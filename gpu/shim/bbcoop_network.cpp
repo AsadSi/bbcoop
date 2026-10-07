@@ -1,7 +1,7 @@
 // bbcoop: registers the ported online libraries (shadp2p: Net, NetCtl, Http, Ssl, NpCommon,
-// NpManager, NpAuth, NpMatching2, NpSignaling) with bbgpu's NID table. Only when online
-// (BB_SHADNET_SERVER set): offline, runtime_services.c keeps answering with its unplugged
-// stubs. NpManager's registration connects to the shadNet server (NpHandler::Initialize).
+// NpManager, NpAuth, NpMatching2, NpSignaling, NpScore, NpWebApi) with bbgpu's NID table. Only
+// when online (BB_SHADNET_SERVER set): offline, runtime_services.c keeps answering with its
+// unplugged stubs. NpManager's registration connects to the shadNet server (NpHandler::Initialize).
 #include <ctime>
 #include <mutex>
 #include "core/emulator_settings.h"
@@ -18,6 +18,8 @@ namespace Libraries::Np::NpManager { void RegisterLib(Core::Loader::SymbolsResol
 namespace Libraries::Np::NpAuth { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Np::NpMatching2 { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Np::NpSignaling { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::Np::NpScore { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::Np::NpWebApi { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 
 // The two host services the ported libraries call directly rather than through an import.
 namespace Libraries::UserService {
@@ -51,6 +53,8 @@ extern "C" int bbcoop_network_register(void) {
         Libraries::Np::NpAuth::RegisterLib(&resolver);
         Libraries::Np::NpMatching2::RegisterLib(&resolver);
         Libraries::Np::NpSignaling::RegisterLib(&resolver);
+        Libraries::Np::NpScore::RegisterLib(&resolver);
+        Libraries::Np::NpWebApi::RegisterLib(&resolver);
         Libraries::Np::NpManager::RegisterLib(&resolver); // last: connects to the server
     });
     return online;

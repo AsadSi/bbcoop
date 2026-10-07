@@ -19,6 +19,9 @@
 
 #include "common/types.h"
 #include "core/libraries/np/np_manager.h"
+#include "core/libraries/np/np_score/np_score.h"
+#include "core/libraries/np/np_score/np_score_ctx.h"
+#include "core/libraries/rtc/rtc.h"
 #include "core/libraries/system/userservice.h"
 #include "shadnet/client.h"
 
@@ -109,6 +112,75 @@ public:
     s32 BlockUser(s32 user_id, const std::string& npid);
     s32 UnblockUser(s32 user_id, const std::string& npid);
 
+    // Submit a RecordScore request to the shadNet server.
+    s32 RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId, s64 score,
+                    const char* comment, size_t commentLen, const u8* gameInfoData,
+                    size_t gameInfoSize, std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    s32 RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 pcId, s64 score,
+                       const u8* data, size_t size, std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    s32 GetGameData(s32 user_id, s32 service_label, u32 boardId, const std::string& npId, s32 pcId,
+                    void* dataOut, u64 recvSize, u64* totalSizeOut,
+                    std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    s32 GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardId, u64 accountId, s32 pcId,
+                               void* dataOut, u64 recvSize, u64* totalSizeOut,
+                               std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    s32 GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
+                     NpScore::OrbisNpScoreBoardInfo* boardInfo,
+                     std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    // Submit a GetRankingByNpId request to the shadNet server.
+    s32 GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
+                         const std::vector<std::string>& npIds, const std::vector<s32>& pcIds,
+                         NpScore::OrbisNpScorePlayerRankData* rankArray,
+                         NpScore::OrbisNpScoreComment* commentArray,
+                         NpScore::OrbisNpScoreGameInfo* infoArray,
+                         Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                         std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    // Submit a GetRankingByRange request to the shadNet server.
+    s32 GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u32 startSerialRank,
+                          u32 arrayNum, NpScore::OrbisNpScoreRankData* rankArray,
+                          NpScore::OrbisNpScoreComment* commentArray,
+                          NpScore::OrbisNpScoreGameInfo* infoArray,
+                          Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                          std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    // A-variant of GetRankingByRange.
+    s32 GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u32 startSerialRank,
+                           u32 arrayNum, NpScore::OrbisNpScoreRankDataA* rankArray,
+                           NpScore::OrbisNpScoreComment* commentArray,
+                           NpScore::OrbisNpScoreGameInfo* infoArray,
+                           Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                           std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    s32 GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId,
+                              const std::vector<u64>& accountIds, const std::vector<s32>& pcIds,
+                              NpScore::OrbisNpScorePlayerRankDataA* rankArray,
+                              NpScore::OrbisNpScoreComment* commentArray,
+                              NpScore::OrbisNpScoreGameInfo* infoArray,
+                              Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                              std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    // Submit a GetFriendsRanking request to the shadNet server.
+    s32 GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bool includeSelf,
+                          u32 arrayNum, NpScore::OrbisNpScoreRankData* rankArray,
+                          NpScore::OrbisNpScoreComment* commentArray,
+                          NpScore::OrbisNpScoreGameInfo* infoArray,
+                          Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                          std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
+    // A-variant of GetFriendsRanking
+    s32 GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, bool includeSelf,
+                           u32 arrayNum, NpScore::OrbisNpScoreRankDataA* rankArray,
+                           NpScore::OrbisNpScoreComment* commentArray,
+                           NpScore::OrbisNpScoreGameInfo* infoArray,
+                           Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                           std::shared_ptr<NpScore::ScoreRequestCtx> req);
+
     // State callbacks
     using StateCallback = std::function<void(Libraries::UserService::OrbisUserServiceUserId user_id,
                                              NpManager::OrbisNpState state)>;
@@ -147,12 +219,19 @@ private:
     void OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n);
     void OnFriendLost(s32 user_id, const ShadNet::NotifyFriendLost& n);
     void OnFriendStatus(s32 user_id, const ShadNet::NotifyFriendStatus& n);
+    void OnWebApiPushEvent(s32 user_id, const ShadNet::NotifyWebApiPushEvent& n);
     void OnLoginResult(s32 user_id, const ShadNet::LoginResult& res);
 
     // General async reply dispatch. Routes a reply to the owning subsystem by
     // command. Called from the per-user ShadNetClient on the reader thread.
     void OnAsyncReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType error,
                       const std::vector<u8>& body);
+
+    void OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType error,
+                      const std::vector<u8>& body);
+
+    // 12-byte NP Communication ID
+    std::string GetNpCommId(s32 service_label) const;
 
     // Appear-Offline preference, applied to every client at login and on change.
     std::atomic<bool> m_appear_offline{false};
@@ -162,6 +241,29 @@ private:
     std::map<s32, std::shared_ptr<ShadNet::ShadNetClient>> m_clients;
     // Per-user NP ID built once from shadnet_npid after login.
     std::map<s32, OrbisNpId> m_np_ids;
+
+    // Score requests awaiting a reply, keyed by the submit packet id.
+    struct PendingScoreRequest {
+        std::shared_ptr<NpScore::ScoreRequestCtx> req;
+        ShadNet::CommandType cmd;
+        std::vector<std::string> requestedNpIds;
+        NpScore::OrbisNpScorePlayerRankData* rankArray = nullptr;
+        NpScore::OrbisNpScoreRankData* plainRankArray = nullptr;
+        NpScore::OrbisNpScoreRankDataA* aRankArray = nullptr;
+        NpScore::OrbisNpScorePlayerRankDataA* aPlayerRankArray = nullptr;
+        NpScore::OrbisNpScoreComment* commentArray = nullptr;
+        NpScore::OrbisNpScoreGameInfo* infoArray = nullptr;
+        NpScore::OrbisNpScoreBoardInfo* boardInfo = nullptr;
+        // GetGameData / GetGameDataByAccountId output buffers.
+        void* dataOut = nullptr;
+        u64 recvSize = 0;
+        u64* totalSizeOut = nullptr;
+        Libraries::Rtc::OrbisRtcTick* lastSortDate = nullptr;
+        u32* totalRecord = nullptr;
+        u64 arrayNum = 0;
+    };
+    mutable std::mutex m_mutex_pending_score;
+    std::map<u64, PendingScoreRequest> m_pending_score;
 
     // Worker thread
     std::atomic<bool> m_initialized{false};
