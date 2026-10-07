@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 #include "client.h"
@@ -191,6 +192,20 @@ void ShadNetClient::ConnectThread() {
     m_thread_reader = std::thread(&ShadNetClient::ReaderThread, this);
     m_thread_writer = std::thread(&ShadNetClient::WriterThread, this);
     m_sem_connected.release();
+
+    // bbcoop: with an invite code (the host server's registration key), create the account on
+    // first contact. The reply arrives before Login's (one ordered stream); an existing account
+    // answers CreationExistingUsername, which is fine.
+    if (const char* invite = std::getenv("BB_SHADNET_INVITE"); invite && *invite) {
+        shadnet::RegistrationRequest create;
+        create.set_npid(m_npid);
+        create.set_password(m_password);
+        create.set_email(m_npid + "@bbcoop.invalid");
+        create.set_secret_key(invite);
+        if (!SendAll(BuildPacket(CommandType::Create, m_pkt_counter.fetch_add(1), MakeProtoPayload(create)))) {
+            LOG_ERROR(ShadNet, "ShadNet: Failed to send account creation");
+        }
+    }
 
     // Build Login request as protobuf
     shadnet::LoginRequest req;
@@ -553,6 +568,14 @@ void ShadNetClient::DispatchPacket(PacketType type, u16 cmd_raw, u64 pkt_id,
         case CommandType::GetServerFeatures:
             HandleServerFeaturesReply(payload);
             break;
+        case CommandType::Create: { // bbcoop: invite registration (ConnectThread)
+            const auto error = payload.empty() ? ErrorType::Malformed : static_cast<ErrorType>(payload[0]);
+            if (error == ErrorType::NoError)
+                LOG_INFO(ShadNet, "Account '{}' created with the invite code", m_npid);
+            else if (error != ErrorType::CreationExistingUsername)
+                LOG_ERROR(ShadNet, "Account creation failed: error {}", static_cast<int>(error));
+            break;
+        }
         default:
             if (onAsyncReply) {
                 // Every reply body starts with an ErrorType byte.
