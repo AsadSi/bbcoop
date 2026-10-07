@@ -85,6 +85,18 @@ public:
         info.psf_attributes.raw = config.psf_attributes;
     }
 };
+} // namespace Core
+
+// bbcoop: game identity without a GPU (tests/online_client.cpp; shadNet login sends it). The
+// game itself gets it from bbgpu_init, which runs before its imports resolve.
+extern "C" void bbcoop_set_game_info(const char* serial, const char* title) {
+    BbGpuConfig config{};
+    config.serial = serial;
+    config.title = title;
+    Core::Emulator::FillElfInfo(config);
+}
+
+namespace Core {
 
 void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     rasterizer = rasterizer_;
