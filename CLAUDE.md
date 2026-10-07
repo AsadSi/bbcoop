@@ -11,8 +11,9 @@ what's still open.
 
 ## Keep rebases cheap
 - New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
-  without any edits: `runtime_seamless.c` (byte patches, `BB_SEAMLESS=1`), and later
-  `runtime_hooks.c`, `runtime_coop.c`, `runtime_net.c` and `runtime_np.c`. Data mods go in
+  without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
+  `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`) and
+  `runtime_net.c`, and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`.
 - Edits to upstream files stay small and marked: `probe.c`, `runtime_services.c`, `build.sh`,
   `launcher/`.
