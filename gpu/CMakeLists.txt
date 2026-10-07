@@ -122,6 +122,22 @@ add_library(bbgpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES}
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
     shadps4/core/libraries/videodec/video_utils.cpp)
 add_dependencies(bbgpu host_shaders)
+# bbcoop: online co-op. shadp2p's Net/NetCtl/Http/Np* libraries and shadNet client (GPL-2.0+),
+# adapted under shim/; `ninja -C out/gpu bbnet` compiles just these.
+find_package(Protobuf REQUIRED)
+find_package(httplib REQUIRED)
+find_package(nlohmann_json REQUIRED)
+file(GLOB BBNET_SOURCES CONFIGURE_DEPENDS shadps4/core/libraries/network/*.cpp
+    shadps4/core/libraries/np/*.cpp shadps4/core/libraries/np/*/*.cpp shadps4/shadnet/*.cpp)
+add_library(bbnet OBJECT ${BBNET_SOURCES})
+protobuf_generate(TARGET bbnet PROTOS shadps4/shadnet/shadnet.proto)
+set_target_properties(bbnet PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(bbnet PRIVATE shim shadps4 shadps4/shadnet ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/shadps4/shadnet)
+target_compile_definitions(bbnet PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
+target_compile_options(bbnet PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers -ftls-model=initial-exec)
+target_link_libraries(bbnet PUBLIC fmt::fmt Boost::headers magic_enum::magic_enum protobuf::libprotobuf
+    httplib::httplib nlohmann_json::nlohmann_json)
+target_link_libraries(bbgpu PRIVATE bbnet)
 # In-game settings menu: Dear ImGui (third_party/imgui, MIT) with its Vulkan backend, and an
 # embedded Cyrillic font (third_party/fonts).
 target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
