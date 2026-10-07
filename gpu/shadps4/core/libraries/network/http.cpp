@@ -342,6 +342,14 @@ static HostOverrideState LoadHostOverrideState() {
     }
     std::ifstream f(path);
     if (!f.is_open()) {
+        // bbcoop: private servers only. Without an override file, the game's boot fetch of
+        // ss.info (the FromSoft server's endpoint list) goes to the host's shadNet WebAPI, whose
+        // ss.info points every api_* endpoint back at itself.
+        if (EmulatorSettings.IsShadNetEnabled()) {
+            s.entries.emplace("https://ss4.scej-network.jp:20443",
+                              ParseHostOverrideTarget(EmulatorSettings.GetShadNetWebApiServer()));
+            LOG_INFO(Lib_Http, "FromSoft server -> {}", EmulatorSettings.GetShadNetWebApiServer());
+        }
         return s;
     }
     std::stringstream buf;
@@ -723,7 +731,9 @@ std::optional<std::string_view> FindResponseHeader(std::string_view headers,
 }
 
 bool ShouldCaptureBloodborneSummon(const SendRequestPlan& plan) {
-    return EnvFlagEnabled("SHADPS4_CAPTURE_BLOODBORNE_SUMMON") && IsBloodborneSummonPath(plan.path);
+    // bbcoop: BB_CAPTURE_ONLINE=1 captures every request (FromSoft protocol discovery).
+    return EnvFlagEnabled("BB_CAPTURE_ONLINE") ||
+           (EnvFlagEnabled("SHADPS4_CAPTURE_BLOODBORNE_SUMMON") && IsBloodborneSummonPath(plan.path));
 }
 
 void CaptureBloodborneSummon(const SendRequestPlan& plan, const HttpResponse& response,
@@ -803,7 +813,7 @@ void RewriteHostHeader(SendRequestPlan& plan) {
 }
 
 bool ApplyBloodborneSeamlessRoute(SendRequestPlan& plan) {
-    if (!EnvFlagEnabled("SHADPS4_BLOODBORNE_SEAMLESS_COOP") ||
+    if (!(EnvFlagEnabled("BB_SEAMLESS") || EnvFlagEnabled("SHADPS4_BLOODBORNE_SEAMLESS_COOP")) || // bbcoop
         !EmulatorSettings.IsShadNetEnabled() || !IsBloodborneSummonPath(plan.path)) {
         return false;
     }
@@ -944,6 +954,16 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
     };
 
     for (int depth = 0; depth <= MaxRedirects; ++depth) {
+        // bbcoop: private servers only. Every hop, redirects included, must reach the host's
+        // shadNet server; anything else (a missed override, Sony's or a community server) is
+        // refused as if its name did not resolve.
+        if (const auto allowed = ParseHostOverrideTarget(EmulatorSettings.GetShadNetWebApiServer());
+            plan.host != allowed.host) {
+            LOG_WARNING(Lib_Http, "refused {}://{}:{}{}: not the shadNet server", plan.scheme, plan.host,
+                        plan.port, plan.path);
+            SynthesizeTransportFailureResponse(out_res);
+            return ORBIS_HTTP_ERROR_RESOLVER_ENODNS;
+        }
         if (plan.scheme == "https" && !ORBIS_HTTP_HAS_HTTPS) {
             LOG_ERROR(Lib_Http, "HTTPS request but cpp-httplib lacks OpenSSL support");
             SynthesizeTransportFailureResponse(out_res);
