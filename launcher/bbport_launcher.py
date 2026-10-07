@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from bbport_assets import fsr411_problem
+import bbcoop_online
 from bbport_i18n import language, set_language, tr
 
 import gi
@@ -33,6 +34,10 @@ PACKAGED = bool(os.environ.get("BB_PREBUILT"))
 DATA_DIR = Path(os.environ.get("BB_DATA_DIR", PORT_DIR))
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "bbport-launcher"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
+# bbcoop: the co-op server binary (scripts/build-server.sh) and its data while hosting.
+SERVER_BINARY = Path(os.environ.get("BB_SHADNET_BIN", DATA_DIR / "server" / "build-linux" / "shadnet"))
+SERVER_DIR = CONFIG_DIR / "server"
+COOP_MODES = [("Off", "off"), ("Host", "host"), ("Join", "join")]
 MAX_LOG_LINES = 5000
 
 # Choices: (label, value). The first entry is the default. Labels are translated when shown.
@@ -99,6 +104,9 @@ DEFAULTS = {
     "gpu_profile": False,
     "vk_validation": False,
     "extra_env": "",
+    # bbcoop: online co-op (launcher/bbcoop_online.py)
+    "coop_mode": "off", "coop_name": "", "coop_host": "", "coop_join_invite": "",
+    "coop_invite": "", "coop_password": "",
 }
 
 # bbport.ini keys the launcher edits; the rest of the file is kept.
@@ -217,6 +225,7 @@ def game_environment(s):
         env["BB_GPU_PROFILE"] = "1"
     if s["vk_validation"]:
         env["BB_VK_VALIDATION"] = "1"
+    env.update(bbcoop_online.environment(s))
     for item in s["extra_env"].split():
         if "=" in item:
             key, value = item.split("=", 1)
@@ -328,6 +337,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.ini, self.ini_lines = load_ini()
         self.process = None
         self.stream = None
+        self.server = None  # bbcoop: the co-op server while hosting
         self.build()
         self.connect("close-request", self.on_close)
 
@@ -365,6 +375,67 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.launch_button.set_label(tr("Остановить") if running else tr("Запустить"))
         self.launch_button.remove_css_class("destructive-action" if not running else "suggested-action")
         self.launch_button.add_css_class("destructive-action" if running else "suggested-action")
+
+    # --- co-op (bbcoop) -------------------------------------------------------------------
+
+    def build_coop_group(self):
+        if bbcoop_online.ensure_secrets(self.settings):
+            save_settings(self.settings)
+        group = Adw.PreferencesGroup(
+            title="Co-op", description="Play the whole game together. The host shares an address and "
+                                       "invite code; friends enter them. Connect over Tailscale.")
+        self.coop_mode_row = combo_row("Mode", None, COOP_MODES, self.settings["coop_mode"])
+        self.coop_mode_row.connect("notify::selected", lambda *_: self.update_coop_rows())
+        group.add(self.coop_mode_row)
+        self.coop_name_row = Adw.EntryRow(title="Player name", text=self.settings["coop_name"])
+        group.add(self.coop_name_row)
+        self.coop_share_row = Adw.ActionRow(title="Share with friends")
+        self.coop_share_row.add_suffix(flat_button("edit-copy-symbolic", "Copy", self.on_copy_coop_share))
+        group.add(self.coop_share_row)
+        self.coop_host_row = Adw.EntryRow(title="Host address", text=self.settings["coop_host"])
+        group.add(self.coop_host_row)
+        self.coop_invite_row = Adw.EntryRow(title="Invite code", text=self.settings["coop_join_invite"])
+        group.add(self.coop_invite_row)
+        self.update_coop_rows()
+        return group
+
+    def update_coop_rows(self):
+        mode = combo_value(self.coop_mode_row)
+        self.coop_name_row.set_visible(mode != "off")
+        self.coop_share_row.set_visible(mode == "host")
+        self.coop_host_row.set_visible(mode == "join")
+        self.coop_invite_row.set_visible(mode == "join")
+        if mode == "host":
+            self.coop_share = f"{bbcoop_online.share_address()}  ·  {self.settings['coop_invite']}"
+            self.coop_share_row.set_subtitle(f"Address and invite code: {self.coop_share}")
+
+    def on_copy_coop_share(self, _button):
+        self.get_clipboard().set(self.coop_share)
+        self.toasts.add_toast(Adw.Toast(title="Copied"))
+
+    def start_coop_server(self):
+        """Hosting: starts the server before the game. False (with a toast) when it cannot."""
+        error = bbcoop_online.problem(self.settings, SERVER_BINARY)
+        if error:
+            self.toasts.add_toast(Adw.Toast(title=error))
+            return False
+        if self.settings["coop_mode"] != "host":
+            return True
+        SERVER_DIR.mkdir(parents=True, exist_ok=True)
+        self.server = bbcoop_online.HostServer(SERVER_BINARY, SERVER_DIR)
+        try:
+            with open(SERVER_DIR / "server.log", "a") as log:
+                self.server.start(self.settings["coop_invite"], log)
+        except (OSError, RuntimeError) as error:
+            self.server = None
+            self.toasts.add_toast(Adw.Toast(title=f"Co-op server: {error}"))
+            return False
+        return True
+
+    def stop_coop_server(self):
+        if self.server:
+            self.server.stop()
+            self.server = None
 
     # --- settings page -------------------------------------------------------------------
 
@@ -404,6 +475,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.language_row = combo_row(tr("Язык системы"), None, LANGUAGES, self.settings["language"])
         game.add(self.language_row)
         page.add(game)
+        page.add(self.build_coop_group())
 
         self.mods_group = Adw.PreferencesGroup(
             title=tr("Моды"), description=tr(
@@ -741,6 +813,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             process = Gio.Subprocess.new([str(tool), "--read-input", kind],
                                          Gio.SubprocessFlags.STDOUT_PIPE)
         except GLib.Error as error:
+            self.stop_coop_server()
             self.toasts.add_toast(Adw.Toast(title=tr("Не удалось запустить: {}").format(error.message)))
             return
         row, _default = self.control_rows[(kind, name)]
@@ -800,6 +873,10 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["gpu_profile"] = self.profile_row.get_active()
         s["vk_validation"] = self.validation_row.get_active()
         s["extra_env"] = self.extra_row.get_text().strip()
+        s["coop_mode"] = combo_value(self.coop_mode_row)
+        s["coop_name"] = self.coop_name_row.get_text().strip()
+        s["coop_host"] = self.coop_host_row.get_text().strip()
+        s["coop_join_invite"] = self.coop_invite_row.get_text().strip()
         s["mods_enabled"] = self.mods_enabled_row.get_active()
         self.save_mod_profile()
         self.save_patch_profile()
@@ -961,6 +1038,8 @@ class LauncherWindow(Adw.ApplicationWindow):
             self.stop_game()
             return
         self.store()
+        if not self.start_coop_server():
+            return
         self.log_view.get_buffer().set_text("")
         launcher = Gio.SubprocessLauncher.new(
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE)
@@ -1016,6 +1095,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             pass
         status = process.get_exit_status() if process.get_if_exited() else -1
         self.process = None
+        self.stop_coop_server()
         self.update_launch_button()
         self.update_game_status()
         self.append_log(tr("\n— игра завершилась (код {}) —\n").format(status))
@@ -1024,6 +1104,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.store()
         if self.process:
             self.stop_game()
+        self.stop_coop_server()
         return False
 
 
