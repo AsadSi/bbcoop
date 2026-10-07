@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
-# bbcoop: end-to-end online test without the game. Builds the shadNet server (from
-# ${SHADNET_SRC:-../shadnet-p2p-ref}) in a container and runs it with an invite code, then runs
-# tests/online_client.cpp as host and guest in x86-64 containers on a private Docker network:
-# account creation with the invite code, sign-in, room create/join, NP signaling and P2P
-# datagrams both ways. Needs `bash build.sh`
-# (scripts/docker-test.sh) to have built out/ first.
+# bbcoop: end-to-end online test without the game. Builds the server (server/) in a container
+# and runs it with an invite code, then runs tests/online_client.cpp as host and guest in x86-64
+# containers on a private Docker network: account creation with the invite code, NP sign-in, the
+# bell's HTTP side (ss.info, login, summon sign posted and found), room create/join, NP signaling
+# and P2P datagrams both ways. Builds out/ first (bash build.sh in scripts/docker-test.sh).
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
-server_src=$(cd "${SHADNET_SRC:-../shadnet-p2p-ref}" && pwd)
+server_src=$PWD/server
 nix_config=$'sandbox = false\nfilter-syscalls = false'
 
 docker build -q -t bbcoop-server-build -f scripts/server.Dockerfile scripts >/dev/null
-if [[ ! -x $server_src/build-linux/shadnet ]]; then
-    (cd "$server_src" && git submodule update --init --recursive --depth 1)
-    docker run --rm -v "$server_src":/src -w /src bbcoop-server-build sh -ec '
-        cmake -G Ninja -B build-linux -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build-linux >/dev/null'
-fi
+git submodule update --init --depth 1 server/externals/protobuf
+docker run --rm -v "$server_src":/src -w /src bbcoop-server-build sh -ec '
+    [ -f build-linux/build.ninja ] || cmake -G Ninja -B build-linux -DCMAKE_BUILD_TYPE=Release >/dev/null
+    cmake --build build-linux >/dev/null'
 invite=test-invite-$RANDOM
 
 scripts/docker-test.sh '
+    bash build.sh >/dev/null
     mkdir -p out/client-objs
     for f in src/runtime*.c; do gcc -std=c11 -O2 -g -pthread -I. -Isrc $(pkg-config --cflags vulkan sdl3) -c $f -o out/client-objs/$(basename $f .c).o; done
     g++ -std=c++20 -O1 -g -Wall -Werror -Wno-unused-function -pthread -I. -Isrc -Igpu/shim -Igpu/shadps4 tests/online_client.cpp out/client-objs/*.o out/libatrac9.a -lm \
