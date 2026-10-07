@@ -76,4 +76,6 @@ if [[ ${1:-} == --test ]]; then
     out/seamless-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -Isrc tests/test_hooks.c src/runtime_hooks.c -lm -o out/hooks-test
     out/hooks-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_seamless_hooks.c src/runtime_seamless_hooks.c src/runtime_hooks.c -lm -o out/seamless-hooks-test # bbcoop
+    out/seamless-hooks-test
 fi
