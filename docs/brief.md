@@ -69,6 +69,11 @@ Supporting pieces:
 - **Build now:** a launcher Host/Join panel. The host sees "share this IP and code"; a guest enters the host's IP and code.
 - **Later:** an in-game session overlay showing who's connected.
 
+## Reference values (to check against v1.09's own tables)
+
+- **Level cost above level 12:** the community model is 0.02x³ + 3.06x² + 105.6x − 895 Blood Echoes at hunter level x (Fextralife; gamerguides.com). Respec refunds should use the game's own cost function once it's located, not this formula.
+- **Upgrade costs:** 3/5/8 Blood Stone Shards for +1 to +3, 3/5/8 Twin Shards for +4 to +6, 3/5/8 Chunks for +7 to +9, and 1 Blood Rock for +10 (gamerguides.com). A December 2015 patch changed upgrade costs, so refunds read EquipMtrlSetParam from the game instead of using this table.
+
 ## Open
 
 - **The login response is unverified.** `/basic_utils/login` returns `SessionId` (string) and `UserId` (int) and nothing else. Get the exact keys the game reads from its eboot strings or a `BB_CAPTURE_ONLINE=1` run before trusting it. The messenger and list routes also answer with only `ResKind`/`MessageId`. This blocks the first in-game online test.

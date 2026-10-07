@@ -6,7 +6,7 @@ what's still open.
 
 ## Remotes
 - `origin` is AsadSi/bbcoop, private. Friends who get a build get the source (GPL-2.0+).
-- `upstream` is deadinside28/bloodborne_pc, which changes daily. Rebase onto `upstream/main`
+- `upstream` is deadinside28/bloodborne_pc, which changes daily. Merge `upstream/master`
   often.
 
 ## Keep rebases cheap
