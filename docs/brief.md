@@ -71,5 +71,7 @@ Supporting pieces:
 
 ## Open
 
+- **The login response is unverified.** `/basic_utils/login` returns `SessionId` (string) and `UserId` (int) and nothing else. Get the exact keys the game reads from its eboot strings or a `BB_CAPTURE_ONLINE=1` run before trusting it. The messenger and list routes also answer with only `ResKind`/`MessageId`. This blocks the first in-game online test.
+
 - Everything that runs the game is blocked until Asad's Linux PC and v1.09 dump are available. The Mac is arm64 and can't run the game.
 - shadp2p's room-retention patch at 0x019471B1 (the `StageTransitionKeepMatchingCall` bytes) is declared and its original bytes are checked, but nothing ever writes it in `bloodborne_re.cpp`. So it's left out of `runtime_seamless.c` until we know whether it's needed. This is part of M3 blocker 1.
