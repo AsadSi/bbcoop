@@ -24,6 +24,7 @@ static void original(unsigned char *image) {
     put(image, 0x01874B79, (const unsigned char[]){0x74,0x0D}, 2);
     put(image, 0x018749E8, (const unsigned char[]){0x0F,0x85,0x48,0x01,0x00,0x00}, 6);
     put(image, 0x018749F0, (const unsigned char[]){0x0F,0x88,0x40,0x01,0x00,0x00}, 6);
+    put(image, 0x019471B1, (const unsigned char[]){0xE8,0xEA,0x95,0x58,0x00}, 5);
 }
 
 int main(void) {
@@ -50,6 +51,7 @@ int main(void) {
     assert(seamless_apply(image, 0x01A00000) == NULL);
     assert(image[0x0157F8C9] == 0x8F && image[0x01874B79] == 0xEB && image[0x018700D3] == 0x45);
     assert(!memcmp(image + 0x014B714A, (const unsigned char[]){0x90,0x90,0x90,0x90,0x90,0x90}, 6));
+    assert(!memcmp(image + 0x019471B1, (const unsigned char[]){0xE8,0xEA,0x8E,0x58,0x00}, 5));
 
     /* Applying twice is refused: the sites no longer hold the originals. */
     assert(seamless_apply(image, 0x01A00000) != NULL);
