@@ -74,4 +74,6 @@ if [[ ${1:-} == --test ]]; then
     out/content-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_seamless.c src/runtime_seamless.c -o out/seamless-test
     out/seamless-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -Isrc tests/test_hooks.c src/runtime_hooks.c -lm -o out/hooks-test
+    out/hooks-test
 fi
