@@ -10,15 +10,18 @@ what's still open.
   often.
 
 ## Keep rebases cheap
-- New work goes in new files: `src/hooks.c`, `src/coop_*.c`, `src/runtime_net.c`,
-  `src/runtime_np.c`, `mods/coop-rebalance/`.
+- New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
+  without any edits: `runtime_seamless.c` (byte patches, `BB_SEAMLESS=1`), and later
+  `runtime_hooks.c`, `runtime_coop.c`, `runtime_net.c` and `runtime_np.c`. Data mods go in
+  `mods/coop-rebalance/`.
 - Edits to upstream files stay small and marked: `probe.c`, `runtime_services.c`, `build.sh`,
   `launcher/`.
 - Never reformat upstream code.
 
 ## Game patches
-- Every write to the game image goes through `src/hooks.c`, which checks the exact original
-  bytes first and fails loudly if they don't match.
+- Every co-op write to the game image checks the exact original bytes of every site first, and
+  writes nothing if any of them differ. `src/runtime_seamless.c` shows the pattern, and
+  `tests/test_seamless.c` is its test.
 - Don't add co-op patches to `patches/*.xml`. That loader writes without checking.
 - Addresses are image offsets: an XML `Address` minus 0x400000. That's the same convention as
   the `*Offset` constants in shadp2p's `src/core/bloodborne_re.cpp`.
