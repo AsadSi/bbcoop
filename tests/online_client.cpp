@@ -31,6 +31,7 @@ extern "C" {
 #include "runtime.h"
 void runtime_restart(void) { abort(); }
 void bbcoop_set_game_info(const char* serial, const char* title);
+#include "bbcoop_sync.h"
 }
 
 using namespace Libraries::Np;
@@ -364,6 +365,18 @@ int main(int argc, char** argv) {
                 net_sendto(socket, message.data(), message.size(), 0, &peer, sizeof(peer));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
+            // The co-op sync channel (lamp travel, flags, loot): through the host's server.
+            const std::string sync = host ? "coop: host lit a lamp" : "coop: guest picked up a shard";
+            if (bbcoop_sync_send(sync.data(), u32(sync.size())) != 0) {
+                std::fprintf(stderr, "FAIL: co-op sync send\n");
+                Fail();
+            }
+            char from[BBCOOP_SYNC_NAME]{};
+            char text[256]{};
+            if (!WaitFor([&] { return bbcoop_sync_receive(from, text, sizeof(text) - 1) > 0; }, 30, "a co-op sync message"))
+                Fail();
+            std::printf("PASS: co-op sync from %s: \"%s\"\n", from, text);
+            std::this_thread::sleep_for(std::chrono::seconds(3)); // stay in the room for the peer's
             std::fflush(nullptr);
             std::_Exit(0); // NP's worker threads are still running; skip static destructors
         }

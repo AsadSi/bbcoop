@@ -69,6 +69,9 @@ public:
     // 64-bit account ID assigned by the server.
     OrbisNpAccountId GetAccountId(s32 user_id) const;
 
+    // bbcoop: the shadNet client of a connected user, or null (co-op sync relay).
+    std::shared_ptr<ShadNet::ShadNetClient> GetClient(s32 user_id) const;
+
     // WebAPI bearer token
     std::string GetBearerToken(s32 user_id) const;
 

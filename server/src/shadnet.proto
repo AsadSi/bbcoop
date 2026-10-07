@@ -562,3 +562,11 @@ message NotifyRoomMessage {
     uint32 src_platform = 9;
     bytes msg = 10;
 }
+
+// bbcoop: co-op sync relay. The server forwards data to every other member of each room the
+// sender is in (the game's co-op session), as NotifyCoopRelay. Opaque to the server.
+message CoopRelayRequest { bytes data = 1; }
+message NotifyCoopRelay {
+    string from_npid = 1;
+    bytes data = 2;
+}

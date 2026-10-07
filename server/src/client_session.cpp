@@ -187,6 +187,8 @@ ErrorType ClientSession::DispatchCommand(CommandType cmd, StreamExtractor& se, Q
         return CmdRemoveBlock(se);
     case CommandType::SetAppearOffline:
         return CmdSetAppearOffline(se);
+    case CommandType::CoopRelay: // bbcoop
+        return CmdCoopRelay(se);
     case CommandType::GetServerFeatures:
         return CmdGetServerFeatures(reply);
     case CommandType::GetBoardInfos:

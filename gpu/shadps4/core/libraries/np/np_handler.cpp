@@ -22,6 +22,8 @@
 #include "shadnet.pb.h"
 #include "shadnet/server_probe.h"
 
+#include "bbcoop_sync.h"
+
 namespace Libraries::Np {
 
 NpHandler& NpHandler::GetInstance() {
@@ -214,6 +216,9 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
     };
     client->onWebApiPushEvent = [this, user_id](const ShadNet::NotifyWebApiPushEvent& n) {
         OnWebApiPushEvent(user_id, n);
+    };
+    client->onCoopRelay = [](const std::string& from, const std::string& data) { // bbcoop
+        bbcoop_sync_deliver(from.c_str(), data.data(), static_cast<u32>(data.size()));
     };
     client->onAsyncReply = [this, user_id](ShadNet::CommandType cmd, u64 pkt_id,
                                            ShadNet::ErrorType err, const std::vector<u8>& body) {
@@ -445,6 +450,12 @@ OrbisNpAccountId NpHandler::GetAccountId(s32 user_id) const {
     std::lock_guard lock(m_mutex_clients);
     auto it = m_clients.find(user_id);
     return it != m_clients.end() ? static_cast<OrbisNpAccountId>(it->second->GetUserId()) : 0;
+}
+
+std::shared_ptr<ShadNet::ShadNetClient> NpHandler::GetClient(s32 user_id) const {
+    std::lock_guard lock(m_mutex_clients);
+    auto it = m_clients.find(user_id);
+    return it != m_clients.end() ? it->second : nullptr;
 }
 
 std::string NpHandler::GetBearerToken(s32 user_id) const {
