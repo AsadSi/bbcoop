@@ -5,6 +5,7 @@
 #include <stop_token>
 #include <thread>
 #include "common/types.h"
+#include "core/libraries/kernel/threads/pthread.h" // bbcoop: NP threads (shadPS4 layout)
 
 extern "C" void runtime_thread_attach_host(const char* name);
 

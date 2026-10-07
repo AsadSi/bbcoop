@@ -28,3 +28,5 @@ patches.json
 /message*.txt
 /*.zip
 /docs/ISSUE_ACTION_PLAN_*.md
+# bbcoop: arm64 compile-check builds (scripts/docker-test.sh, BB_DOCKER_ARCH=arm64)
+/out-*/

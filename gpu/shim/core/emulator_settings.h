@@ -74,5 +74,31 @@ public:
     bool IsVkValidationEnabled() { static const auto value = Flag("BB_VK_VALIDATION", false); return value; }
     bool IsVkValidationGpuEnabled() { return false; }
     bool IsVkValidationSyncEnabled() { static const auto value = Flag("BB_VK_VALIDATION_SYNC", false); return value; }
+
+    // bbcoop: online co-op. BB_SHADNET_SERVER=host[:port] (default port 31313) turns it on; without
+    // it the network stays unplugged, as in bbport. BB_SHADNET_WEBAPI defaults to http://host:31315.
+    static std::string ShadNetHost() {
+        const char* v = std::getenv("BB_SHADNET_SERVER");
+        std::string server = v ? v : "";
+        return server.substr(0, server.rfind(':') == std::string::npos ? server.size() : server.rfind(':'));
+    }
+    bool IsConnectedToNetwork() { return IsShadNetEnabled(); }
+    bool IsShadNetEnabled() {
+        const char* v = std::getenv("BB_SHADNET_SERVER");
+        return v && *v && !shadnet_session_disabled;
+    }
+    std::string GetShadNetServer() {
+        const char* v = std::getenv("BB_SHADNET_SERVER");
+        return v ? v : "";
+    }
+    std::string GetShadNetWebApiServer() {
+        const char* v = std::getenv("BB_SHADNET_WEBAPI");
+        return v && *v ? v : "http://" + ShadNetHost() + ":31315";
+    }
+    void SetShadNetSessionDisabled(bool disabled) { shadnet_session_disabled = disabled; }
+    bool IsUPnPEnabled() { return false; }
+
+private:
+    bool shadnet_session_disabled = false;
 };
 #define EmulatorSettings (*EmulatorSettingsImpl::GetInstance())

@@ -32,6 +32,8 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Guest death | Respawns at the host's last lamp and is re-inserted | Seamless Co-op model | Asad |
 | Host death | The host respawns at their lamp and guests stay where they are, with no reset for them | Asad: the host dying must not send everyone back | Asad |
 | Progress | Boss kills, lamps and shortcuts are copied into each guest's own save | Seamless Co-op model | Claude |
+| Non-co-op online traffic | Private only. The host's server answers the game's FromSoft-server requests (login, messages, bloodstains, ghosts) with the minimum the game needs. Nothing goes to thehuntersdream.com or any other third party, unlike shadp2p's documented `host_overrides.json` | Nothing leaves the group | Asad |
+| Online code | shadp2p's C++ NP, Net and Http libraries (about 25k lines), adapted into a C++ library linked like the GPU library, with no rewrite into C. Tested by a fake-game client that makes Bloodborne's online calls against the real server | A C rewrite would take 7-9k lines plus a protobuf C port, for no gain | Claude |
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player, plus extra enemies in chosen spots during co-op only | | Asad |
 | Extra enemies | Only along the main routes of the large areas (Central Yharnam first, then Old Yharnam, Cathedral Ward, Forbidden Woods, Yahar'gul and Cainhurst). One extra group per guest, at points where enemies already gather. Never in boss arenas | Bosses already scale through HP. Adding enemies to an arena changes the fight's design and makes friendly fire chaotic, while open areas are where co-op gets trivial | Claude |
