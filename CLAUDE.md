@@ -27,6 +27,30 @@ what's still open.
   the `*Offset` constants in shadp2p's `src/core/bloodborne_re.cpp`.
 - Everything is for CUSA03173 v1.09 only. `scripts/game_check.py` rejects any other build.
 
+## Online (M2)
+- `gpu/shadps4/core/libraries/{network,np}` and `gpu/shadps4/shadnet` hold shadp2p's online
+  libraries. They're mostly unmodified, and every edit is marked `bbcoop`. They're adapted
+  through shims in `gpu/shim/` and registered by `gpu/shim/bbcoop_network.cpp`.
+- `src/runtime_net.c` routes the game's network imports to them, but only when
+  `BB_SHADNET_SERVER` is set.
+- `server/` is the vendored shadnet-p2p server (Qt 6.9). Its FromSoft game-server routes are in
+  `server/src/webapi_routes_fromsoft.cpp`.
+- Environment variables:
+  - `BB_SHADNET_SERVER=host[:31313]`
+  - `BB_SHADNET_NPID`
+  - `BB_SHADNET_PASSWORD`
+  - `BB_SHADNET_INVITE`: the server's `RegistrationSecretKey`; it creates the account on
+    first contact.
+  - `BB_SHADNET_WEBAPI`: defaults to `http://host:31315`.
+  - `BB_SEAMLESS=1`
+  - `BB_CAPTURE_ONLINE=1`: captures every HTTP request.
+- Private only: while online, HTTP to any host other than the shadNet server is refused, in
+  `RunRealHttpRequest`. Never weaken this.
+- Tests on the Mac:
+  - `scripts/docker-test.sh` runs the x86-64 build and C tests.
+  - `scripts/test-online.sh` is the end-to-end run, with the server plus host and guest
+    `tests/online_client.cpp`.
+
 ## References (siblings, read-only, shallow clones)
 - `../shadp2p-ref` is shadPS4 with Bloodborne co-op. See `src/core/bloodborne_re.cpp`,
   `src/core/libraries/np/`, `documents/bloodborne-seamless-re.md` and
