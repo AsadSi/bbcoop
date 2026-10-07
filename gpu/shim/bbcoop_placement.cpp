@@ -28,7 +28,8 @@ bool Same(const BbcoopPlacement& a, const BbcoopPlacement& b) {
 
 extern "C" void bbcoop_placement_set_host(const BbcoopPlacement* placement) {
     std::scoped_lock lock{mutex};
-    host = *placement;
+    if (placement) host = *placement;
+    else host.reset();
 }
 
 extern "C" int bbcoop_placement_take_received(BbcoopPlacement* out) {
@@ -37,6 +38,19 @@ extern "C" int bbcoop_placement_take_received(BbcoopPlacement* out) {
     *out = *received;
     received_consumed = true;
     return 1;
+}
+
+extern "C" int bbcoop_placement_received(BbcoopPlacement* out, int* consumed) {
+    std::scoped_lock lock{mutex};
+    if (!received) return 0;
+    *out = *received;
+    *consumed = received_consumed;
+    return 1;
+}
+
+extern "C" void bbcoop_placement_consume(const BbcoopPlacement* placement) {
+    std::scoped_lock lock{mutex};
+    if (received && Same(*received, *placement)) received_consumed = true;
 }
 
 namespace Core::Bloodborne {

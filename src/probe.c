@@ -41,6 +41,7 @@ int vulkan_smoke(void);
 
 static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
 const char *seamless_apply(unsigned char *image, uint64_t size); /* bbcoop: runtime_seamless.c */
+const char *seamless_hooks_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_seamless_hooks.c */
 static uint64_t read64(FILE *f) {
     unsigned char b[8];
     if (fread(b, 1, 8, f) != 8) fail("truncated boot file");
@@ -497,6 +498,7 @@ int main(int argc, char **argv) {
     /* bbcoop: after the XML patches, so an XML patch touching a co-op site fails the check. */
     if (getenv("BB_SEAMLESS") && !strcmp(getenv("BB_SEAMLESS"), "1")) {
         const char *error = seamless_apply(image, size);
+        if (!error) error = seamless_hooks_install(image, size); /* bbcoop */
         if (error) fail(error);
     }
     protect(traps, round_page((import_count + 1) * 32), 5);
