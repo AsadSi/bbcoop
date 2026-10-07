@@ -34,7 +34,8 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Progress | Boss kills, lamps and shortcuts are copied into each guest's own save | Seamless Co-op model | Claude |
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player, plus extra enemies in chosen spots during co-op only | | Asad |
-| Respec | At the Doll, in the Hunter's Dream, outside a session. Costs Insight (1 per stat reset, 1 per weapon refund, pending confirmation). Saves a backup first | | Asad |
+| Extra enemies | Only along the main routes of the large areas (Central Yharnam first, then Old Yharnam, Cathedral Ward, Forbidden Woods, Yahar'gul and Cainhurst). One extra group per guest, at points where enemies already gather. Never in boss arenas | Bosses already scale through HP. Adding enemies to an arena changes the fight's design and makes friendly fire chaotic, while open areas are where co-op gets trivial | Claude |
+| Respec | At the Doll, in the Hunter's Dream, outside a session. 1 Insight per stat reset and 1 per weapon refund. A refund also moves the weapon's Blood Gems to the inventory. Saves a backup first | | Asad |
 | Seamless patches | Go through `src/runtime_seamless.c`, which checks the original bytes, not bbport's XML loader | The XML path writes without checking, so a wrong address would silently corrupt the game | Claude |
 | Our code | In new `src/runtime_*.c` files, which `build.sh` already compiles, with only small marked edits to upstream files | bbport changes every day, so rebasing must stay cheap | Claude |
 | Addresses | shadp2p offsets are already bbport image offsets (an XML address minus 0x400000, as shown by `memory_patcher.cpp:282` and `scripts/patches.py:197`) | Checked 2026-10-07 | Claude |
@@ -68,8 +69,5 @@ Supporting pieces:
 
 ## Open
 
-- Insight costs: 1 per stat reset and 1 per weapon refund until Asad confirms. Blocks M6 tuning only.
-- Weapon refund: whether gems in the weapon are removed or kept. Blocks M6.
-- "Extra enemies in certain situations": which areas or bosses. Central Yharnam is the first template. Blocks M5 rollout.
 - Everything that runs the game is blocked until Asad's Linux PC and v1.09 dump are available. The Mac is arm64 and can't run the game.
 - shadp2p's room-retention patch at 0x019471B1 (the `StageTransitionKeepMatchingCall` bytes) is declared and its original bytes are checked, but nothing ever writes it in `bloodborne_re.cpp`. So it's left out of `runtime_seamless.c` until we know whether it's needed. This is part of M3 blocker 1.
