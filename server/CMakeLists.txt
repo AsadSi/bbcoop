@@ -66,6 +66,7 @@ set(SOURCES
     # Matchmaking
     src/matching.h
     src/cmd_matching.cpp
+    src/cmd_coop.cpp # bbcoop
     src/stun_server.h
     src/stun_server.cpp
     # WebAPI HTTP/JSON listener

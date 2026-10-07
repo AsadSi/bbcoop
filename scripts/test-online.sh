@@ -2,8 +2,9 @@
 # bbcoop: end-to-end online test without the game. Builds the server (server/) in a container
 # and runs it with an invite code, then runs tests/online_client.cpp as host and guest in x86-64
 # containers on a private Docker network: account creation with the invite code, NP sign-in, the
-# bell's HTTP side (ss.info, login, summon sign posted and found), room create/join, NP signaling
-# and P2P datagrams both ways. Builds out/ first (bash build.sh in scripts/docker-test.sh).
+# bell's HTTP side (ss.info, login, summon sign posted and found), room create/join, NP signaling,
+# P2P datagrams both ways, and a co-op sync message each way through the server's relay.
+# Builds out/ first (bash build.sh in scripts/docker-test.sh).
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 server_src=$PWD/server
@@ -46,4 +47,4 @@ status=0
 wait $host_pid || status=1
 wait $guest_pid || status=1
 for role in host guest; do echo "--- $role"; tail -6 out/online-$role.log; done
-grep -q '^PASS' out/online-host.log && grep -q '^PASS' out/online-guest.log && [[ $status == 0 ]] && echo "online test: PASS" || { echo "online test: FAIL"; exit 1; }
+grep -q '^PASS: co-op sync' out/online-host.log && grep -q '^PASS: co-op sync' out/online-guest.log && [[ $status == 0 ]] && echo "online test: PASS" || { echo "online test: FAIL"; exit 1; }

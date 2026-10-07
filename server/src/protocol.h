@@ -62,6 +62,8 @@ enum class CommandType : uint16_t {
     GetUserInfoList = 113,
     GetRoomMemberDataExternalList = 114,
     SendRoomMessage = 115,
+    // bbcoop: co-op sync relay (payload: CoopRelayRequest), see cmd_coop.cpp
+    CoopRelay = 250,
 };
 
 // Notification type IDs (u16 LE in Notification packet header).
@@ -80,6 +82,8 @@ enum class NotificationType : uint16_t {
     // ClientSession::BuildWebApiPushPayload): npServiceName, npServiceLabel(u32 LE),
     // dataType, data, fromNpid, toNpid.
     WebApiPushEvent = 17,
+    // bbcoop: a co-op sync message from another member of your room (NotifyCoopRelay)
+    CoopRelay = 50,
 };
 
 // Error codes for Reply packets

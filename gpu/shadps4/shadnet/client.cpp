@@ -568,6 +568,10 @@ void ShadNetClient::DispatchPacket(PacketType type, u16 cmd_raw, u64 pkt_id,
         case CommandType::GetServerFeatures:
             HandleServerFeaturesReply(payload);
             break;
+        case CommandType::CoopRelay: // bbcoop: acknowledged; nothing to do unless it failed
+            if (!payload.empty() && payload[0] != 0)
+                LOG_WARNING(ShadNet, "Co-op relay refused: error {}", payload[0]);
+            break;
         case CommandType::Create: { // bbcoop: invite registration (ConnectThread)
             const auto error = payload.empty() ? ErrorType::Malformed : static_cast<ErrorType>(payload[0]);
             if (error == ErrorType::NoError)
@@ -760,6 +764,12 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
     }
 
     switch (static_cast<NotificationType>(cmd_raw)) {
+    case NotificationType::CoopRelay: { // bbcoop
+        shadnet::NotifyCoopRelay pb;
+        if (pb.ParseFromString(blob) && onCoopRelay)
+            onCoopRelay(pb.from_npid(), pb.data());
+        break;
+    }
     case NotificationType::FriendQuery: {
         shadnet::NotifyFriendQuery pb;
         if (!pb.ParseFromString(blob)) {

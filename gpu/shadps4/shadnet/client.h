@@ -95,6 +95,7 @@ enum class CommandType : u16 {
     GetUserInfoList = 113,
     GetRoomMemberDataExternalList = 114,
     SendRoomMessage = 115,
+    CoopRelay = 250, // bbcoop: co-op sync relay (server cmd_coop.cpp)
 };
 
 enum class NotificationType : u16 {
@@ -105,6 +106,7 @@ enum class NotificationType : u16 {
     RoomEvent = 10,
     RoomMessage = 11,
     WebApiPushEvent = 17, // Generic NP WebApi push event
+    CoopRelay = 50,       // bbcoop: co-op sync message from a room member
 };
 
 enum class ErrorType : uint8_t {
@@ -292,6 +294,8 @@ public:
     std::function<void(const NotifyRoomEvent&)> onRoomEvent;
     std::function<void(const NotifyRoomMessage&)> onRoomMessage;
     std::function<void(const NotifyWebApiPushEvent&)> onWebApiPushEvent;
+    // bbcoop: co-op sync message (sender npid, opaque data), on the reader thread.
+    std::function<void(const std::string& from, const std::string& data)> onCoopRelay;
     // Async reply callback.
     //   cmd    —command this reply is for (matches the request's cmd)
     //   pkt_id —packet id echoed back from the original request header
