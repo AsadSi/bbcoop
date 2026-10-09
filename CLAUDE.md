@@ -26,7 +26,9 @@ what's still open.
 - Don't add co-op patches to `patches/*.xml`. That loader writes without checking.
 - Addresses are image offsets: an XML `Address` minus 0x400000. That's the same convention as
   the `*Offset` constants in shadp2p's `src/core/bloodborne_re.cpp`.
-- Everything is for CUSA03173 v1.09 only. `scripts/game_check.py` rejects any other build.
+- Everything is for v1.09: CUSA03173 (EU) or CUSA00900 (US). Their eboot.bin images are
+  byte-identical (same `SUPPORTED_IMAGE` hash), so one set of offsets serves both.
+  `scripts/game_check.py` rejects any other build.
 
 ## Online (M2)
 - `gpu/shadps4/core/libraries/{network,np}` and `gpu/shadps4/shadnet` hold shadp2p's online

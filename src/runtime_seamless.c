@@ -1,4 +1,4 @@
-/* Seamless co-op byte patches for CUSA03173 01.09, from shadp2p's InstallSeamlessCoopPatches
+/* Seamless co-op byte patches for 1.09 (EU/US, one image), from shadp2p's InstallSeamlessCoopPatches
  * (src/core/bloodborne_re.cpp, GPL-2.0-or-later). Offsets are image offsets (XML address -
  * 0x400000). Every site's original bytes are checked before anything is written, so a different
  * build or an overlapping XML patch fails as a whole instead of corrupting the game. */
@@ -47,7 +47,7 @@ const char *seamless_apply(unsigned char *image, uint64_t size) {
     for (size_t i = 0; i < count; ++i) {
         const SeamlessPatch *p = &patches[i];
         if (p->offset > size || p->length > size - p->offset || memcmp(image + p->offset, p->original, p->length)) {
-            snprintf(error, sizeof(error), "seamless patch \"%s\" at %#llx does not match CUSA03173 01.09",
+            snprintf(error, sizeof(error), "seamless patch \"%s\" at %#llx does not match Bloodborne 1.09",
                      p->name, (unsigned long long)p->offset);
             return error;
         }

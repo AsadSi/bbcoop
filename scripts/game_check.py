@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 
 SUPPORTED_TITLE = 'CUSA03173'
+# bbcoop: the US edition's 1.09 eboot.bin loads to the same image (same SHA-256), so every offset holds.
+SUPPORTED_TITLES = (SUPPORTED_TITLE, 'CUSA00900')
 SUPPORTED_VERSION = '01.09'
 SUPPORTED_IMAGE = '071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a'
 
@@ -43,7 +45,7 @@ def problem(game, image_hash=None):
             return None
     except (OSError, ValueError, IndexError, StopIteration, KeyError):
         return 'unreadable', title, version
-    if title != SUPPORTED_TITLE:
+    if title not in SUPPORTED_TITLES:  # bbcoop
         return 'other_title', title, version
     if version != SUPPORTED_VERSION:
         return 'missing_update', title, version
@@ -55,12 +57,13 @@ def explain(kind, title, version):
     found = f'Found {title} version {version} (sce_sys/param.sfo).'
     return {
         'missing_update': f'{found} bbport needs the 1.09 update merged into the game folder: copy '
-                          'everything from the dumped 1.09 update (e.g. CUSA03173-patch) into the '
-                          'game folder, replacing files (eboot.bin and sce_sys too).',
+                          'everything from the dumped 1.09 update (e.g. CUSA03173-patch or '
+                          'CUSA00900-patch) into the game folder, replacing files (eboot.bin and '
+                          'sce_sys too).',
         'wrong_eboot': f'{found} param.sfo is from 1.09 but eboot.bin is not: copy eboot.bin from '
                        'the dumped 1.09 update into the game folder, replacing the old one.',
-        'other_title': f'{found} Only Bloodborne {SUPPORTED_TITLE} with update 1.09 is supported '
-                       'for now; other editions and regions have a different executable.',
+        'other_title': f'{found} Only Bloodborne {" and ".join(SUPPORTED_TITLES)} with update 1.09 '
+                       'are supported for now; other editions and regions have a different executable.',
         'unreadable': f'{found} eboot.bin could not be read as a decrypted PS4 executable: dump '
                       'the game and the 1.09 update again.',
     }[kind]

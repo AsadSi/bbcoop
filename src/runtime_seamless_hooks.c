@@ -1,4 +1,4 @@
-/* bbcoop: seamless co-op code hooks for CUSA03173 01.09, from shadp2p's InstallSeamlessCoopPatches
+/* bbcoop: seamless co-op code hooks for 1.09 (EU/US, one image), from shadp2p's InstallSeamlessCoopPatches
  * and the functional part of its TraceEntry (src/core/bloodborne_re.cpp, GPL-2.0-or-later), without
  * the RE tracing. Offsets are image offsets. Every hook site and every game function the handlers
  * call is checked byte for byte before anything is written. The sites hold whole instructions
@@ -343,11 +343,11 @@ static const Site sites[] = {
 const char *seamless_hooks_install(unsigned char *image, uint64_t size) {
     static char error[160];
     size_t count = sizeof(sites) / sizeof(sites[0]), hooks = 0;
-    if (size < GLOBAL_STATE + 8) return "seamless hooks: the image is too small for CUSA03173 01.09";
+    if (size < GLOBAL_STATE + 8) return "seamless hooks: the image is too small for Bloodborne 1.09";
     for (size_t i = 0; i < count; ++i) {
         const Site *s = &sites[i];
         if (s->offset > size || s->length > size - s->offset || memcmp(image + s->offset, s->bytes, s->length)) {
-            snprintf(error, sizeof(error), "seamless hook site \"%s\" at %#llx does not match CUSA03173 01.09",
+            snprintf(error, sizeof(error), "seamless hook site \"%s\" at %#llx does not match Bloodborne 1.09",
                      s->name, (unsigned long long)s->offset);
             return error;
         }

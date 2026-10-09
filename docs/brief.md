@@ -19,7 +19,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 - PvP or invasions.
 - Chalice Dungeon co-op.
 - macOS or Windows builds.
-- Support for any game version other than CUSA03173 v1.09.
+- Support for any game version other than v1.09 of CUSA03173 (EU) or CUSA00900 (US).
 
 ## Decisions made
 
@@ -40,6 +40,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Respec | At the Doll, in the Hunter's Dream, outside a session. 1 Insight per stat reset and 1 per weapon refund. A refund also moves the weapon's Blood Gems to the inventory. Saves a backup first | | Asad |
 | Seamless patches | Go through `src/runtime_seamless.c`, which checks the original bytes, not bbport's XML loader | The XML path writes without checking, so a wrong address would silently corrupt the game | Claude |
 | Our code | In new `src/runtime_*.c` files, which `build.sh` already compiles, with only small marked edits to upstream files | bbport changes every day, so rebasing must stay cheap | Claude |
+| US edition | CUSA00900 v1.09 is supported alongside CUSA03173 v1.09, with no per-build offset table | Its eboot.bin loads to the same image as EU 1.09 (SHA-256 071df19c…4c0a), so every offset and import is the same. Saves are per title ID, and the NP comm ID is region-specific (US NPWR05818_00) | Asad (request); checked 2026-10-09 by Claude |
 | Addresses | shadp2p offsets are already bbport image offsets (an XML address minus 0x400000, as shown by `memory_patcher.cpp:282` and `scripts/patches.py:197`) | Checked 2026-10-07 | Claude |
 
 ## Reusing

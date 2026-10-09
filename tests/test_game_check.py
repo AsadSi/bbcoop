@@ -48,6 +48,18 @@ class GameCheckTests(unittest.TestCase):
     def test_update_metadata_with_an_old_executable(self):
         self.assertEqual(game_check.problem(self.game('CUSA03173', '01.09'))[0], 'wrong_eboot')
 
+    def test_us_edition_without_the_update(self):
+        self.assertEqual(game_check.problem(self.game('CUSA00900', '01.00')),
+                         ('missing_update', 'CUSA00900', '01.00'))
+
+    def test_us_edition_with_an_old_executable(self):
+        self.assertEqual(game_check.problem(self.game('CUSA00900', '01.09'))[0], 'wrong_eboot')
+
+    def test_supported_image_passes_for_the_us_edition(self):
+        game = self.game('CUSA00900', '01.09')
+        with mock.patch.object(game_check, 'SUPPORTED_IMAGE', game_check.image_sha256(game)):
+            self.assertIsNone(game_check.problem(game))
+
     def test_other_edition(self):
         self.assertEqual(game_check.problem(self.game('CUSA00207', '01.09'))[0], 'other_title')
 
