@@ -7,6 +7,7 @@
 #include <vector>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "bbport_settings.h" // bbcoop: vsync
 
 namespace Frontend {
 class WindowSDL;
@@ -27,6 +28,9 @@ public:
 
     /// Recreates the swapchain with a given size and current surface.
     void Recreate(u32 width, u32 height);
+
+    /// bbcoop: the V-Sync setting changed since the present mode was chosen.
+    bool VsyncChanged() const { return vsync != BbSettings::Get().vsync.load(); }
 
     /// Acquires the next image in the swapchain.
     bool AcquireNextImage();
@@ -119,6 +123,7 @@ private:
     vk::SurfaceFormatKHR surface_format;
     vk::Format view_format;
     vk::PresentModeKHR present_mode;
+    bool vsync = false; // bbcoop
     vk::Extent2D extent;
     vk::SurfaceTransformFlagBitsKHR transform;
     vk::CompositeAlphaFlagBitsKHR composite_alpha;

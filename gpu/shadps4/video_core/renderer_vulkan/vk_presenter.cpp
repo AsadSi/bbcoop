@@ -533,7 +533,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     };
 
     // Recreate the swapchain if the window was resized.
-    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight()) {
+    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
+        swapchain.VsyncChanged()) { // bbcoop: V-Sync toggled in the menu
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
     }
 

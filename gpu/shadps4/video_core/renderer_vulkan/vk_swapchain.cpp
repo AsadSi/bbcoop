@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdio> // bbcoop
 #include <limits>
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -82,6 +83,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
 void Swapchain::Recreate(u32 width_, u32 height_) {
     LOG_DEBUG(Render_Vulkan, "Recreate the swapchain: width={} height={} HDR={}", width_, height_,
               needs_hdr);
+    FindPresentMode(); // bbcoop: the V-Sync setting may have changed
     Create(width_, height_);
 }
 
@@ -198,6 +200,7 @@ void Swapchain::FindPresentMode() {
         return;
     }
 
+    vsync = BbSettings::Get().vsync; // bbcoop
     const auto requested_mode = EmulatorSettings.GetPresentMode();
     if (requested_mode == "Mailbox") {
         present_mode = vk::PresentModeKHR::eMailbox;
@@ -236,9 +239,16 @@ void Swapchain::SetSurfaceProperties() {
 
     // Select number of images in swap chain, we prefer one buffer in the background to work on
     image_count = capabilities.minImageCount + 1;
+    // bbcoop: with FIFO (V-Sync) every extra image is another refresh of input lag; keep the
+    // fewest the surface allows. Mailbox keeps the extra image (it replaces queued frames).
+    if (present_mode == vk::PresentModeKHR::eFifo) {
+        image_count = std::max(capabilities.minImageCount, 2u);
+    }
     if (capabilities.maxImageCount > 0) {
         image_count = std::min(image_count, capabilities.maxImageCount);
     }
+    std::printf("GPU: swapchain %s, %u images (surface minimum %u)\n",
+                vk::to_string(present_mode).c_str(), image_count, capabilities.minImageCount);
 
     // Prefer identity transform if possible
     transform = vk::SurfaceTransformFlagBitsKHR::eIdentity;

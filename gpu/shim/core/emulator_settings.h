@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string>
 #include "common/types.h"
+#include "bbport_settings.h" // bbcoop: vsync
 
 enum GpuReadbacksMode : int { Disabled, Relaxed, Precise };
 
@@ -22,7 +23,8 @@ public:
     s32 GetGpuId() { static const auto value = s32(Number("BB_GPU_ID", -1)); return value; }
     u32 GetInternalScreenWidth() { static const auto value = u32(Number("BB_INTERNAL_WIDTH", 1920)); return value; }
     u32 GetInternalScreenHeight() { static const auto value = u32(Number("BB_INTERNAL_HEIGHT", 1080)); return value; }
-    std::string GetPresentMode() { const char* v = std::getenv("BB_PRESENT_MODE"); return v ? v : "Mailbox"; }
+    // bbcoop: without BB_PRESENT_MODE, the V-Sync setting (bbport.ini, in-game menu) picks FIFO.
+    std::string GetPresentMode() { const char* v = std::getenv("BB_PRESENT_MODE"); return v ? v : BbSettings::Get().vsync ? "Fifo" : "Mailbox"; }
     int GetRcasAttenuation() { static const auto value = int(Number("BB_RCAS_ATTENUATION", 250)); return value; }
     // bbport: Relaxed by default: without readbacks FaceGen reads stale GPU-written vertices
     // (vertex explosions); in Hunter's Nightmare it costs no measurable frame rate.

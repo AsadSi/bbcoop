@@ -372,6 +372,11 @@ void Menu() {
 
     ImGui::SeparatorText("Прочее");
     Checkbox("Счётчик FPS в углу", s.show_fps);
+    // bbcoop: V-Sync, applied by recreating the swapchain; BB_PRESENT_MODE (launcher) wins.
+    Checkbox("V-Sync (вертикальная синхронизация)", s.vsync);
+    if (std::getenv("BB_PRESENT_MODE")) {
+        ImGui::TextDisabled("Режим показа задан лаунчером: %s", std::getenv("BB_PRESENT_MODE"));
+    }
 
     ImGui::Spacing();
     if (ImGui::Button("Закрыть")) {
