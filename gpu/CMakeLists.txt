@@ -125,7 +125,13 @@ add_dependencies(bbgpu host_shaders)
 # bbcoop: online co-op. shadp2p's Net/NetCtl/Http/Np* libraries and shadNet client (GPL-2.0+),
 # adapted under shim/; `ninja -C out/gpu bbnet` compiles just these.
 find_package(Protobuf REQUIRED)
-find_package(httplib REQUIRED)
+find_package(httplib QUIET)
+if(NOT TARGET httplib::httplib)
+    # Arch's cpp-httplib ships only the header, no CMake config. Plain HTTP is all bbnet uses.
+    find_path(HTTPLIB_INCLUDE_DIR httplib.h REQUIRED)
+    add_library(httplib::httplib INTERFACE IMPORTED)
+    target_include_directories(httplib::httplib INTERFACE ${HTTPLIB_INCLUDE_DIR})
+endif()
 find_package(nlohmann_json REQUIRED)
 file(GLOB BBNET_SOURCES CONFIGURE_DEPENDS shadps4/core/libraries/network/*.cpp
     shadps4/core/libraries/np/*.cpp shadps4/core/libraries/np/*/*.cpp shadps4/shadnet/*.cpp)
