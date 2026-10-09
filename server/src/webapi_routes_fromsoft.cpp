@@ -11,9 +11,11 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QFile>
+#include <QHash>
 #include <QHttpServer>
 #include <QHttpServerRequest>
 #include <QHttpServerResponse>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRandomGenerator>
@@ -53,6 +55,29 @@ qint64 StableUserId(const QJsonObject& login) {
     return id ? id : 1;
 }
 
+// The lists a response must carry even when empty: the game rejects a response without them
+// ("Failed to record note search information" for BloodMessSearchAdd). Keys from the eboot's
+// UTF-16 response key table (CUSA00900 1.09, file offset 0x49d0d40), by request MessageId.
+void EmptyFields(const QString& message, QJsonObject& out) {
+    static const QHash<QString, QStringList> lists = {
+        {QStringLiteral("BloodMessSearchAddRequest"), {QStringLiteral("LostBloodMessIdList")}},
+        {QStringLiteral("BloodMessGetEvaluateRequest"), {QStringLiteral("BloodMessEvaluationList")}},
+        {QStringLiteral("BloodMessGetListRequest"), {QStringLiteral("BloodMessList")}},
+        {QStringLiteral("ChairMessGetListRequest"), {QStringLiteral("ChairMessList")}},
+        {QStringLiteral("WanderingGhostGetRequest"), {QStringLiteral("WanderingGhostList")}},
+        {QStringLiteral("TombMessGetListRequest"), {QStringLiteral("TombMessList")}},
+        {QStringLiteral("NoticeNormalGetRequest"), {QStringLiteral("NoticeList")}},
+        {QStringLiteral("NoticeEmergencyGetRequest"), {QStringLiteral("NoticeList")}},
+        {QStringLiteral("ChannelGetInfoRequest"), {QStringLiteral("ChannelInfoList")}},
+        {QStringLiteral("ChannelSearchRequest"), {QStringLiteral("ChannelList")}},
+        {QStringLiteral("ChannelWordSearchRequest"), {QStringLiteral("ChannelList")}},
+        {QStringLiteral("ChannelRandomJoinRequest"), {QStringLiteral("ChannelList")}},
+    };
+    for (const QString& key : lists.value(message)) out.insert(key, QJsonArray{});
+    if (message == QStringLiteral("ChairMessGetListRequest")) out.insert(QStringLiteral("ChairMessCount"), 0);
+    if (message == QStringLiteral("UserAgreementGetRequest")) out.insert(QStringLiteral("UserAgreementText"), QString());
+}
+
 } // namespace
 
 QByteArray FromSoftServerInfo(const QString& baseUrl) {
@@ -84,6 +109,24 @@ void RegisterFromSoftRoutes(QHttpServer& http) {
         return Json(out);
     });
 
+    // The game asks for CharaIdNum character ids before it plays online ("Failed to reset online
+    // character data" without them). Keys from the eboot's UTF-16 key table (CUSA00900 1.09, file
+    // offset 0x49d0dba): PublishCharacterIdList of PublishCharaId. Ids are stable per user.
+    http.route("/basic_utils/sync_chara_id", QHttpServerRequest::Method::Post, [](const QHttpServerRequest& request) {
+        const QJsonObject in = Body(request);
+        QJsonObject out = Success(in, QStringLiteral("SyncCharaId"));
+        const qint64 user = in.value(QStringLiteral("UserId")).toVariant().toLongLong();
+        const int count = qBound(0, in.value(QStringLiteral("CharaIdNum")).toInt(), 16);
+        QJsonArray ids;
+        for (int i = 0; i < count; ++i) {
+            QJsonObject id;
+            id.insert(QStringLiteral("PublishCharaId"), (user & 0x7FFFFFF) * 16 + i + 1);
+            ids.append(id);
+        }
+        out.insert(QStringLiteral("PublishCharacterIdList"), ids);
+        return Json(out);
+    });
+
     http.route("/basic_utils/get_datetime", QHttpServerRequest::Method::Post, [](const QHttpServerRequest& request) {
         QJsonObject out = Success(Body(request), QStringLiteral("ServerTimeGet"));
         out.insert(QStringLiteral("ServerTime"), QDateTime::currentSecsSinceEpoch());
@@ -93,7 +136,7 @@ void RegisterFromSoftRoutes(QHttpServer& http) {
     // Everything else: messages, bloodstains, ghosts, lamps, chalice, penalties, notices. Accepted
     // and answered empty, so the game never takes an error path.
     static const QStringList succeed = {
-        "/basic_utils/sync_chara_id", "/basic_utils/get_normal_notice", "/basic_utils/get_emergency_notice",
+        "/basic_utils/get_normal_notice", "/basic_utils/get_emergency_notice",
         "/basic_utils/get_user_agreement",
         "/blood_messenger/create", "/blood_messenger/delete", "/blood_messenger/evaluate_message",
         "/blood_messenger/evaluation", "/blood_messenger/exist_messages", "/blood_messenger/message_area",
@@ -111,7 +154,10 @@ void RegisterFromSoftRoutes(QHttpServer& http) {
     for (const QString& path : succeed) {
         const QString name = path.section('/', -1);
         http.route(path, QHttpServerRequest::Method::Post, [name](const QHttpServerRequest& request) {
-            return Json(Success(Body(request), name));
+            const QJsonObject in = Body(request);
+            QJsonObject out = Success(in, name);
+            EmptyFields(in.value(QStringLiteral("MessageId")).toString(), out);
+            return Json(out);
         });
     }
 }
