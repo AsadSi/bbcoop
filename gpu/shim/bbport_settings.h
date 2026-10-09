@@ -57,6 +57,8 @@ struct Values {
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
     std::atomic<bool> show_fps{false};
+    /// bbcoop: V-Sync (FIFO presentation) unless BB_PRESENT_MODE sets the mode; changes live.
+    std::atomic<bool> vsync{false};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};

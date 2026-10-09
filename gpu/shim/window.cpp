@@ -120,6 +120,11 @@ bool WindowSDL::PollEvents() {
             height = h;
             break;
         }
+        case SDL_EVENT_KEY_DOWN: // bbcoop: F11 toggles fullscreen (lower latency: no compositing)
+            if (event.key.key == SDLK_F11 && !event.key.repeat) {
+                SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
+            }
+            break;
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;
