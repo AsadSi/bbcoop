@@ -77,6 +77,6 @@ Supporting pieces:
 
 ## Open
 
-- **The login response is unverified.** `/basic_utils/login` returns `SessionId` (string) and `UserId` (int) and nothing else. Get the exact keys the game reads from its eboot strings or a `BB_CAPTURE_ONLINE=1` run before trusting it. The messenger and list routes also answer with only `ResKind`/`MessageId`. This blocks the first in-game online test.
+- **Online in the real game (2026-10-09, US 1.09, local server):** NP sign-in, `ss.info` (`/bb-us/ss.info`), `/basic_utils/login` and `/basic_utils/sync_chara_id` (needs `PublishCharacterIdList` of `PublishCharaId`) are accepted. Next blocker: the `BloodMessSearchAdd` response (`/blood_messenger/exist_messages`) is rejected ("Failed to record note search information") even with `LostBloodMessIdList: []`; the parser takes the array (type 6) at image 0x1e84f12, so the cause is elsewhere (ResKind meaning?). Response keys are UTF-16 in the eboot at file offset 0x49d0d40. Reach it with the title, main menu Log In, then Continue (the title remembers Play Offline).
 
 - Everything that runs the game is blocked until Asad's Linux PC and v1.09 dump are available. The Mac is arm64 and can't run the game.
