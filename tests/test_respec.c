@@ -31,10 +31,9 @@ static void original(void) {
     put(0x01C13D00, "\x55\x48\x89\xE5\x41\x57\x41\x56\x41\x55\x41\x54\x53\x48\x83\xEC", 16);
     put(0x01336DA0, "\x55\x48\x89\xE5\x48\x8D\x05\x1D\x43\x20\x04\x48\x83\x38\x00\x75", 16);
     put(0x013CDF30, "\x55\x48\x89\xE5\x41\x57\x41\x56\x53\x48\x83\xEC\x38\x89\xFB\x4C", 16);
-    put(0x01738599, "\x48\xC7\x00\x00\x00\x00\x00", 7);
-    put(0x01737EB9, "\x48\x8B\x8D\x68\xFE\xFF\xFF", 7);
-    put(0x01739033, "\x89\xD8\x48\x81\xC4\xB0\x00\x00\x00", 9);
-    put(0x01736345, "\x89\xB5\x20\xFE\xFF\xFF", 6);
+    put(0x01BD2D73, "\x48\x8D\x7B\x20\x48\x8D\x75\xB0", 8);
+    put(0x01C5E54D, "\xC7\x85\xF8\xFE\xFF\xFF\xFF\xFF\xFF\xFF", 10);
+    put(0x01B5DD88, "\x41\x8B\x76\x48\x48\x89\xDF", 7);
     put(0x014DA3F0, "\x55\x48\x89\xE5\x41\x57\x41\x56\x41\x55\x41\x54\x53\x48\x81\xEC", 16);
     put(0x01A8BED0, "\x55\x48\x89\xE5\x41\x57\x41\x56\x53\x50\x49\x89\xF6\x48\x89\xFB", 16);
     put(0x014D1B30, "\x55\x48\x89\xE5\x41\x57\x41\x56\x41\x55\x41\x54\x53\x48\x81\xEC", 16);
@@ -107,7 +106,7 @@ int main(void) {
     put(0x01872374, "\x48\x81\xC4\xE8\x06\x00\x00\xC3", 8);
     assert(respec_install(image, SIZE) == NULL);
     assert(image[0x0187236D] == 0xE9 && image[0x013CFCC0] == 0xE9);
-    assert(image[0x01738599] == 0xE9 && image[0x01737EB9] == 0xE9 && image[0x01739033] == 0xE9 && image[0x01736345] == 0xE9);
+    assert(image[0x01BD2D73] == 0xE9 && image[0x01C5E54D] == 0xE9 && image[0x01B5DD88] == 0xE9);
     assert(respec_install(image, SIZE) != NULL); /* already hooked */
     ((void (*)(void))(image + 0x0187236D))();
     return 0;
