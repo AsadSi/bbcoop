@@ -27,6 +27,7 @@
 #define GAME_DATA_MAN   0x0553B130
 #define CURRENT_MAP_LIST 0x0553B148
 #define SESSION_MANAGER 0x05540290
+#define WORLD_CHR_MAN   0x0553E878 /* +0x60: the local player character */
 /* Game functions. */
 #define FRAME_UPDATE     0x0187236D /* in SosStatus.Update, after its pushes (hooked) */
 #define GET_EVENT_FLAG   0x013BCCF0
@@ -41,11 +42,12 @@
 #define HANDLE_ASSIGN    0x01A8BED0 /* reference-counted handle store */
 #define CHANGE_ITEM_ID   0x014D1B30 /* the Workshop's in-place upgrade; re-equips if equipped */
 #define ADD_ITEM_OR_STORAGE 0x01B5C8C0 /* what does not fit goes to the Messengers' storage */
-/* The Workshop "Fortify Weapon" menu (FrpgMenuDlgEquipCustomShop); hooked for refund mode. */
-#define FORTIFY_LIST_QUERY 0x01738599 /* r12d: the weapon id whose upgrades are listed */
-#define FORTIFY_ENTRY_MATERIALS 0x01737EB9 /* eax: the entry's material set id */
-#define FORTIFY_COST_RETURN 0x01739033 /* ebx: the echo cost being returned */
-#define FORTIFY_EXECUTE 0x01736345 /* rdi: entries, rax: the chosen index */
+/* The "WeaponUpgrade" menu (the Workshop's Fortify Weapon; the Doll opens it too). It lists every
+ * weapon; an item I holds the inventory index at +0x48, the item key at +0x4C and its cost. Hooked for
+ * refund mode. (FrpgMenuDlgEquipCustomShop at 0x1736140 is a dead leftover.) */
+#define UPGRADE_ITEM_COST   0x01BD2D73 /* rbx: I; the fresh cost at rbp-0x60 (echoes, insight, -, materials) */
+#define UPGRADE_TARGET      0x01C5E54D /* r15: I; ebx: the target id (current + 100) */
+#define UPGRADE_APPLY       0x01B5DD88 /* r14: I; rbx: equipment; edx: the target, before ChangeItemId */
 
 #define FLAG_RESPEC 72100900
 #define FLAG_REFUND 72100901
@@ -65,6 +67,7 @@ static const uint64_t pgd_stats[RESPEC_STAT_COUNT] = {0x40, 0x48, 0x58, 0x60, 0x
 #define PGD_INSIGHT  0x84
 #define PGD_LEVEL    0x90
 #define PGD_ECHOES   0x94
+#define PGD_HP       0x14 /* current, then max */
 #define PGD_ORIGIN   0xCE
 #define PGD_EQUIPMENT 0x1D0
 #define PGD_INVENTORY 0x328
@@ -87,7 +90,7 @@ typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id
 
 static uint64_t image_base;
 static int respec_free, test_endgame, endgame_done, trace;
-static unsigned frames;
+static unsigned frames, dense; /* dense: frames of every-frame tracing left after a change */
 
 /* Reads and writes into live game structures arm runtime_fault_recover, as in
  * runtime_seamless_hooks.c; game functions are called with nothing armed. */
@@ -113,6 +116,8 @@ static uint32_t read_u32(uint64_t base, uint64_t offset) { return (uint32_t)read
 static int write_s32(uint64_t base, uint64_t offset, int32_t v) { return guest_access(base, offset, &v, 4, 1); }
 static uint64_t image_pointer(uint64_t offset) { return read_u64(image_base, offset); }
 
+static void trace_state(void);
+static uint64_t inventory_entry(uint64_t inventory, uint32_t index);
 static uint64_t player_data(void) { return read_u64(image_pointer(GAME_DATA_MAN), 0x08); }
 
 static int get_flag(int32_t flag) {
@@ -153,6 +158,17 @@ static void apply_stats(const RespecStats *s) {
     values[2] = s->level;
     for (int i = 0; i < RESPEC_STAT_COUNT; ++i) values[3 + i] = s->stat[i];
     NATIVE(ApplyStats, APPLY_STATS)(values);
+}
+
+/* The level-up commit adjusts current HP by the change in max HP, clamped at 0: with Vitality going
+ * down that leaves 0 HP, and the character dies (dropping the refunded echoes). Fill HP to the new
+ * maximum, in the player data and the character's live data (+0xF8 current, +0xFC max). */
+static void fill_hp(uint64_t pgd) {
+    uint64_t chr = read_u64(image_pointer(WORLD_CHR_MAN), 0x60), live = read_u64(read_u64(chr, 0x3B0), 0x20);
+    int32_t max = read_s32(live, 0xFC);
+    if (max > 0) write_s32(live, 0xF8, max);
+    max = read_s32(pgd, PGD_HP + 4);
+    if (max > 0) write_s32(pgd, PGD_HP, max);
 }
 
 static int32_t level_cost(int32_t level) { return NATIVE(LevelCost, LEVEL_UP_COST)(level); }
@@ -243,7 +259,10 @@ static void reset_attributes(uint64_t pgd) {
         printf("Respec: refused: could not back up the saves to %s\n", where);
         return;
     }
+    if (trace) trace_state();
     apply_stats(start);
+    fill_hp(pgd);
+    if (trace) { trace_state(); dense = 900; }
     int64_t total = (int64_t)echoes + refund;
     write_s32(pgd, PGD_ECHOES, total > MAX_ECHOES ? MAX_ECHOES : (int32_t)total);
     if (!respec_free) {
@@ -260,6 +279,18 @@ static void reset_attributes(uint64_t pgd) {
     NATIVE(SaveRequest, SAVE_REQUEST)();
 }
 
+/* The inventory index of a weapon by id, or -1 (the last one, so a just-given copy). */
+static int32_t find_weapon(uint64_t pgd, int32_t id) {
+    uint64_t inventory = pgd + PGD_INVENTORY;
+    uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14);
+    int32_t found = -1;
+    for (uint32_t i = 0; i < total && i < 4096; ++i) {
+        uint64_t entry = inventory_entry(inventory, i);
+        if (read_u32(entry, 0) && read_u32(entry, 4) == (CATEGORY_WEAPON | (uint32_t)id)) found = (int32_t)i;
+    }
+    return found;
+}
+
 /* BB_TEST_ENDGAME: a late-game character for testing respec on a throwaway profile. */
 static void make_endgame_character(uint64_t pgd) {
     static const RespecStats stats = {150, {50, 40, 40, 40, 15, 15}};
@@ -272,11 +303,19 @@ static void make_endgame_character(uint64_t pgd) {
         {CATEGORY_GOODS, 4103, 1},      /* Blood Gem Workshop Tool */
     };
     apply_stats(&stats);
+    fill_hp(pgd);
     write_s32(pgd, PGD_ECHOES, 500000);
     write_s32(pgd, PGD_INSIGHT, 20);
     write_s32(pgd, PGD_INSIGHT_COPY, 20);
-    for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); ++i)
-        NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, items[i].category, items[i].id, items[i].count);
+    /* Weapons are given at +0 (the give path drops the level) and upgraded as the Workshop does. */
+    for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); ++i) {
+        int weapon = items[i].category == CATEGORY_WEAPON;
+        int32_t id = weapon ? respec_weapon_base(items[i].id) : items[i].id;
+        NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, items[i].category, id, items[i].count);
+        int32_t index = weapon && id != items[i].id ? find_weapon(pgd, id) : -1;
+        if (index >= 0) NATIVE(ChangeItemId, CHANGE_ITEM_ID)(pgd + PGD_EQUIPMENT, (uint32_t)index, items[i].id);
+        else if (weapon && id != items[i].id) printf("Respec: BB_TEST_ENDGAME: weapon %d not found to upgrade\n", id);
+    }
     /* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
      * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
      * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
@@ -291,8 +330,10 @@ static void make_endgame_character(uint64_t pgd) {
 
 static void trace_state(void) {
     uint64_t pgd = player_data();
-    printf("Respec: trace frame %u: lua %#llx pgd %#llx map %#x level %d echoes %d insight %d origin %d "
-           "flags %d%d%d session %d\n", frames, (unsigned long long)image_pointer(LUA_EVENT_MAN),
+    uint64_t chr = read_u64(image_pointer(WORLD_CHR_MAN), 0x60), live = read_u64(read_u64(chr, 0x3B0), 0x20);
+    printf("Respec: trace frame %u: hp %d/%d/%d live %d/%d/%d sp %d/%d lua %#llx pgd %#llx map %#x level %d echoes %d insight %d origin %d "
+           "flags %d%d%d session %d\n", frames, read_s32(pgd, 0x14), read_s32(pgd, 0x18), read_s32(pgd, 0x1C),
+           read_s32(live, 0xF8), read_s32(live, 0xFC), read_s32(live, 0x100), read_s32(pgd, 0x30), read_s32(pgd, 0x34), (unsigned long long)image_pointer(LUA_EVENT_MAN),
            (unsigned long long)pgd, current_packed_map(), read_s32(pgd, PGD_LEVEL), read_s32(pgd, PGD_ECHOES),
            read_s32(pgd, PGD_INSIGHT), pgd >= 0x10000 ? (int)(read_s32(pgd, PGD_ORIGIN & ~3) >> 16 & 0xFF) : -1,
            get_flag(FLAG_RESPEC), get_flag(FLAG_REFUND), get_flag(FLAG_ENDGAME_GIVEN), in_session());
@@ -311,9 +352,10 @@ static int refund_mode(void) {
     return get_flag(FLAG_REFUND) && (current_packed_map() >> 24) == DREAM_AREA && !in_session();
 }
 
-/* The weapon at inventory index `index` (expected id `id`) back to +0: its gems to the inventory
- * (or storage), its gem slots closed as on a new +0 weapon, every upgrade material returned. The
- * echoes spent on the upgrades are not. Returns 1 when done. */
+/* Refunds the weapon at inventory index `index` (expected id `id`) before the game changes it to +0:
+ * its gems to the inventory (or storage), its gem slots closed as on a new +0 weapon, every upgrade
+ * material returned (what does not fit to storage). The echoes spent on upgrades are not. The menu
+ * saves afterwards, as after an upgrade. Returns 1 when done. */
 static int refund_weapon(uint64_t pgd, uint32_t index, int32_t id) {
     uint64_t inventory = pgd + PGD_INVENTORY, entry = inventory_entry(inventory, index);
     uint32_t handle = read_u32(entry, 0), key = read_u32(entry, 4);
@@ -340,7 +382,7 @@ static int refund_weapon(uint64_t pgd, uint32_t index, int32_t id) {
         ++gems;
     }
     int32_t base = respec_weapon_base(id);
-    NATIVE(ChangeItemId, CHANGE_ITEM_ID)(pgd + PGD_EQUIPMENT, index, base);
+    /* The game's ChangeItemId runs next; it only ever opens slots, so close them first. */
     for (int s = 0; s < GEM_SLOTS; ++s) write_s32(weapon, 0x38 + 16 * (uint64_t)s, (int32_t)GEM_SLOT_CLOSED);
     RespecMaterial materials[RESPEC_MATERIAL_KINDS];
     int kinds = respec_upgrade_materials(level, materials);
@@ -351,42 +393,46 @@ static int refund_weapon(uint64_t pgd, uint32_t index, int32_t id) {
         size_t used = strlen(given);
         snprintf(given + used, sizeof(given) - used, "%s%d x%d", k ? ", " : "", materials[k].goods, materials[k].count);
     }
-    printf("Respec: weapon refunded: %d (+%d) -> %d (now %d), %d gem(s) unfitted, materials %s; "
-           "%d save files backed up in %s\n", id, level, base, read_s32(weapon, 0x0C), gems, given, files, where);
-    NATIVE(SaveRequest, SAVE_REQUEST)();
+    printf("Respec: weapon refunded: %d (+%d) -> %d, %d gem(s) unfitted, materials %s; "
+           "%d save files backed up in %s\n", id, level, base, gems, given, files, where);
     return 1;
 }
 
-/* The menu lists, for each weapon, the rows that upgrade from it. In refund mode it is asked for
- * the rows that upgrade from one level below, which is the weapon itself (+10 too); +0 weapons
- * are asked for -1, which lists nothing. */
-static void fortify_list_query(HookRegs *regs) {
-    if (trace) printf("Respec: trace fortify_list_query: rdi %#llx rax %#llx rbx %#llx r12 %#llx refund %d\n", (unsigned long long)regs->rdi, (unsigned long long)regs->rax, (unsigned long long)regs->rbx, (unsigned long long)regs->r12, refund_mode());
+static int item_level(uint64_t item, int32_t *id) {
+    *id = (int32_t)(read_u32(item, 0x4C) & 0x0FFFFFFF);
+    return (read_u32(item, 0x4C) & 0xF0000000u) == CATEGORY_WEAPON ? respec_weapon_level(*id) : -1;
+}
+
+/* Each item's cost, as the list, the affordability check and the payment see it: in refund mode
+ * nothing (no echoes, no Insight, an empty material list) for an upgraded weapon; anything else
+ * costs the echo maximum, so it is greyed out. */
+static void upgrade_item_cost(HookRegs *regs) {
+    if (trace) printf("Respec: trace upgrade_item_cost: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->rbx, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
     if (!refund_mode()) return;
-    int32_t id = (int32_t)(uint32_t)regs->r12;
-    regs->r12 = respec_weapon_level(id) >= 1 ? (uint32_t)(id - 100) : UINT32_MAX;
+    int32_t id, cost[2] = {0, 0};
+    if (item_level(regs->rbx, &id) < 1) cost[0] = MAX_ECHOES;
+    uint64_t frame = regs->rbp, materials_begin = read_u64(frame - 0x48, 0);
+    guest_access(frame - 0x60, 0, cost, sizeof(cost), 1);
+    guest_access(frame - 0x40, 0, &materials_begin, 8, 1);
 }
-/* Entries carry material set -1 (none): nothing shown, nothing checked, nothing taken. */
-static void fortify_entry_materials(HookRegs *regs) {
-    if (trace) printf("Respec: trace fortify_entry_materials: rdi %#llx rax %#llx rbx %#llx r12 %#llx refund %d\n", (unsigned long long)regs->rdi, (unsigned long long)regs->rax, (unsigned long long)regs->rbx, (unsigned long long)regs->r12, refund_mode());
-    if (refund_mode()) regs->rax = UINT32_MAX;
-}
-/* No echo cost in the list, the checks or the execute. */
-static void fortify_cost_return(HookRegs *regs) {
-    if (trace) printf("Respec: trace fortify_cost_return: rdi %#llx rax %#llx rbx %#llx r12 %#llx refund %d\n", (unsigned long long)regs->rdi, (unsigned long long)regs->rax, (unsigned long long)regs->rbx, (unsigned long long)regs->r12, refund_mode());
-    if (refund_mode()) regs->rbx &= ~(uint64_t)UINT32_MAX;
-}
-/* The confirmed choice: refund it, then clear the entry's "owned" byte so the game skips its
- * ChangeItemId; the rest of its execute (no cost, no materials, refresh, list rebuild) still runs. */
-static void fortify_execute(HookRegs *regs) {
-    if (trace) printf("Respec: trace fortify_execute: rdi %#llx rax %#llx rbx %#llx r12 %#llx refund %d\n", (unsigned long long)regs->rdi, (unsigned long long)regs->rax, (unsigned long long)regs->rbx, (unsigned long long)regs->r12, refund_mode());
+
+/* The target: +0 instead of the next level. The preview shows +0, and the menu's own execute
+ * changes the weapon to it (ChangeItemId re-equips it when equipped). */
+static void upgrade_target(HookRegs *regs) {
+    if (trace) printf("Respec: trace upgrade_target: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r15, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
     if (!refund_mode()) return;
-    uint64_t entry = regs->rdi + regs->rax * 16, pgd = player_data();
-    uint32_t index = read_u32(entry, 4);
-    int32_t id = read_s32(entry, 0x0C);
-    if (pgd >= 0x10000) refund_weapon(pgd, index, id);
-    unsigned char skip = 0;
-    guest_access(entry, 0, &skip, 1, 1);
+    int32_t id;
+    if (item_level(regs->r15, &id) >= 1) regs->rbx = (uint32_t)respec_weapon_base(id);
+}
+
+/* Just before that ChangeItemId: gems out, materials back. */
+static void upgrade_apply(HookRegs *regs) {
+    if (trace) printf("Respec: trace upgrade_apply: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r14, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
+    if (!refund_mode()) return;
+    int32_t id;
+    uint64_t pgd = player_data();
+    if (item_level(regs->r14, &id) < 1 || (int32_t)(uint32_t)regs->rdx != respec_weapon_base(id) || pgd < 0x10000) return;
+    refund_weapon(pgd, read_u32(regs->r14, 0x48), id);
 }
 
 static int in_game(uint64_t *pgd) {
@@ -398,7 +444,7 @@ static int in_game(uint64_t *pgd) {
 static void frame_update(HookRegs *regs) {
     (void)regs;
     uint64_t pgd;
-    if (trace && frames++ % 300 == 0) trace_state();
+    if (trace && (frames++ % 300 == 0 || (dense && dense-- % 10 == 0))) trace_state();
     if (!test_endgame || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
     if (!get_flag(FLAG_ENDGAME_GIVEN)) {
@@ -410,7 +456,23 @@ static void frame_update(HookRegs *regs) {
 /* SetEventFlag(manager rdi, flag esi, on dl). The Doll's "Yes" sets 72100900: reset the attributes
  * here, then let the original instructions write the flag as 0, so it never stays set. Other
  * callers (about 85, some on other threads) only pay for the compare. */
+static void dump_inventory(void) {
+    uint64_t pgd = player_data(), inventory = pgd + PGD_INVENTORY;
+    uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14);
+    for (uint32_t i = 0; i < total && i < 2048; ++i) {
+        uint64_t entry = inventory_entry(inventory, i);
+        uint32_t handle = read_u32(entry, 0), key = read_u32(entry, 4);
+        if (handle && (key >> 28 == 0 || key == (CATEGORY_GOODS | 3000) || key == (CATEGORY_GOODS | 3010) ||
+                       key == (CATEGORY_GOODS | 3020) || key == (CATEGORY_GOODS | 3030)))
+            printf("Respec: trace inventory %u: handle %#x key %#x count %d\n", i, handle, key, read_s32(entry, 8));
+    }
+}
+
 static void set_event_flag(HookRegs *regs) {
+    if (trace && (uint32_t)regs->rsi == FLAG_REFUND) {
+        printf("Respec: trace refund flag %d\n", (int)(regs->rdx & 0xFF));
+        dump_inventory();
+    }
     if ((uint32_t)regs->rsi != FLAG_RESPEC || !(regs->rdx & 0xFF)) return;
     regs->rdx &= ~(uint64_t)0xFF;
     uint64_t pgd;
@@ -431,12 +493,9 @@ typedef struct {
 static const Site sites[] = {
     {"SosStatus.Update+0xD", FRAME_UPDATE, 7, {0x48,0x81,0xEC,0xE8,0x06,0x00,0x00}, frame_update},
     {"SetEventFlag", SET_EVENT_FLAG, 6, {0x41,0x89,0xD0,0x8B,0x4F,0x1C}, set_event_flag},
-    {"Fortify.ListQuery", FORTIFY_LIST_QUERY, 7, {0x48,0xC7,0x00,0x00,0x00,0x00,0x00}, fortify_list_query},
-    {"Fortify.EntryMaterials", FORTIFY_ENTRY_MATERIALS, 7, {0x48,0x8B,0x8D,0x68,0xFE,0xFF,0xFF},
-     fortify_entry_materials},
-    {"Fortify.CostReturn", FORTIFY_COST_RETURN, 9, {0x89,0xD8,0x48,0x81,0xC4,0xB0,0x00,0x00,0x00},
-     fortify_cost_return},
-    {"Fortify.Execute", FORTIFY_EXECUTE, 6, {0x89,0xB5,0x20,0xFE,0xFF,0xFF}, fortify_execute},
+    {"WeaponUpgrade.ItemCost", UPGRADE_ITEM_COST, 8, {0x48,0x8D,0x7B,0x20,0x48,0x8D,0x75,0xB0}, upgrade_item_cost},
+    {"WeaponUpgrade.Target", UPGRADE_TARGET, 10, {0xC7,0x85,0xF8,0xFE,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}, upgrade_target},
+    {"WeaponUpgrade.Apply", UPGRADE_APPLY, 7, {0x41,0x8B,0x76,0x48,0x48,0x89,0xDF}, upgrade_apply},
     {"GetEventFlag", GET_EVENT_FLAG, 16,
      {0x85,0xF6,0x78,0x67,0x8B,0x4F,0x1C,0x31,0xD2,0x89,0xF0,0xF7,0xF1,0x41,0x89,0xC0}, NULL},
     {"SetEventFlag.Body", SET_EVENT_FLAG + 6, 10, {0x31,0xD2,0x89,0xF0,0xF7,0xF1,0x41,0x89,0xC1,0x44}, NULL},
