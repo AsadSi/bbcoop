@@ -14,6 +14,7 @@
 #include "runtime.h"
 #include "runtime_respec.h"
 #include <dirent.h>
+#include <ftw.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +46,8 @@
 /* The "WeaponUpgrade" menu (the Workshop's Fortify Weapon; the Doll opens it too). It lists every
  * weapon; an item I holds the inventory index at +0x48, the item key at +0x4C and its cost. Hooked for
  * refund mode. (FrpgMenuDlgEquipCustomShop at 0x1736140 is a dead leftover.) */
+#define UPGRADE_LIST_FILTER_1 0x01C689E1 /* the tabs' "has a next level" filters: eax the id, esi the */
+#define UPGRADE_LIST_FILTER_2 0x01C68B41 /* row to look up (id + 100); listed when that row exists */
 #define UPGRADE_ITEM_COST   0x01BD2D73 /* rbx: I; the fresh cost at rbp-0x60 (echoes, insight, -, materials) */
 #define UPGRADE_TARGET      0x01C5E54D /* r15: I; ebx: the target id (current + 100) */
 #define UPGRADE_APPLY       0x01B5DD88 /* r14: I; rbx: equipment; edx: the target, before ChangeItemId */
@@ -57,6 +60,8 @@
 #define SESSION_CLIENT 6
 #define MAX_ECHOES  999999999
 #define MAX_INSIGHT 99
+#define NO_WEAPON_ROW 0x63 /* what the game looks up for an invalid id: no such row */
+#define BACKUPS_KEPT 20
 #define CATEGORY_WEAPON 0x00000000u
 #define CATEGORY_GOODS  0x40000000u
 
@@ -90,6 +95,9 @@ typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id
 
 static uint64_t image_base;
 static int respec_free, test_endgame, endgame_done, trace;
+/* Refund mode, from the Doll's writes of flag 72100901, which is never stored: a stored flag is saved
+ * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
+static int refund_requested;
 static unsigned frames, dense; /* dense: frames of every-frame tracing left after a change */
 
 /* Reads and writes into live game structures arm runtime_fault_recover, as in
@@ -184,16 +192,49 @@ static int copy_file(const char *from, const char *to) {
     return ok;
 }
 
-/* Copies every <user>/savedata/<id>/<title>/SPRJ0005 to <user>/respec-backups/<time>/<id>-<title>/:
- * the last save before the change. Returns the number of files copied, or -1. */
+static int remove_entry(const char *path, const struct stat *st, int type, struct FTW *ftw) {
+    (void)st; (void)type; (void)ftw;
+    return remove(path);
+}
+static int compare_names(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+/* Keeps the newest BACKUPS_KEPT backups (their names sort by time). */
+static void prune_backups(const char *root) {
+    char *names[512];
+    size_t count = 0;
+    DIR *d = opendir(root);
+    if (!d) return;
+    for (struct dirent *e; (e = readdir(d)) && count < 512;)
+        if (e->d_name[0] != '.') names[count++] = strdup(e->d_name);
+    closedir(d);
+    qsort(names, count, sizeof(*names), compare_names);
+    for (size_t i = 0; i < count; ++i) {
+        if (i + BACKUPS_KEPT < count) {
+            char path[1400];
+            snprintf(path, sizeof(path), "%s/%s", root, names[i]);
+            nftw(path, remove_entry, 8, FTW_DEPTH | FTW_PHYS);
+        }
+        free(names[i]);
+    }
+}
+
+/* Copies every <user>/savedata/<id>/<title>/SPRJ0005 to a new <user>/respec-backups/<time>[-n]/
+ * <id>-<title>/: the last save before the change. Returns the number of files copied, or -1. */
 static int backup_saves(char *where, size_t where_size) {
     char stamp[32], root[1024];
     time_t now = time(NULL);
     strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", localtime(&now));
     snprintf(root, sizeof(root), "%s/respec-backups", runtime_file_user_dir());
     mkdir(root, 0755);
-    snprintf(where, where_size, "%s/%s", root, stamp);
-    if (mkdir(where, 0755) && errno != EEXIST) return -1;
+    prune_backups(root);
+    int made = 0;
+    for (int n = 0; n < 100 && !made; ++n) {
+        if (n) snprintf(where, where_size, "%s/%s-%02d", root, stamp, n);
+        else snprintf(where, where_size, "%s/%s", root, stamp);
+        made = !mkdir(where, 0755);
+        if (!made && errno != EEXIST) return -1;
+    }
+    if (!made) return -1;
     char users[1024];
     snprintf(users, sizeof(users), "%s/savedata", runtime_file_user_dir());
     int files = 0;
@@ -216,7 +257,9 @@ static int backup_saves(char *where, size_t where_size) {
             for (struct dirent *f; (f = readdir(sd));) {
                 if (f->d_name[0] == '.') continue;
                 char from[4096], to[4096];
+                struct stat st;
                 snprintf(from, sizeof(from), "%s/%s", save, f->d_name);
+                if (stat(from, &st) || !S_ISREG(st.st_mode)) continue;
                 snprintf(to, sizeof(to), "%s/%s", target, f->d_name);
                 if (!copy_file(from, to)) { closedir(sd); closedir(td); closedir(ud); return -1; }
                 ++files;
@@ -264,6 +307,8 @@ static void reset_attributes(uint64_t pgd) {
     fill_hp(pgd);
     if (trace) { trace_state(); dense = 900; }
     int64_t total = (int64_t)echoes + refund;
+    if (total > MAX_ECHOES)
+        printf("Respec: %lld echoes over the game's maximum are lost\n", (long long)(total - MAX_ECHOES));
     write_s32(pgd, PGD_ECHOES, total > MAX_ECHOES ? MAX_ECHOES : (int32_t)total);
     if (!respec_free) {
         write_s32(pgd, PGD_INSIGHT, insight - 1);
@@ -302,6 +347,8 @@ static void make_endgame_character(uint64_t pgd) {
         {CATEGORY_GOODS, RESPEC_GOODS_SHARD, 2},
         {CATEGORY_GOODS, 4103, 1},      /* Blood Gem Workshop Tool */
     };
+    char where[1200];
+    printf("Respec: BB_TEST_ENDGAME: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
     apply_stats(&stats);
     fill_hp(pgd);
     write_s32(pgd, PGD_ECHOES, 500000);
@@ -346,10 +393,10 @@ static uint64_t inventory_entry(uint64_t inventory, uint32_t index) {
                              : read_u64(inventory, 0x48) + (uint64_t)(index - key_items) * 16;
 }
 
-/* Refund mode: the Doll's "Refund Weapon Upgrades" has the Fortify menu open (flag 72100901, which
- * her talk script clears again), in the Dream, with no co-op session. */
+/* Refund mode: the Doll's "Refund Weapon Upgrades" has the Fortify menu open (she writes 72100901
+ * before opening it and again when it closes), in the Dream, with no co-op session. */
 static int refund_mode(void) {
-    return get_flag(FLAG_REFUND) && (current_packed_map() >> 24) == DREAM_AREA && !in_session();
+    return refund_requested && (current_packed_map() >> 24) == DREAM_AREA && !in_session();
 }
 
 /* Refunds the weapon at inventory index `index` (expected id `id`) before the game changes it to +0:
@@ -375,8 +422,12 @@ static int refund_weapon(uint64_t pgd, uint32_t index, int32_t id) {
     for (int s = 0; s < GEM_SLOTS; ++s) {
         uint32_t gem = read_u32(weapon, 0x3C + 16 * (uint64_t)s);
         if (!gem) continue;
-        if (NATIVE(AddHandle, ADD_HANDLE)(inventory, &gem, 1, 0, 0) < 0)
-            NATIVE(AddHandle, ADD_HANDLE)(read_u64(pgd, PGD_STORAGE), &gem, 1, 0, 0);
+        if (NATIVE(AddHandle, ADD_HANDLE)(inventory, &gem, 1, 0, 0) < 0 &&
+            NATIVE(AddHandle, ADD_HANDLE)(read_u64(pgd, PGD_STORAGE), &gem, 1, 0, 0) < 0) {
+            /* Releasing the slot now would destroy the gem. The weapon stays as it is. */
+            printf("Respec: refund stopped: no room for gem %#x in the inventory or storage (%d unfitted)\n", gem, gems);
+            return 0;
+        }
         static const uint32_t none = 0;
         NATIVE(HandleAssign, HANDLE_ASSIGN)(weapon + 0x3C + 16 * (uint64_t)s, &none);
         ++gems;
@@ -389,9 +440,10 @@ static int refund_weapon(uint64_t pgd, uint32_t index, int32_t id) {
     char given[160] = "";
     for (int k = 0; k < kinds; ++k) {
         uint32_t goods = CATEGORY_GOODS | (uint32_t)materials[k].goods;
-        NATIVE(AddItemOrStorage, ADD_ITEM_OR_STORAGE)(&goods, materials[k].count);
+        int added = NATIVE(AddItemOrStorage, ADD_ITEM_OR_STORAGE)(&goods, materials[k].count);
         size_t used = strlen(given);
-        snprintf(given + used, sizeof(given) - used, "%s%d x%d", k ? ", " : "", materials[k].goods, materials[k].count);
+        snprintf(given + used, sizeof(given) - used, "%s%d x%d%s", k ? ", " : "", materials[k].goods,
+                 materials[k].count, added ? "" : " (NOT ADDED: inventory and storage full)");
     }
     printf("Respec: weapon refunded: %d (+%d) -> %d, %d gem(s) unfitted, materials %s; "
            "%d save files backed up in %s\n", id, level, base, gems, given, files, where);
@@ -403,14 +455,21 @@ static int item_level(uint64_t item, int32_t *id) {
     return (read_u32(item, 0x4C) & 0xF0000000u) == CATEGORY_WEAPON ? respec_weapon_level(*id) : -1;
 }
 
-/* Each item's cost, as the list, the affordability check and the payment see it: in refund mode
- * nothing (no echoes, no Insight, an empty material list) for an upgraded weapon; anything else
- * costs the echo maximum, so it is greyed out. */
+/* Which weapons the list shows. The game lists a weapon when its next level's row exists; with the
+ * Doll's menu open it lists those whose +0 row exists, upgraded ones (+10 too), and nothing else
+ * (nothing at all when a refund is not allowed, in a co-op session). */
+static void upgrade_list_filter(HookRegs *regs) {
+    if (!refund_requested) return;
+    int32_t id = (int32_t)(uint32_t)regs->rax;
+    regs->rsi = refund_mode() && respec_weapon_level(id) >= 1 ? (uint32_t)respec_weapon_base(id) : NO_WEAPON_ROW;
+}
+
+/* Each item's cost, as the list, the affordability check and the payment see it: with the Doll's
+ * menu open, nothing (no echoes, no Insight, an empty material list). */
 static void upgrade_item_cost(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_item_cost: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->rbx, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
-    if (!refund_mode()) return;
-    int32_t id, cost[2] = {0, 0};
-    if (item_level(regs->rbx, &id) < 1) cost[0] = MAX_ECHOES;
+    if (!refund_requested) return;
+    int32_t cost[2] = {0, 0};
     uint64_t frame = regs->rbp, materials_begin = read_u64(frame - 0x48, 0);
     guest_access(frame - 0x60, 0, cost, sizeof(cost), 1);
     guest_access(frame - 0x40, 0, &materials_begin, 8, 1);
@@ -425,14 +484,17 @@ static void upgrade_target(HookRegs *regs) {
     if (item_level(regs->r15, &id) >= 1) regs->rbx = (uint32_t)respec_weapon_base(id);
 }
 
-/* Just before that ChangeItemId: gems out, materials back. */
+/* Just before that ChangeItemId: gems out, materials back. With the Doll's menu open anything else,
+ * or a failed refund, gives the game's ChangeItemId the weapon's own id, so nothing changes. */
 static void upgrade_apply(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_apply: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r14, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
-    if (!refund_mode()) return;
+    if (!refund_requested) return;
     int32_t id;
+    int level = item_level(regs->r14, &id);
     uint64_t pgd = player_data();
-    if (item_level(regs->r14, &id) < 1 || (int32_t)(uint32_t)regs->rdx != respec_weapon_base(id) || pgd < 0x10000) return;
-    refund_weapon(pgd, read_u32(regs->r14, 0x48), id);
+    if (!refund_mode() || level < 1 || (int32_t)(uint32_t)regs->rdx != respec_weapon_base(id) || pgd < 0x10000 ||
+        !refund_weapon(pgd, read_u32(regs->r14, 0x48), id))
+        regs->rdx = (uint32_t)id;
 }
 
 static int in_game(uint64_t *pgd) {
@@ -445,6 +507,16 @@ static void frame_update(HookRegs *regs) {
     (void)regs;
     uint64_t pgd;
     if (trace && (frames++ % 300 == 0 || (dense && dense-- % 10 == 0))) trace_state();
+    /* A new load (the Lua event manager is recreated): the flags are saved, so a game quit with the
+     * Doll's refund menu open would leave refund mode on for the Workshop's own Fortify menu. */
+    static uint64_t loaded;
+    uint64_t lua = image_pointer(LUA_EVENT_MAN);
+    if (lua >= 0x10000 && lua != loaded && player_data() >= 0x10000) {
+        loaded = lua;
+        refund_requested = 0;
+        if (get_flag(FLAG_REFUND)) set_flag(FLAG_REFUND, 0); /* saved by builds before it was never stored */
+        if (get_flag(FLAG_RESPEC)) set_flag(FLAG_RESPEC, 0);
+    }
     if (!test_endgame || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
     if (!get_flag(FLAG_ENDGAME_GIVEN)) {
@@ -453,9 +525,7 @@ static void frame_update(HookRegs *regs) {
     }
 }
 
-/* SetEventFlag(manager rdi, flag esi, on dl). The Doll's "Yes" sets 72100900: reset the attributes
- * here, then let the original instructions write the flag as 0, so it never stays set. Other
- * callers (about 85, some on other threads) only pay for the compare. */
+/* BB_RESPEC_TRACE: the weapons and upgrade materials in the inventory. */
 static void dump_inventory(void) {
     uint64_t pgd = player_data(), inventory = pgd + PGD_INVENTORY;
     uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14);
@@ -468,13 +538,23 @@ static void dump_inventory(void) {
     }
 }
 
+/* SetEventFlag(manager rdi, flag esi, on edx). The Doll's "Yes" sets 72100900: reset the attributes
+ * here. Her refund menu writes 72100901: that is refund mode. Either way the original instructions
+ * then write the flag as 0, so neither is ever stored (or saved). Other callers (about 85, some on
+ * other threads) only pay for the compare. */
 static void set_event_flag(HookRegs *regs) {
-    if (trace && (uint32_t)regs->rsi == FLAG_REFUND) {
-        printf("Respec: trace refund flag %d\n", (int)(regs->rdx & 0xFF));
-        dump_inventory();
+    uint32_t flag = (uint32_t)regs->rsi, on = (uint32_t)regs->rdx != 0;
+    if (flag == FLAG_REFUND) {
+        refund_requested = on;
+        regs->rdx &= ~(uint64_t)UINT32_MAX;
+        if (trace) {
+            printf("Respec: trace refund mode %d\n", on);
+            dump_inventory();
+        }
+        return;
     }
-    if ((uint32_t)regs->rsi != FLAG_RESPEC || !(regs->rdx & 0xFF)) return;
-    regs->rdx &= ~(uint64_t)0xFF;
+    if (flag != FLAG_RESPEC || !on) return;
+    regs->rdx &= ~(uint64_t)UINT32_MAX;
     uint64_t pgd;
     if (!in_game(&pgd)) printf("Respec: refused: not in game\n");
     else if ((current_packed_map() >> 24) != DREAM_AREA) printf("Respec: refused: not in the Hunter's Dream\n");
@@ -493,6 +573,8 @@ typedef struct {
 static const Site sites[] = {
     {"SosStatus.Update+0xD", FRAME_UPDATE, 7, {0x48,0x81,0xEC,0xE8,0x06,0x00,0x00}, frame_update},
     {"SetEventFlag", SET_EVENT_FLAG, 6, {0x41,0x89,0xD0,0x8B,0x4F,0x1C}, set_event_flag},
+    {"WeaponUpgrade.ListFilter1", UPGRADE_LIST_FILTER_1, 7, {0xC7,0x45,0xA0,0xFF,0xFF,0xFF,0xFF}, upgrade_list_filter},
+    {"WeaponUpgrade.ListFilter2", UPGRADE_LIST_FILTER_2, 7, {0xC7,0x45,0xA0,0xFF,0xFF,0xFF,0xFF}, upgrade_list_filter},
     {"WeaponUpgrade.ItemCost", UPGRADE_ITEM_COST, 8, {0x48,0x8D,0x7B,0x20,0x48,0x8D,0x75,0xB0}, upgrade_item_cost},
     {"WeaponUpgrade.Target", UPGRADE_TARGET, 10, {0xC7,0x85,0xF8,0xFE,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}, upgrade_target},
     {"WeaponUpgrade.Apply", UPGRADE_APPLY, 7, {0x41,0x8B,0x76,0x48,0x48,0x89,0xDF}, upgrade_apply},
