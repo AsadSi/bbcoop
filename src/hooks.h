@@ -15,7 +15,8 @@ typedef void (*HookHandler)(HookRegs *regs);
 /* The game's rsp at the hook site (above the stub's slots and the 128-byte red zone). */
 static inline uint64_t hook_guest_rsp(const HookRegs *regs) { return (uint64_t)(uintptr_t)(&regs->rax + 1) + 128; }
 
-/* Reserves the stub area within rel32 reach of the image. Call once, after relocation and
+/* Reserves a stub area within rel32 reach of the image. Call once per set of hooks (seamless, respec;
+ * each call maps its own area), after relocation and
  * while the image is still writable. Returns NULL or an error message. */
 const char *hooks_init(unsigned char *image, uint64_t size);
 

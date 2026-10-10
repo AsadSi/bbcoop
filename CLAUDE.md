@@ -13,8 +13,11 @@ what's still open.
 - New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
   without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
   `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`) and
-  `runtime_net.c`, and later `runtime_coop.c`. Data mods go in
-  `mods/coop-rebalance/`.
+  `runtime_net.c`, `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
+  `docs/respec_re.md`), and later `runtime_coop.c`. Data mods go in
+  `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
+  files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
+  into `mods/bbcoop-respec/` (git-ignored).
 - Edits to upstream files stay small and marked: `probe.c`, `runtime_services.c`, `build.sh`,
   `launcher/`.
 - Never reformat upstream code.
@@ -47,6 +50,10 @@ what's still open.
   - `BB_SHADNET_WEBAPI`: defaults to `http://host:31315`.
   - `BB_SEAMLESS=1`
   - `BB_CAPTURE_ONLINE=1`: captures every HTTP request.
+- Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
+  `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
+  level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
+  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh).
 - Private only: while online, HTTP to any host other than the shadNet server is refused, in
   `RunRealHttpRequest`. Never weaken this.
 - Tests on the Mac:
@@ -66,3 +73,8 @@ what's still open.
 - `./build.sh --test` runs the C tests. The Python tests are in `tests/test_*.py`.
 - The Mac (arm64) can edit code and run the Python tests, but can't run the game.
 - Never commit game files, dumps or saves.
+- Driving the game (Steam Deck, KDE): `tools/new_game.sh` (clinic profile), `--continue` with
+  `BB_SNAPSHOT=out/<profile>`, `tools/press.sh` for pad input, and `tools/frame.sh` (or `shot.sh`) for
+  a screenshot from the game's own frame dump. That needs `BB_PRESENT_DUMP_TRIGGER=$PWD/out/present_trigger
+  BB_DUMP_DIR=$PWD/out/present` at launch; spectacle cannot capture the game. Run everything inside
+  `distrobox enter bbcoop`.

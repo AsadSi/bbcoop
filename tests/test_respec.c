@@ -84,16 +84,15 @@ int main(void) {
     unsigned char *copy = malloc(SIZE);
     assert(image != MAP_FAILED && copy);
 
-    /* A blank (wrong) build: refused, nothing written. */
-    assert(respec_install(image, SIZE) != NULL);
+    /* A blank (wrong) build: respec off, the game runs, nothing written. */
+    assert(respec_install(image, SIZE) == NULL);
     for (size_t i = 0; i < SIZE; ++i) assert(image[i] == 0);
 
-    /* One changed game function: refused, naming it, still nothing written. */
+    /* One changed game function: off, still nothing written. */
     original();
     image[0x01C13D00 + 4] = 0x90;
     memcpy(copy, image, SIZE);
-    const char *error = respec_install(image, SIZE);
-    assert(error && strstr(error, "LevelUpCommit"));
+    assert(respec_install(image, SIZE) == NULL);
     assert(!memcmp(copy, image, SIZE));
     image[0x01C13D00 + 4] = 0x41;
 
@@ -109,7 +108,8 @@ int main(void) {
     assert(respec_install(image, SIZE) == NULL);
     assert(image[0x0187236D] == 0xE9 && image[0x013CFCC0] == 0xE9);
     assert(image[0x01C689E1] == 0xE9 && image[0x01C68B41] == 0xE9 && image[0x01BD2D73] == 0xE9 && image[0x01C5E54D] == 0xE9 && image[0x01B5DD88] == 0xE9);
-    assert(respec_install(image, SIZE) != NULL); /* already hooked */
+    memcpy(copy, image, SIZE);
+    assert(respec_install(image, SIZE) == NULL && !memcmp(copy, image, SIZE)); /* already hooked: off */
     ((void (*)(void))(image + 0x0187236D))();
     return 0;
 }
