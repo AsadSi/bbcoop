@@ -21,7 +21,7 @@ class RespecModTests(unittest.TestCase):
             run = subprocess.run([str(PYTHON), '-I', str(ROOT / 'tools/respec_mod.py'), str(GAME), out],
                                  capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-            self.assertIn('talk OK: only t210304.esd changed', run.stdout)
+            self.assertIn('talk OK: only t210304.esd and t210692.esd', run.stdout)
             self.assertIn("'Reset Attributes'", run.stdout)
             self.assertIn("'Refund Weapon Upgrades'", run.stdout)
             files = sorted(str(p.relative_to(out)) for p in Path(out).rglob('*') if p.is_file())
