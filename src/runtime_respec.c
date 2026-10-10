@@ -601,19 +601,19 @@ static const Site sites[] = {
      {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x53,0x48,0x83,0xEC}, NULL},
 };
 
-/* NULL on success, or a message naming the first site whose bytes do not match. Call after
- * relocation, while the image is still writable. */
+/* NULL on success (respec on, or off when any site's bytes do not match: then nothing is written and
+ * the game runs without it, as any other image than Bloodborne 1.09 does), or a hook error. Call
+ * after relocation, while the image is still writable. */
 const char *respec_install(unsigned char *image, uint64_t size) {
-    static char error[160];
     const char *env = getenv("BB_RESPEC");
     if (env && !strcmp(env, "0")) return NULL;
     size_t count = sizeof(sites) / sizeof(sites[0]), hooks = 0;
     for (size_t i = 0; i < count; ++i) {
         const Site *s = &sites[i];
         if (s->offset > size || s->length > size - s->offset || memcmp(image + s->offset, s->bytes, s->length)) {
-            snprintf(error, sizeof(error), "respec site \"%s\" at %#llx does not match Bloodborne 1.09", s->name,
-                     (unsigned long long)s->offset);
-            return error;
+            printf("Respec: off: site \"%s\" at %#llx does not match Bloodborne 1.09\n", s->name,
+                   (unsigned long long)s->offset);
+            return NULL;
         }
     }
     image_base = (uint64_t)(uintptr_t)image;

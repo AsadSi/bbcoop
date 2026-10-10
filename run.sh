@@ -57,14 +57,17 @@ original_game=$game
 # BB_RE_PYTHON), again when the generator, the game folder or its two source files change.
 respec_mod=${BB_MODS_DIR:-$data/mods}/bbcoop-respec
 re_python=${BB_RE_PYTHON:-$HOME/.local/share/bbcoop-re/bin/python}
-respec_stamp="$(realpath -- "$game") $(cksum < tools/respec_mod.py) $(stat -c '%s %Y' -- \
-    "$game/dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx" "$game/dvdroot_ps4/msg/engus/menu.msgbnd.dcx" 2>&1)"
-if [[ ! -d $respec_mod/dvdroot_ps4 || $(cat -- "$respec_mod/.stamp" 2>/dev/null) != "$respec_stamp" ]]; then
-    if [[ -x $re_python ]] && "$re_python" -I tools/respec_mod.py "$game" "$respec_mod.new" > "$out/respec_mod.log" 2>&1; then
-        printf '%s' "$respec_stamp" > "$respec_mod.new/.stamp"
-        rm -rf -- "$respec_mod"; mv -- "$respec_mod.new" "$respec_mod"; echo "Respec mod: built $respec_mod"
-    else
-        rm -rf -- "$respec_mod.new"; echo "Respec mod: not built (needs soulstruct in $re_python; see $out/respec_mod.log)" >&2
+respec_talk=$game/dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx
+if [[ -f $respec_talk ]] && command -v realpath cksum stat > /dev/null 2>&1; then
+    respec_stamp="$(realpath -- "$game" 2>/dev/null || true) $(cksum < tools/respec_mod.py) $(stat -c '%s %Y' -- \
+        "$respec_talk" "$game/dvdroot_ps4/msg/engus/menu.msgbnd.dcx" 2>/dev/null || true)"
+    if [[ ! -d $respec_mod/dvdroot_ps4 || $(cat -- "$respec_mod/.stamp" 2>/dev/null) != "$respec_stamp" ]]; then
+        if [[ -x $re_python ]] && "$re_python" -I tools/respec_mod.py "$game" "$respec_mod.new" > "$out/respec_mod.log" 2>&1; then
+            printf '%s' "$respec_stamp" > "$respec_mod.new/.stamp"
+            rm -rf -- "$respec_mod"; mv -- "$respec_mod.new" "$respec_mod"; echo "Respec mod: built $respec_mod"
+        else
+            rm -rf -- "$respec_mod.new"; echo "Respec mod: not built (needs soulstruct in $re_python; see $out/respec_mod.log)" >&2
+        fi
     fi
 fi
 game=$("$PYTHON" scripts/mods.py "$game" --out "$out" \

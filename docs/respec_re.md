@@ -99,7 +99,50 @@ The origin's row is `CharaInitParam[3000 + origin index]`. The start values are 
 | Handle assign | 0x1a8bed0 |
 | Gem slot get / set / take | 0x1a941b0 / 0x1a941d0 / 0x1a942a0 |
 
-- **Workshop Fortify execute:** 0x1736140 (FrpgMenuDlgEquipCustomShop confirm, vtable 0x53830c0). It calls ChangeItemId at 0x173636a, then subtracts Echoes, then charges the materials through ChangeQty. The list builder is 0x1f2a760, and the affordability check is 0x1738da0.
+- **FrpgMenuDlgEquipCustomShop is dead code:** 0x1736140, 0x1737cd0 and 0x1738ed0 are never reached; hooks there never fired in game.
+
+## The live Fortify menu ("WeaponUpgrade")
+The Workshop altar and the Doll's `c1_48` open it. It is registered at 0x1bb9d00.
+
+**List source and filters**
+- The list source is 0x1c75fc0, with a per-tab filter for Right and Left Hand: 0x1c688f0 and 0x1c68a50.
+- Each filter lists a weapon only when the row `id + 100` exists, so +10 weapons are missing from the list.
+- The row lookup happens right after the hooked sites 0x1c689e1 and 0x1c68b41 (`mov [rbp-0x60],-1`). There, eax is the id and esi is the row to look up.
+
+**Per-item setup** (0x1bd2d40, item `I`)
+- `I` holds: +0x48 inventory index, +0x4C item key, +0x10 echo cost, +0x14 Insight cost, +0x20 materials.
+- The cost comes from 0x1b5eec0 (the next row's `basicPrice` plus the first material of its set).
+- At the hooked site 0x1bd2d73, the cost is on the stack at rbp-0x60, and the material vector's begin and end are at rbp-0x48 and rbp-0x40.
+
+**Target**
+- 0x1c5e500 computes `(id & 0xFFFFFFF) + 100`.
+- At the hooked site 0x1c5e54d, ebx holds that target, before the row-exists check.
+- The preview, the details panel and the execute all use it.
+
+**Confirm**
+- 0x1bd2fd0 builds two callbacks: PayCost (0x1b63bc0, which takes I+0x10 echoes, I+0x14 Insight and the materials from inventory then storage) and the upgrade effect (0x1b5dd30).
+- 0x1b5dd30 recomputes the target, then calls `ChangeItemId(EGD, I+0x48, target)` at 0x1b5dd8f.
+- The hooked site 0x1b5dd88 sits just before that call: r14 = I, rbx = EGD, edx = the target.
+- Afterwards the player is refreshed and the game saves.
+
+**How refund mode uses these hooks**
+- The filters look up the +0 row for upgraded weapons and row 0x63 (none) for everything else.
+- The cost is set to 0.
+- The target is set to +0.
+- Before ChangeItemId: the gems go to the inventory or storage, the slots are closed, and the materials are returned through the game's AddItemOrStorage (0x1b5c8c0). If anything fails, edx is set back to the weapon's own id.
+
+## Stat reset gotcha
+The level-up commit (0x1c13d00) changes current HP by the change in max HP, clamped at 0. Lowering Vitality from 50 left 0 HP, and the character died and dropped the refunded echoes. So HP is filled to the new maximum afterwards: live data `[[chr+0x3B0]+0x20]` +0xF8/+0xFC, and PGD +0x14/+0x18.
+
+## Testing notes
+- `BB_TEST_ENDGAME=1` builds the test character as follows:
+  - Weapons are given at +0, because the give path (0x131cb70) drops the upgrade level, and then upgraded through ChangeItemId.
+  - Doll and Dream flags: 9400–9404 and 12417810, plus the tutorial flags.
+  - It warps with `0x13CDF30(2102950)`, the Dream's lamp arrival.
+- The Doll wakes when the Dream loads with flag 9401 set and Insight ≥ 1.
+- Her first talk plays an intro that ends in Level Up.
+- Talk prompt: walk to her and press Cross. The menu appears after her greeting line, about 3 s later.
+- `SprjLuaEventUpdateTask::_STEP_Update` (0x1393fd0) never runs in this game. The per-update hook is inside SosStatus.Update (0x187236d), which runs offline too.
 
 ## Event flags, the frame hook, sessions and saving
 - **Flag manager:** SprjEventFlagMan is the global `0x553b100`.
