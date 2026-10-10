@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # tools/shot.sh FILE.png: captures only the game window (bb-probe) with grim, by its Hyprland
-# geometry (hyprctl clients: at, size, pid per window block).
+# geometry (hyprctl clients: at, size, pid per window block). bbcoop: without Hyprland (KDE on the
+# Steam Deck, where spectacle cannot capture the game) it is tools/frame.sh, the game's own frame dump.
 pid=$(pgrep -x bb-probe | head -1)
 [[ -n $pid ]] || { echo "no game"; exit 1; }
+command -v hyprctl > /dev/null || exec "$(dirname -- "$0")/frame.sh" "$1"
 geo=$(hyprctl clients | awk -v pid="$pid" '
     /^Window / { at=""; size="" }
     /^\tat: / { at=$2 }

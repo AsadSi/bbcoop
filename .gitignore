@@ -33,3 +33,6 @@ patches.json
 /server/build-*/
 # AMD FidelityFX DLLs (FSR 4.1.1 is built from the user's own): never in the repository
 *.dll
+# bbcoop: the respec mod is generated from the player's own game files (tools/respec_mod.py)
+/mods/bbcoop-respec/
+/mods/bbcoop-respec.new/

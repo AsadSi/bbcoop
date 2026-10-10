@@ -53,6 +53,17 @@ if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1
 game=${BB_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set BB_GAME_DIR)." >&2; exit 1; fi
 original_game=$game
+# bbcoop: the respec data mod is made from this game's own files (tools/respec_mod.py, soulstruct in
+# BB_RE_PYTHON), again when the generator changes.
+respec_mod=${BB_MODS_DIR:-$data/mods}/bbcoop-respec
+re_python=${BB_RE_PYTHON:-$HOME/.local/share/bbcoop-re/bin/python}
+if [[ ! -d $respec_mod/dvdroot_ps4 || tools/respec_mod.py -nt $respec_mod/dvdroot_ps4 ]]; then
+    if [[ -x $re_python ]] && "$re_python" -I tools/respec_mod.py "$game" "$respec_mod.new" > "$out/respec_mod.log" 2>&1; then
+        rm -rf -- "$respec_mod"; mv -- "$respec_mod.new" "$respec_mod"; echo "Respec mod: built $respec_mod"
+    else
+        rm -rf -- "$respec_mod.new"; echo "Respec mod: not built (needs soulstruct in $re_python; see $out/respec_mod.log)" >&2
+    fi
+fi
 game=$("$PYTHON" scripts/mods.py "$game" --out "$out" \
     --mods-dir "${BB_MODS_DIR:-$data/mods}" --config "${BB_MODS_CONFIG:-$data/mods.json}" \
     --enabled "${BB_MODS_ENABLED:-1}")

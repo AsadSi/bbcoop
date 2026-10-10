@@ -43,6 +43,7 @@ int vulkan_smoke(void);
 static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
 const char *seamless_apply(unsigned char *image, uint64_t size); /* bbcoop: runtime_seamless.c */
 const char *seamless_hooks_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_seamless_hooks.c */
+const char *respec_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_respec.c */
 
 /* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
  * (andn/bextr/blsr/tzcnt), MOVBE, LZCNT and POPCNT, thousands of each in eboot.bin. A CPU without
@@ -544,6 +545,7 @@ int main(int argc, char **argv) {
         if (!error) error = seamless_hooks_install(image, size); /* bbcoop */
         if (error) fail(error);
     }
+    { const char *error = respec_install(image, size); if (error) fail(error); } /* bbcoop: BB_RESPEC=0 skips */
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
