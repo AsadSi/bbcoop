@@ -42,6 +42,9 @@
 #define ADD_HANDLE       0x014DA3F0 /* inventory: put an existing instance (a gem) back */
 #define HANDLE_ASSIGN    0x01A8BED0 /* reference-counted handle store */
 #define CHANGE_ITEM_ID   0x014D1B30 /* the Workshop's in-place upgrade; re-equips if equipped */
+#define GEM_GENERATE     0x01A88130 /* (out handle, instances, doping ref, modify ref, features, GemGenParam) */
+#define HANDLE_RELEASE   0x01A8BC00
+#define GEM_FEATURES     0x0555235C /* the chalice feature block the debug "add gem" passes */
 #define ADD_ITEM_OR_STORAGE 0x01B5C8C0 /* what does not fit goes to the Messengers' storage */
 /* The "WeaponUpgrade" menu (the Workshop's Fortify Weapon; the Doll opens it too). It lists every
  * weapon; an item I holds the inventory index at +0x48, the item key at +0x4C and its cost. Hooked for
@@ -50,6 +53,11 @@
 #define UPGRADE_LIST_FILTER_2 0x01C68B41 /* row to look up (id + 100); listed when that row exists */
 #define UPGRADE_ITEM_COST   0x01BD2D73 /* rbx: I; the fresh cost at rbp-0x60 (echoes, insight, -, materials) */
 #define UPGRADE_TARGET      0x01C5E54D /* r15: I; ebx: the target id (current + 100) */
+#define UPGRADE_PANEL_COST  0x01C5E82B /* r15: I; the info panel's cost at rbp-0x150 (as at ITEM_COST) */
+#define TEXT_REFERENCE   0x01AE8CD1 /* in the menu text lookup (rdi out, esi FMG, edx text id), after its pushes */
+#define MENU_DIALOGS_FMG 204       /* MenuDialogs_SP */
+#define FORTIFY_CONFIRM_TEXT 221000 /* "Use <?demandSoul?> Blood Echoes and ... to fortify weapon?" */
+#define REFUND_CONFIRM_TEXT 221090 /* added by tools/respec_mod.py */
 #define UPGRADE_APPLY       0x01B5DD88 /* r14: I; rbx: equipment; edx: the target, before ChangeItemId */
 
 #define FLAG_RESPEC 72100900
@@ -89,6 +97,9 @@ typedef void (ABI *Warp)(int32_t respawn_point);
 typedef int32_t (ABI *AddHandle)(uint64_t inventory, uint32_t *handle, int32_t count, int32_t sort, int32_t flag);
 typedef void (ABI *HandleAssign)(uint64_t to, const uint32_t *from);
 typedef void (ABI *ChangeItemId)(uint64_t equipment, uint32_t index, int32_t id);
+typedef void (ABI *GemGenerate)(uint32_t *out, uint64_t instances, const void *doping, const void *modify,
+                                const void *features, int32_t gem_gen);
+typedef void (ABI *HandleRelease)(uint32_t *handle);
 typedef _Bool (ABI *AddItemOrStorage)(const uint32_t *key, int32_t count);
 typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id, int32_t delta);
 #define NATIVE(type, offset) ((type)(uintptr_t)(image_base + (offset)))
@@ -363,6 +374,23 @@ static void make_endgame_character(uint64_t pgd) {
         if (index >= 0) NATIVE(ChangeItemId, CHANGE_ITEM_ID)(pgd + PGD_EQUIPMENT, (uint32_t)index, items[i].id);
         else if (weapon && id != items[i].id) printf("Respec: BB_TEST_ENDGAME: weapon %d not found to upgrade\n", id);
     }
+    /* A gem fitted in the Uncanny Saw Cleaver's first (Radial) slot, as the Blood Gem menu leaves it:
+     * generated from GemGenParam 110001 (a Radial rough), the slot holding the only reference. */
+    int32_t uncanny = find_weapon(pgd, 7011000);
+    uint64_t instances = image_pointer(ITEM_INSTANCES);
+    uint64_t weapon = uncanny >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
+                                                                   (uint32_t)uncanny), 0) & 0xFFFF) * 8) : 0;
+    if (weapon >= 0x10000 && (read_u32(weapon, 0x38) & 1) && !read_u32(weapon, 0x3C)) {
+        static const struct { uint32_t id, pad; uint64_t row; } none = {UINT32_MAX, 0, 0};
+        uint32_t gem = 0;
+        NATIVE(GemGenerate, GEM_GENERATE)(&gem, instances, &none, &none, (const void *)(uintptr_t)(image_base + GEM_FEATURES),
+                                          110001);
+        if (gem) {
+            NATIVE(HandleAssign, HANDLE_ASSIGN)(weapon + 0x3C, &gem);
+            NATIVE(HandleRelease, HANDLE_RELEASE)(&gem);
+        }
+        printf("Respec: BB_TEST_ENDGAME: gem %#x fitted in the Uncanny Saw Cleaver +10\n", read_u32(weapon, 0x3C));
+    } else printf("Respec: BB_TEST_ENDGAME: no open Radial slot for a gem\n");
     /* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
      * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
      * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
@@ -464,15 +492,32 @@ static void upgrade_list_filter(HookRegs *regs) {
     regs->rsi = refund_mode() && respec_weapon_level(id) >= 1 ? (uint32_t)respec_weapon_base(id) : NO_WEAPON_ROW;
 }
 
+/* An upgrade cost on the stack (echoes, Insight, -, then a material vector with begin at +0x18 and end
+ * at +0x20): nothing. The game copies and frees the emptied vector as usual. */
+static void blank_cost(uint64_t cost) {
+    int32_t none[2] = {0, 0};
+    uint64_t materials_begin = read_u64(cost + 0x18, 0);
+    guest_access(cost, 0, none, sizeof(none), 1);
+    guest_access(cost + 0x20, 0, &materials_begin, 8, 1);
+}
+
+/* The info panel's cost (computed for the preview, separately from the item's): nothing either. */
+static void upgrade_panel_cost(HookRegs *regs) {
+    if (refund_requested) blank_cost(regs->rbp - 0x150);
+}
+
+/* Menu text lookups: with the Doll's menu open, the Fortify confirm becomes "Refund this weapon's
+ * upgrades?" instead of "Use 0 Blood Echoes and × 1 to fortify weapon?". */
+static void text_reference(HookRegs *regs) {
+    if ((uint32_t)regs->rdx == FORTIFY_CONFIRM_TEXT && (uint32_t)regs->rsi == MENU_DIALOGS_FMG && refund_requested)
+        regs->rdx = REFUND_CONFIRM_TEXT;
+}
+
 /* Each item's cost, as the list, the affordability check and the payment see it: with the Doll's
  * menu open, nothing (no echoes, no Insight, an empty material list). */
 static void upgrade_item_cost(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_item_cost: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->rbx, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
-    if (!refund_requested) return;
-    int32_t cost[2] = {0, 0};
-    uint64_t frame = regs->rbp, materials_begin = read_u64(frame - 0x48, 0);
-    guest_access(frame - 0x60, 0, cost, sizeof(cost), 1);
-    guest_access(frame - 0x40, 0, &materials_begin, 8, 1);
+    if (refund_requested) blank_cost(regs->rbp - 0x60);
 }
 
 /* The target: +0 instead of the next level. The preview shows +0, and the menu's own execute
@@ -525,14 +570,14 @@ static void frame_update(HookRegs *regs) {
     }
 }
 
-/* BB_RESPEC_TRACE: the weapons and upgrade materials in the inventory. */
+/* BB_RESPEC_TRACE: the weapons, gems and upgrade materials in the inventory. */
 static void dump_inventory(void) {
     uint64_t pgd = player_data(), inventory = pgd + PGD_INVENTORY;
     uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14);
     for (uint32_t i = 0; i < total && i < 2048; ++i) {
         uint64_t entry = inventory_entry(inventory, i);
         uint32_t handle = read_u32(entry, 0), key = read_u32(entry, 4);
-        if (handle && (key >> 28 == 0 || key == (CATEGORY_GOODS | 3000) || key == (CATEGORY_GOODS | 3010) ||
+        if (handle && (key >> 28 == 0 || key >> 28 == 8 || key == (CATEGORY_GOODS | 3000) || key == (CATEGORY_GOODS | 3010) ||
                        key == (CATEGORY_GOODS | 3020) || key == (CATEGORY_GOODS | 3030)))
             printf("Respec: trace inventory %u: handle %#x key %#x count %d\n", i, handle, key, read_s32(entry, 8));
     }
@@ -575,6 +620,8 @@ static const Site sites[] = {
     {"SetEventFlag", SET_EVENT_FLAG, 6, {0x41,0x89,0xD0,0x8B,0x4F,0x1C}, set_event_flag},
     {"WeaponUpgrade.ListFilter1", UPGRADE_LIST_FILTER_1, 7, {0xC7,0x45,0xA0,0xFF,0xFF,0xFF,0xFF}, upgrade_list_filter},
     {"WeaponUpgrade.ListFilter2", UPGRADE_LIST_FILTER_2, 7, {0xC7,0x45,0xA0,0xFF,0xFF,0xFF,0xFF}, upgrade_list_filter},
+    {"WeaponUpgrade.PanelCost", UPGRADE_PANEL_COST, 7, {0x48,0x8D,0xBD,0x18,0xFF,0xFF,0xFF}, upgrade_panel_cost},
+    {"MenuText.Reference", TEXT_REFERENCE, 5, {0x41,0x89,0xD4,0x89,0xF3}, text_reference},
     {"WeaponUpgrade.ItemCost", UPGRADE_ITEM_COST, 8, {0x48,0x8D,0x7B,0x20,0x48,0x8D,0x75,0xB0}, upgrade_item_cost},
     {"WeaponUpgrade.Target", UPGRADE_TARGET, 10, {0xC7,0x85,0xF8,0xFE,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}, upgrade_target},
     {"WeaponUpgrade.Apply", UPGRADE_APPLY, 7, {0x41,0x8B,0x76,0x48,0x48,0x89,0xDF}, upgrade_apply},
@@ -597,6 +644,8 @@ static const Site sites[] = {
      {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x53,0x48,0x81,0xEC}, NULL},
     {"AddItemOrStorage", ADD_ITEM_OR_STORAGE, 16,
      {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,0x41,0x54,0x53,0x48,0x83,0xEC,0x30,0x89}, NULL},
+    {"GemGenerate", GEM_GENERATE, 12, {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54}, NULL},
+    {"HandleRelease", HANDLE_RELEASE, 12, {0x55,0x48,0x89,0xE5,0x41,0x56,0x53,0x48,0x89,0xFB,0x8B,0x33}, NULL},
     {"ChangePlayerItemQty", CHANGE_ITEM_QTY, 16,
      {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x53,0x48,0x83,0xEC}, NULL},
 };

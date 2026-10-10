@@ -131,6 +131,16 @@ The Workshop altar and the Doll's `c1_48` open it. It is registered at 0x1bb9d00
 - The target is set to +0.
 - Before ChangeItemId: the gems go to the inventory or storage, the slots are closed, and the materials are returned through the game's AddItemOrStorage (0x1b5c8c0). If anything fails, edx is set back to the weapon's own id.
 
+**Refund-mode cosmetics**
+- The info panel's cost is computed separately, in 0x1c5e500 → 0x1b5eec0. At the hooked site 0x1c5e82b (r15 = I) it sits at rbp-0x150, in the same layout as at 0x1bd2d73, and refund mode blanks it.
+- The confirm text is MenuDialogs_SP (FMG 204) id 221000, "Use <?demandSoul?> Blood Echoes and …". The menu text lookup 0x1ae8cc0(out, fmg, id) is hooked after its pushes at 0x1ae8cd1. That hook turns it into 221090, which `tools/respec_mod.py` adds: "Refund this weapon's upgrades?".
+
+**Gems in the test character**
+- AddItem can't make a gem, because a gem is generated.
+- `0x1a88130(&handle, *(base+0x553e990), &none, &none, base+0x555235c, gemGenId)`, where `none = {u32 -1, 0, NULL}`, generates one. GemGenParam 110001 is a Radial rough.
+- Fitting it is `HandleAssign(&weapon[0x3C+16s], &handle)` followed by a release of the local reference (0x1a8bc00).
+- Inventory key of a gem: 0x80000000 | the generator id.
+
 ## Stat reset gotcha
 The level-up commit (0x1c13d00) changes current HP by the change in max HP, clamped at 0. Lowering Vitality from 50 left 0 HP, and the character died and dropped the refunded echoes. So HP is filled to the new maximum afterwards: live data `[[chr+0x3B0]+0x20]` +0xF8/+0xFC, and PGD +0x14/+0x18.
 
