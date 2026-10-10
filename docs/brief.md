@@ -37,7 +37,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player, plus extra enemies in chosen spots during co-op only | | Asad |
 | Extra enemies | Only along the main routes of the large areas (Central Yharnam first, then Old Yharnam, Cathedral Ward, Forbidden Woods, Yahar'gul and Cainhurst). One extra group per guest, at points where enemies already gather. Never in boss arenas | Bosses already scale through HP. Adding enemies to an arena changes the fight's design and makes friendly fire chaotic, while open areas are where co-op gets trivial | Claude |
-| Respec | At the Doll, in the Hunter's Dream, outside a session. "Reset Attributes" returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" opens the Fortify list of upgraded weapons. Picking one sets it to +0 for free and returns every upgrade material, with gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
+| Respec | At the Doll, in the Hunter's Dream, outside a session. "Reset Attributes" returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
 | Respec entry | A new option in the Doll's dialogue (her talk script), not a settings-menu button | Feels native; chosen over the faster menu button | Asad, 2026-10-09 |
 | Seamless patches | Go through `src/runtime_seamless.c`, which checks the original bytes, not bbport's XML loader | The XML path writes without checking, so a wrong address would silently corrupt the game | Claude |
 | Our code | In new `src/runtime_*.c` files, which `build.sh` already compiles, with only small marked edits to upstream files | bbport changes every day, so rebasing must stay cheap | Claude |
@@ -83,8 +83,8 @@ Supporting pieces:
   - Glitches with the messengers.
   - Make every firearm upgradable and give firearms gem slots.
 - **Respec, not yet verified in game:**
-  - Refunding a weapon with gems fitted.
-  - A full inventory or storage.
+  - A full inventory or storage. Gems and materials then go to storage. A gem with no room anywhere stops the refund, and the weapon stays as it is.
+  - The Workshop altar's own Fortify menu after a refund. Refund mode lives only in memory while the Doll's menu is open, so the altar's menu should be unchanged, but it was not opened in a test.
   - The AppImage build does not ship `tools/respec_mod.py` or soulstruct, so the Doll's new options are missing there.
 
 - **Online in the real game (2026-10-09, US 1.09, local server):** NP sign-in, `ss.info` (`/bb-us/ss.info`), `/basic_utils/login` and `/basic_utils/sync_chara_id` (needs `PublishCharacterIdList` of `PublishCharaId`) are accepted. Next blocker: the `BloodMessSearchAdd` response (`/blood_messenger/exist_messages`) is rejected ("Failed to record note search information") even with `LostBloodMessIdList: []`; the parser takes the array (type 6) at image 0x1e84f12, so the cause is elsewhere (ResKind meaning?). Response keys are UTF-16 in the eboot at file offset 0x49d0d40. Reach it with the title, main menu Log In, then Continue (the title remembers Play Offline).

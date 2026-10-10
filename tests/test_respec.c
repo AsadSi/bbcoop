@@ -33,6 +33,10 @@ static void original(void) {
     put(0x013CDF30, "\x55\x48\x89\xE5\x41\x57\x41\x56\x53\x48\x83\xEC\x38\x89\xFB\x4C", 16);
     put(0x01C689E1, "\xC7\x45\xA0\xFF\xFF\xFF\xFF", 7);
     put(0x01C68B41, "\xC7\x45\xA0\xFF\xFF\xFF\xFF", 7);
+    put(0x01C5E82B, "\x48\x8D\xBD\x18\xFF\xFF\xFF", 7);
+    put(0x01AE8CD1, "\x41\x89\xD4\x89\xF3", 5);
+    put(0x01A88130, "\x55\x48\x89\xE5\x41\x57\x41\x56\x41\x55\x41\x54", 12);
+    put(0x01A8BC00, "\x55\x48\x89\xE5\x41\x56\x53\x48\x89\xFB\x8B\x33", 12);
     put(0x01BD2D73, "\x48\x8D\x7B\x20\x48\x8D\x75\xB0", 8);
     put(0x01C5E54D, "\xC7\x85\xF8\xFE\xFF\xFF\xFF\xFF\xFF\xFF", 10);
     put(0x01B5DD88, "\x41\x8B\x76\x48\x48\x89\xDF", 7);
@@ -107,6 +111,7 @@ int main(void) {
     put(0x01872374, "\x48\x81\xC4\xE8\x06\x00\x00\xC3", 8);
     assert(respec_install(image, SIZE) == NULL);
     assert(image[0x0187236D] == 0xE9 && image[0x013CFCC0] == 0xE9);
+    assert(image[0x01C5E82B] == 0xE9 && image[0x01AE8CD1] == 0xE9);
     assert(image[0x01C689E1] == 0xE9 && image[0x01C68B41] == 0xE9 && image[0x01BD2D73] == 0xE9 && image[0x01C5E54D] == 0xE9 && image[0x01B5DD88] == 0xE9);
     memcpy(copy, image, SIZE);
     assert(respec_install(image, SIZE) == NULL && !memcmp(copy, image, SIZE)); /* already hooked: off */

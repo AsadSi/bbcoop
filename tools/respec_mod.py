@@ -43,6 +43,7 @@ MSG_REL = "msg/engus/menu.msgbnd.dcx"
 DOLL_ESD = "t210304.esd"
 MENU_SM = 0x80000000 - 7          # "x7" = Doll's main talk menu (Channel Blood Echoes / Talk / Give ... / Leave)
 EVENT_TEXT_ENTRY_ID = 30          # menu.msgbnd entry 30 = EventText (talk-list labels 15000xxx, dialogs 1001xxxx)
+DIALOG_TEXT_ENTRY_ID = 204        # menu.msgbnd entry 204 = MenuDialogs_SP (the Fortify confirm is 221000)
 
 # Event flags (block 72100xxx: Hunter's Dream NPC flags; 72100500-72100999 unused by every ESD/EMEVD in the game).
 FLAG_RESPEC_REQUESTED = 72100900  # ESD sets 1 after "Yes"; native code performs respec, then clears it.
@@ -60,6 +61,9 @@ NEW_TEXT = {
     TXT_REFUND_LABEL: "Refund Weapon Upgrades",
     TXT_RESPEC_CONFIRM: "Reset all attributes?\nThis costs 1 Insight.",
 }
+# The Fortify confirm in refund mode (runtime_respec.c swaps 221000 for it; 22109x is unused).
+TXT_REFUND_CONFIRM = 221090
+NEW_DIALOG_TEXT = {TXT_REFUND_CONFIRM: "Refund this weapon's upgrades?\nIts upgrade materials are returned."}
 
 # New state IDs in machine x7 (vanilla uses 0..30).
 S_RESPEC_ASK, S_RESPEC_SET, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE = 31, 32, 33, 34, 35
@@ -362,10 +366,15 @@ def main():
     for b in (msg, item):
         for e in b.entries:
             ids = FMG.from_bytes(e.get_uncompressed_data()).entries
-            clash = set(NEW_TEXT) & set(ids)
+            clash = (set(NEW_TEXT) | set(NEW_DIALOG_TEXT)) & set(ids)
             assert not clash, (e.path, clash)
     fmg.entries.update(NEW_TEXT)
     fmg_entry.set_uncompressed_data(bytes(fmg.to_writer()))
+    dialog_entry = [e for e in msg.entries if e.entry_id == DIALOG_TEXT_ENTRY_ID][0]
+    dialog = FMG.from_bytes(dialog_entry.get_uncompressed_data())
+    assert not set(NEW_DIALOG_TEXT) & set(dialog.entries)
+    dialog.entries.update(NEW_DIALOG_TEXT)
+    dialog_entry.set_uncompressed_data(bytes(dialog.to_writer()))
     msg_out = OUT / MSG_REL
     msg_out.parent.mkdir(parents=True, exist_ok=True)
     msg_out.write_bytes(bytes(msg))
@@ -413,19 +422,19 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     assert adds == [15000100, 15000007, 15000008, TXT_RESPEC_LABEL, TXT_REFUND_LABEL, 15000005], adds
     print(f"talk OK: only {DOLL_ESD} changed; machine x7 states changed/added: {diff_states}; menu labels {adds}")
 
-    # Msg: every FMG except EventText byte-identical; EventText = vanilla + 3 new strings.
+    # Msg: every FMG except EventText and MenuDialogs_SP byte-identical; those two = vanilla + the new strings.
     a, b = Binder.from_path(msg_src), Binder.from_path(msg_out)
     changed = [x.entry_id for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
-    assert changed == [EVENT_TEXT_ENTRY_ID], changed
-    fa = FMG.from_bytes([e for e in a.entries if e.entry_id == EVENT_TEXT_ENTRY_ID][0].get_uncompressed_data())
-    fb = FMG.from_bytes([e for e in b.entries if e.entry_id == EVENT_TEXT_ENTRY_ID][0].get_uncompressed_data())
+    assert changed == sorted([EVENT_TEXT_ENTRY_ID, DIALOG_TEXT_ENTRY_ID]), changed
     norm = lambda d: {k: (v or "") for k, v in d.items()}
-    ea, eb = norm(fa.entries), norm(fb.entries)
-    assert {k: v for k, v in eb.items() if k not in NEW_TEXT} == ea
-    assert {k: eb[k] for k in NEW_TEXT} == NEW_TEXT
-    print(f"msg OK: only entry {EVENT_TEXT_ENTRY_ID} changed; {len(ea)} -> {len(eb)} strings; new: {NEW_TEXT}")
-
+    for entry_id, new_text in ((EVENT_TEXT_ENTRY_ID, NEW_TEXT), (DIALOG_TEXT_ENTRY_ID, NEW_DIALOG_TEXT)):
+        fa = FMG.from_bytes([e for e in a.entries if e.entry_id == entry_id][0].get_uncompressed_data())
+        fb = FMG.from_bytes([e for e in b.entries if e.entry_id == entry_id][0].get_uncompressed_data())
+        ea, eb = norm(fa.entries), norm(fb.entries)
+        assert {k: v for k, v in eb.items() if k not in new_text} == ea
+        assert {k: eb[k] for k in new_text} == new_text
+        print(f"msg OK: entry {entry_id}: {len(ea)} -> {len(eb)} strings; new: {new_text}")
 
 if __name__ == "__main__":
     main()
