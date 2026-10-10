@@ -41,6 +41,8 @@ GAME = OUT = Path()  # set by main()
 TALK_REL = "script/talk/m21_00_00_00.talkesdbnd.dcx"
 MSG_REL = "msg/engus/menu.msgbnd.dcx"
 DOLL_ESD = "t210304.esd"
+WORKSHOP_ESD = "t210692.esd"      # the Workshop tools (the altar); machine x2 state 1 opens Fortify Weapon
+WORKSHOP_FORTIFY_SM = 0x80000000 - 2
 MENU_SM = 0x80000000 - 7          # "x7" = Doll's main talk menu (Channel Blood Echoes / Talk / Give ... / Leave)
 EVENT_TEXT_ENTRY_ID = 30          # menu.msgbnd entry 30 = EventText (talk-list labels 15000xxx, dialogs 1001xxxx)
 DIALOG_TEXT_ENTRY_ID = 204        # menu.msgbnd entry 204 = MenuDialogs_SP (the Fortify confirm is 221000)
@@ -308,6 +310,14 @@ def edit_doll(esd: TalkESD):
     )
 
 
+def edit_workshop(esd: TalkESD):
+    """The altar's Fortify Weapon switches refund mode off first: the native refund mode follows the
+    Doll's writes of the flag, and a talk interrupted with her menu open would otherwise leave it on."""
+    state = esd.state_machines[WORKSHOP_FORTIFY_SM][1]
+    assert [(c.bank, c.index) for c in state.enter_commands] == [(1, C_OPEN_FORTIFY)]
+    state.enter_commands.insert(0, cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Comparison helpers
 # ---------------------------------------------------------------------------------------------------------------------
@@ -355,6 +365,9 @@ def main():
     edit_doll(doll)
     doll_entry = find_entry(talk, DOLL_ESD)
     doll_entry.set_uncompressed_data(write_esd(doll))
+    workshop = load_esd(talk, WORKSHOP_ESD)
+    edit_workshop(workshop)
+    find_entry(talk, WORKSHOP_ESD).set_uncompressed_data(write_esd(workshop))
     talk_out = OUT / TALK_REL
     talk_out.parent.mkdir(parents=True, exist_ok=True)
     talk_out.write_bytes(bytes(talk))
@@ -401,7 +414,12 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     a, b = Binder.from_path(talk_src), Binder.from_path(talk_out)
     changed = [PureWindowsPath(x.path).name for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
-    assert changed == [DOLL_ESD], changed
+    assert sorted(changed) == sorted([DOLL_ESD, WORKSHOP_ESD]), changed
+    new_workshop = find_entry(b, WORKSHOP_ESD).get_uncompressed_data()
+    check_next_state_pointers(new_workshop)
+    expected_workshop = load_esd(a, WORKSHOP_ESD)
+    edit_workshop(expected_workshop)
+    assert esd_key(TalkESD.from_bytes(new_workshop)) == esd_key(expected_workshop)
     new_bytes = find_entry(b, DOLL_ESD).get_uncompressed_data()
     check_next_state_pointers(new_bytes)
     new = TalkESD.from_bytes(new_bytes)
@@ -420,7 +438,7 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     adds = [(int(cmd_key(c)[2][1][1:5].hex() and struct.unpack('<i', cmd_key(c)[2][1][1:5])[0]))
             for c in sm[5].enter_commands if c.index == C_ADD_TALK_LIST and cmd_key(c)[2][1][0] == 0x82]
     assert adds == [15000100, 15000007, 15000008, TXT_RESPEC_LABEL, TXT_REFUND_LABEL, 15000005], adds
-    print(f"talk OK: only {DOLL_ESD} changed; machine x7 states changed/added: {diff_states}; menu labels {adds}")
+    print(f"talk OK: only {DOLL_ESD} and {WORKSHOP_ESD} (fortify clears refund mode) changed; machine x7 states changed/added: {diff_states}; menu labels {adds}")
 
     # Msg: every FMG except EventText and MenuDialogs_SP byte-identical; those two = vanilla + the new strings.
     a, b = Binder.from_path(msg_src), Binder.from_path(msg_out)
