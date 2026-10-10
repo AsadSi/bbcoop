@@ -13,7 +13,7 @@ cd -- "$(dirname -- "$0")/.."
 mode=new
 [[ ${1:-} == --continue ]] && { mode=continue; shift; }
 user=${BB_USER_DIR:-$PWD/out/test-user}
-snapshot=$PWD/out/test-user-clinic
+snapshot=${BB_SNAPSHOT:-$PWD/out/test-user-clinic} # bbcoop: BB_SNAPSHOT, another saved profile for --continue
 case $user in "$PWD"/out/*) ;; *) echo "BB_USER_DIR must be under out/ (it is deleted)" >&2; exit 1;; esac
 if [[ $mode == continue && ! -d $snapshot ]]; then echo "No $snapshot: run tools/new_game.sh first." >&2; exit 1; fi
 

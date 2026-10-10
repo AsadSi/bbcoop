@@ -78,4 +78,6 @@ if [[ ${1:-} == --test ]]; then
     out/hooks-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_seamless_hooks.c src/runtime_seamless_hooks.c src/runtime_hooks.c -lm -o out/seamless-hooks-test # bbcoop
     out/seamless-hooks-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
+    out/respec-test
 fi
