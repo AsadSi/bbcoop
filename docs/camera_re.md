@@ -16,8 +16,9 @@ which the log shows at ~240 FPS.
   the monotonic clock; `BB_WALL_CLOCK=1` restores the wall clock.
 
 ## The follow camera (ChrExFollowCam)
-- **Update:** `0x143ac60(cam = rdi, …, dt = xmm0)`. xmm0 is saved untouched to `[rbp-0x250]` at
-  `0x143ad1d`, and is the dt of the turn ramp below.
+- **Update:** `0x143ac60(cam = rdi, …, dt = xmm0)`, called from `0x1436c00` and `0x1436e15` with
+  `rdi = [rbx+0x60]` and xmm0 from `[rbp-0x40]` (`0x1436b34`). The caller also divides by it
+  (`0x1436baa`), and the update multiplies speeds by it (`0x143b069`) and uses it for the turn ramp below.
 - **Defaults:** two init blocks, `0x143a0e0`-area immediates at `0x143a57b…` and `0x143a979…`.
 - **Field names:** from the debug-menu builder `0x143fb60`.
 - **Manual turning is dt-correct:** CamRotX/Y (`+0x140/+0x144`) += stick × speed × dt.
@@ -53,5 +54,8 @@ Left alone:
 - **ChrTransChaseRate** `+0x198`: the game rewrites it every frame (`0x143e27f`, `0x143e2c2`).
 - **The CamDist lerp constant** `0x4925e68`.
 - **A 32-frame position average** in `0x1439430`.
-- **Uncap FPS++ in the debug menu:** it also sets DirectPitchRate to 0.03 in the debug-menu builder (`0x1440799`). That only runs
-  with the debug node, so the hook assumes the vanilla 30 FPS base.
+- **Uncap FPS++ and DirectPitchRate:** the patch also sets DirectPitchRate to 0.03 (half of vanilla, for ~60 FPS) in
+  the parameter builder (`0x1440799`, called from `0x14366a0` for the same camera). The hook reads 0.03 there
+  as the vanilla 0.06, so the rate isn't halved twice.
+- **The 30/60/90 FPS++ presets** halve several rates themselves at a fixed frame time, so `run.sh` turns the
+  hook off for them (`BB_CAMERA_RATES=0` unless set).

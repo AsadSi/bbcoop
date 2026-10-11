@@ -1,5 +1,6 @@
 /* bbcoop: runtime_camera.c on a synthetic image (x86-64 Linux): the all-or-nothing site check, the
- * turn-ramp patch, the update hook, the env switches, and the chase-rate maths. */
+ * turn-ramp patch, the update hook (called for real: rdi and xmm0 reach the handler), the env
+ * switches, and the chase-rate maths. */
 #define _GNU_SOURCE
 #include "runtime_camera.h"
 #include <assert.h>
@@ -13,12 +14,17 @@ static const unsigned char ramp[10] = {0xC7,0x83,0xE8,0x01,0x00,0x00,0x9A,0x99,0
 static const unsigned char ramp_off[10] = {0xC7,0x83,0xE8,0x01,0x00,0x00,0x28,0x6B,0x6E,0x4E};
 static const unsigned char entry[10] = {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,0x41,0x55};
 
+/* The update's prologue is followed by its mirror: pop r13; pop r14; pop r15; pop rbp; ret. */
+static const unsigned char epilogue[7] = {0x41,0x5D,0x41,0x5E,0x41,0x5F,0x5D};
+
 static unsigned char *fresh(void) {
-    unsigned char *image = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    unsigned char *image = mmap(NULL, SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     assert(image != MAP_FAILED);
     memcpy(image + 0x143A57B, ramp, 10);
     memcpy(image + 0x143A979, ramp, 10);
     memcpy(image + 0x143AC60, entry, 10);
+    memcpy(image + 0x143AC6A, epilogue, 7);
+    image[0x143AC71] = 0xC3;
     return image;
 }
 
@@ -36,6 +42,13 @@ static void install(void) {
     assert(!camera_install(image, SIZE));
     assert(!memcmp(image + 0x143A57B, ramp_off, 10) && !memcmp(image + 0x143A979, ramp_off, 10));
     assert(image[0x143AC60] == 0xE9 && image[0x143AC65] == 0x90 && image[0x143AC69] == 0x90);
+
+    /* The hooked update, called as the game does: rdi = camera, xmm0 = frame time. */
+    unsigned char camera[0x400] = {0};
+    set_field(camera, 0, 0.3f);
+    void (*update)(unsigned char *, float) = (void (*)(unsigned char *, float))(void *)(image + 0x143AC60);
+    update(camera, 1.0f / 120.0f);
+    assert(near(field(camera, 0), 1.0f - powf(0.7f, 0.25f)));
 
     /* One site differs: nothing is written. */
     image = fresh();
@@ -96,6 +109,22 @@ static void rates(void) {
     set_field(camera, 2, 1.5f);
     camera_rates_apply(camera, 1.0f / 120.0f);
     assert(field(camera, 2) == 1.5f);
+
+    /* Uncap FPS++'s DirectPitchRate (0.03) stands for the vanilla 0.06. */
+    set_field(camera, 2, 0.03f);
+    camera_rates_apply(camera, 1.0f / 30.0f);
+    assert(near(field(camera, 2), 0.06f));
+    camera_rates_apply(camera, 1.0f / 120.0f);
+    assert(near(field(camera, 2), 1.0f - powf(0.94f, 0.25f)));
+
+    /* Eight more cameras seen once each do not evict the one updated every frame. */
+    static unsigned char others[8][0x400];
+    for (unsigned c = 0; c < 8; ++c) {
+        for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i) set_field(others[c], i, vanilla[i]);
+        camera_rates_apply(others[c], 1.0f / 120.0f);
+        camera_rates_apply(camera, 1.0f / 120.0f);
+    }
+    assert(near(field(camera, 0), 1.0f - powf(0.7f, 0.25f)));
 }
 
 int main(void) {

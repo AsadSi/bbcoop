@@ -500,6 +500,15 @@ def main():
         param_out.unlink(missing_ok=True)
         print("Gun gems: off (BB_GUN_GEMS=0)")
         return
+    try:
+        gun_gems(item, param_src, param_out)
+    except Exception as error:  # the respec files above are fine on their own: keep them
+        param_out.unlink(missing_ok=True)
+        print(f"Gun gems: off (failed: {type(error).__name__}: {error})")
+
+
+def gun_gems(item: Binder, param_src: Path, param_out: Path):
+    """Writes param_out: the game's gameparam with one gem slot on every firearm, checked."""
     names = [e for e in item.entries if e.entry_id == WEAPON_NAME_ENTRY_ID][0]
     weapon_names = {k: v for k, v in FMG.from_bytes(names.get_uncompressed_data()).entries.items() if v}
     gameparam = Binder.from_path(param_src)

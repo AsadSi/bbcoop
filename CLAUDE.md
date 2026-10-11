@@ -56,7 +56,9 @@ what's still open.
 - Camera and frame rate: `BB_CAMERA_ACCEL=1` keeps the game's turn ramp (off by default), `BB_CAMERA_RATES=0`
   leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
   clock instead of the monotonic one (`src/runtime_time.c`), and `BB_FPS_LIMIT` limits frames per second.
-  Uncapped defaults to 120 (`run.sh`, the launcher); 0 means no limit.
+  Uncapped defaults to 120 (`run.sh`; the launcher's 0 keeps that default), `BB_FPS_LIMIT=0` means no limit.
+  `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
+  `docs/messengers_re.md`).
 - Tests on the Mac: `scripts/docker-test.sh` runs the x86-64 build and C tests.
 
 ## References (siblings, read-only, shallow clones)

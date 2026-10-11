@@ -73,13 +73,16 @@ if [[ -f $respec_talk ]] && command -v realpath cksum stat > /dev/null 2>&1; the
     respec_stamp="$(realpath -- "$game" 2>/dev/null || true) $(cksum < tools/respec_mod.py) $(stat -c '%s %Y' -- \
         "$respec_talk" "$game/dvdroot_ps4/msg/engus/menu.msgbnd.dcx" 2>/dev/null || true)"
     # bbcoop: gun gems (a gem slot on every firearm, in its gameparam; BB_GUN_GEMS=0: none) rebuild it too.
-    respec_stamp+=" gun_gems=${BB_GUN_GEMS:-1} $(stat -c '%s %Y' -- "$game/dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx" 2>/dev/null || true)"
+    respec_stamp+=" gun_gems=$([[ ${BB_GUN_GEMS:-1} == 0 ]] && echo 0 || echo 1) $(stat -c '%s %Y' -- \
+        "$game/dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx" "$game/dvdroot_ps4/msg/engus/item.msgbnd.dcx" 2>/dev/null || true)"
     if [[ ! -d $respec_mod/dvdroot_ps4 || $(cat -- "$respec_mod/.stamp" 2>/dev/null) != "$respec_stamp" ]]; then
         if [[ -x $re_python ]] && "$re_python" -I tools/respec_mod.py "$game" "$respec_mod.new" > "$out/respec_mod.log" 2>&1; then
             printf '%s' "$respec_stamp" > "$respec_mod.new/.stamp"
             rm -rf -- "$respec_mod"; mv -- "$respec_mod.new" "$respec_mod"; echo "Respec mod: built $respec_mod"
         else
             rm -rf -- "$respec_mod.new"; echo "Respec mod: not built (needs soulstruct in $re_python; see $out/respec_mod.log)" >&2
+            # bbcoop: an older build's gun gems must not outlive BB_GUN_GEMS=0.
+            [[ ${BB_GUN_GEMS:-1} == 0 ]] && rm -f -- "$respec_mod/dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx"
         fi
     fi
 fi
@@ -225,6 +228,8 @@ fi
 # bbcoop: uncapped frames are limited to 120 FPS unless BB_FPS_LIMIT is set (0 = no limit). The
 # camera sped up at times while uncapped (Asad, 2026-10-10); src/runtime_camera.c has the fix.
 if [[ $fps == uncap ]]; then export BB_FPS_LIMIT=${BB_FPS_LIMIT-120}; fi
+# bbcoop: the fixed-frame-rate patches tune the camera's chase rates themselves (runtime_camera.c).
+if [[ $fps != uncap ]]; then export BB_CAMERA_RATES=${BB_CAMERA_RATES-0}; fi
 # FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
 if [[ -z ${BB_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
     bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2
@@ -239,8 +244,10 @@ fi
 # goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py).
 # bbcoop: private only, and online is on hold (2026-10-11): it stays off unless both servers are set
 # and neither is a public default (shadPS4's shadNet server, The Hunter's Dream).
-if [[ ${BB_ONLINE:-0} == 1 && ( -z ${BB_SHADNET_SERVER:-} || -z ${BB_COMMUNITY_SERVER:-} ||
-      $BB_SHADNET_SERVER == *shadps4.net* || $BB_COMMUNITY_SERVER == *thehuntersdream* ) ]]; then
+online_hosts="${BB_SHADNET_SERVER:-} ${BB_COMMUNITY_SERVER:-} ${BB_SHADNET_WEBAPI:-}"; online_hosts=${online_hosts,,}
+online_flag=${BB_ONLINE:-0}  # runtime_net.c: on when it starts with 1
+if [[ ${online_flag:0:1} == 1 && ( -z ${BB_SHADNET_SERVER:-} || -z ${BB_COMMUNITY_SERVER:-} ||
+      $online_hosts == *shadps4.net* || $online_hosts == *thehuntersdream* || $online_hosts == *scej-network* ) ]]; then
     echo 'Online: off (bbcoop: private only; set BB_SHADNET_SERVER and BB_COMMUNITY_SERVER to your own servers)' >&2
     export BB_ONLINE=0
 fi
@@ -256,6 +263,8 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     [[ -n ${BB_SHADNET_WEBAPI:-} ]] || export BB_SHADNET_WEBAPI=http://${BB_SHADNET_SERVER%:*}:31315
     SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${BB_USER_DIR:-$data/user}") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
+    # bbcoop: without overrides the game would reach its own (public) server: online stays off.
+    if [[ -z $SHADPS4_HTTP_HOST_OVERRIDES_JSON ]]; then echo 'Online: off (no host overrides)' >&2; export BB_ONLINE=0; fi
 fi
 probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then
