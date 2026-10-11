@@ -130,7 +130,7 @@ DEFAULTS = {
     "gamepad": "",
     "gamepad_name": "",
     "fps_mode": "uncap",
-    "fps_limit": 0,
+    "fps_limit": 120,  # bbcoop: uncapped frames above 120 FPS sped the camera up
     "draw_pipe": "",
     "readbacks": "",
     "preupload": "",
@@ -267,8 +267,7 @@ def game_environment(s):
     if s["hdr"]:
         env["BB_HDR"] = "1"
     env["BB_FPS"] = s["fps_mode"]
-    if s["fps_limit"] > 0:
-        env["BB_FPS_LIMIT"] = str(s["fps_limit"])
+    env["BB_FPS_LIMIT"] = str(max(0, s["fps_limit"]))  # bbcoop: 0 = no limit, run.sh defaults to 120
     if s["draw_pipe"]:
         env["BB_DRAW_PIPE"] = s["draw_pipe"]
     if s["readbacks"]:
