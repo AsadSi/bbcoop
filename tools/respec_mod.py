@@ -10,6 +10,10 @@ dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx (Doll = t210304.esd, machine
 menu) and dvdroot_ps4/msg/engus/menu.msgbnd.dcx (entry 30, EventText). The output is re-read and
 checked: the new entries exist and everything else is unchanged. run.sh calls this.
 
+Gun gems (on unless BB_GUN_GEMS=0): MOD_DIR also gets dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx,
+where every firearm's WeaponGenParam rows +1..+10 without an open gem slot get the Hunter Pistol's one
+slot at the same level. Only those rows' bytes change; the rest of the file is the game's own.
+
 Needs soulstruct 2.6 (python3 -m venv ~/.local/share/bbcoop-re; .../bin/pip install soulstruct).
 Works around two soulstruct quirks (docs/respec_re.md):
   * ESD.to_writer() keys next-state offsets by state id across all state machines and shares
@@ -20,12 +24,15 @@ Works around two soulstruct quirks (docs/respec_re.md):
 """
 from __future__ import annotations
 
+import os
 import struct
 import sys
 from pathlib import Path, PureWindowsPath
 
 from soulstruct.containers import Binder
+from soulstruct.base.params.param import TypedParam
 from soulstruct.base.text.fmg import FMG
+from soulstruct.bloodborne.params.paramdef import EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST, WEAPON_GEN_PARAM_ST
 from soulstruct.bloodborne.ezstate.esd import TalkESD
 from soulstruct.base.ezstate.esd.command import Command
 from soulstruct.base.ezstate.esd.condition import Condition
@@ -69,6 +76,18 @@ NEW_DIALOG_TEXT = {TXT_REFUND_CONFIRM: "Refund this weapon's upgrades?\nIts upgr
 
 # New state IDs in machine x7 (vanilla uses 0..30).
 S_RESPEC_ASK, S_RESPEC_SET, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE = 31, 32, 33, 34, 35
+
+# Gun gems. A weapon's gem slots come from its WeaponGenParam row (row id = weapon id = family*10000 + level*100);
+# upgrading opens the slots the next row has open (0x1a94340) and never closes one.
+GAMEPARAM_REL = "param/gameparam/gameparam.parambnd.dcx"
+ITEM_MSG_REL = "msg/engus/item.msgbnd.dcx"
+WEAPON_NAME_ENTRY_ID = 11         # item.msgbnd entry 11 = weapon names
+GUN_GEM_MODEL = "Hunter Pistol"   # the firearm whose slot (one droplet slot, type 0x8, from +1) all others get
+SHIELD_CATEGORY = 12              # weaponCategory of the torches and shields (the guns and Fist of Gratia: 0)
+SLOT_CLOSED = 0x80000000          # gemSlotType bit 31: closed (0x80000100 in the params)
+GEN_FIELDS = ("wepParamId",) + tuple(f"{k}_{i}" for i in range(5) for k in ("gemSlotType", "gemGenId")) + (
+    "equipableGemSegmentMask", "reserveGemSlotNo_0", "reserveGemSlotNo_1", "reserveGemSlotNo_2")
+GEN_ROW_SIZE = 48                 # wepParamId, then only gem slot fields: bytes 4..47 are what a row's slots are
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Minimal EZL encoder (same encoding as the game; validated against vanilla bytes in `self_test_ezl`).
@@ -319,6 +338,86 @@ def edit_workshop(esd: TalkESD):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Gun gems (WeaponGenParam)
+# ---------------------------------------------------------------------------------------------------------------------
+def load_param(bnd: Binder, stem: str, row_type):
+    return TypedParam(row_type).from_bytes(find_entry(bnd, stem + ".param").get_uncompressed_data())
+
+
+def param_row_offsets(data: bytes) -> dict[int, int]:
+    """Row id -> offset of its data in a Bloodborne .param: little-endian, 64-bit row pointers {id, 0, data offset,
+    name offset} from 0x40. soulstruct keeps only the first of repeated ids, so the rows are patched in place."""
+    assert data[0x2c] == 0 and data[0x2d] & 4, data[0x2c:0x30].hex()  # little-endian, LongDataOffset
+    count = struct.unpack_from("<H", data, 0xa)[0]
+    offsets = {row_id: offset for row_id, _, offset, _ in
+               (struct.unpack_from("<iiqq", data, 0x40 + 24 * i) for i in range(count))}
+    assert len(offsets) == count, "repeated row ids"
+    return offsets
+
+
+def open_slots(row) -> list[int]:
+    return [t for t in (getattr(row, f"GemSlotType{i}") for i in range(5)) if not t & SLOT_CLOSED]
+
+
+def firearm_families(weapons) -> dict[int, list[int]]:
+    """Firearm family (weapon id // 10000; an Uncanny or Lost variant is a family of its own) -> its weapon ids.
+    Firearms are the left-hand weapons (leftHandEquipable) that can be upgraded (have a +1 row): the guns, Fist
+    of Gratia and the Hunter's Torch. The shields and the plain Torch exist at +0 only."""
+    left_hand: dict[int, list[int]] = {}
+    for weapon_id, row in weapons.rows.items():
+        if row.LeftHandAllowed:
+            assert row.WeaponCategory in (0, SHIELD_CATEGORY), (weapon_id, row.WeaponCategory)
+            left_hand.setdefault(weapon_id // 10000, []).append(weapon_id)
+    for family, ids in left_hand.items():  # +0 only, or +0..+10
+        assert sorted(ids) in ([family * 10000], [family * 10000 + level * 100 for level in range(11)]), family
+    return {family: ids for family, ids in left_hand.items() if len(ids) > 1}
+
+
+def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
+    """(firearm families, model family, {WeaponGenParam row: model row}): every firearm row +1..+10 without an open
+    slot, paired with the Hunter Pistol's row at the same level. +0 rows and slotted rows stay as they are."""
+    assert WEAPON_GEN_PARAM_ST.get_internal_names() == GEN_FIELDS
+    weapons = load_param(gameparam, "EquipParamWeapon", EQUIP_PARAM_WEAPON_ST)
+    gen = load_param(gameparam, "WeaponGenParam", WEAPON_GEN_PARAM_ST)
+    offsets = sorted(param_row_offsets(find_entry(gameparam, "WeaponGenParam.param").get_uncompressed_data()).values())
+    assert {b - a for a, b in zip(offsets, offsets[1:])} == {GEN_ROW_SIZE}
+    families = firearm_families(weapons)
+    # No shield among them: in the shield category only the Hunter's Torch can be upgraded.
+    upgradable_shields = [weapon_names.get(f * 10000) for f in families
+                          if weapons.rows[f * 10000].WeaponCategory == SHIELD_CATEGORY]
+    assert upgradable_shields == ["Hunter's Torch"], upgradable_shields
+    model = [w // 10000 for w, name in weapon_names.items() if name == GUN_GEM_MODEL and w in weapons.rows]
+    assert len(model) == 1 and model[0] in families, model
+    model = model[0]
+    model_slots = {tuple(open_slots(gen.rows[model * 10000 + level * 100])) for level in range(1, 11)}
+    assert len(model_slots) == 1 and len(next(iter(model_slots))) == 1, model_slots
+    # Every gem category may sit in that slot type (GemCategoryParam enableSlotTypeA..F = slot types 1 << 0..5).
+    letter = "ABCDEF"[next(iter(model_slots))[0].bit_length() - 1]
+    assert all(getattr(c, f"EnableSlotType{letter}") for c in load_param(
+        gameparam, "GemCategoryParam", GEM_CATEGORY_PARAM_ST).rows.values())
+    edits = {}
+    for family in sorted(families):
+        for level in range(1, 11):
+            row_id = family * 10000 + level * 100
+            if row_id not in weapons.rows:
+                continue
+            assert gen.rows[row_id].WeaponParamID == row_id, row_id
+            if not open_slots(gen.rows[row_id]):
+                edits[row_id] = model * 10000 + level * 100
+    return families, model, edits
+
+
+def apply_gun_gems(gameparam: Binder, edits: dict[int, int]):
+    entry = find_entry(gameparam, "WeaponGenParam.param")
+    data = bytearray(entry.get_uncompressed_data())
+    offsets = param_row_offsets(data)
+    for row_id, model_id in edits.items():
+        dst, src = offsets[row_id], offsets[model_id]
+        data[dst + 4:dst + GEN_ROW_SIZE] = data[src + 4:src + GEN_ROW_SIZE]  # all but wepParamId
+    entry.set_uncompressed_data(bytes(data))
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Comparison helpers
 # ---------------------------------------------------------------------------------------------------------------------
 def cmd_key(c: Command):
@@ -375,7 +474,7 @@ def main():
     # --- 2. EventText FMG ---
     fmg_entry = [e for e in msg.entries if e.entry_id == EVENT_TEXT_ENTRY_ID][0]
     fmg = FMG.from_bytes(fmg_entry.get_uncompressed_data())
-    item = Binder.from_path(GAME / "msg/engus/item.msgbnd.dcx")
+    item = Binder.from_path(GAME / ITEM_MSG_REL)
     for b in (msg, item):
         for e in b.entries:
             ids = FMG.from_bytes(e.get_uncompressed_data()).entries
@@ -395,20 +494,72 @@ def main():
     verify(talk_src, talk_out, msg_src, msg_out)
     print(f"wrote {talk_out}\nwrote {msg_out}")
 
+    # --- 3. WeaponGenParam: one gem slot on every firearm (BB_GUN_GEMS=0: none, and no gameparam file) ---
+    param_src, param_out = GAME / GAMEPARAM_REL, OUT / GAMEPARAM_REL
+    if os.environ.get("BB_GUN_GEMS", "1") == "0":
+        param_out.unlink(missing_ok=True)
+        print("Gun gems: off (BB_GUN_GEMS=0)")
+        return
+    names = [e for e in item.entries if e.entry_id == WEAPON_NAME_ENTRY_ID][0]
+    weapon_names = {k: v for k, v in FMG.from_bytes(names.get_uncompressed_data()).entries.items() if v}
+    gameparam = Binder.from_path(param_src)
+    families, model, edits = plan_gun_gems(gameparam, weapon_names)
+    name = lambda family: weapon_names.get(family * 10000, "(no name)")
+    print("Gun gems: firearm families: " + ", ".join(f"{f} {name(f)}" for f in sorted(families)))
+    apply_gun_gems(gameparam, edits)
+    param_out.parent.mkdir(parents=True, exist_ok=True)
+    param_out.write_bytes(bytes(gameparam))
+    verify_gun_gems(param_src, param_out, families, edits)
+    changed = sorted({row_id // 10000 for row_id in edits})
+    print(f"Gun gems: {len(edits)} rows in {len(changed)} firearm families get {name(model)}'s slot: "
+          + ", ".join(name(f) for f in changed))
+    print(f"wrote {param_out}")
 
-def verify(talk_src, talk_out, msg_src, msg_out):
+
+def same_container(src: Path, out: Path):
+    """Same DCX type, same binder header, same entry list (ids, paths, flags, order)."""
     from soulstruct.dcx import decompress
 
-    # Containers: same DCX type, same binder header, same entry list (ids, paths, flags, order).
+    a, b = Binder.from_path(src), Binder.from_path(out)
+    assert a.dcx_type == b.dcx_type, (a.dcx_type, b.dcx_type)
+    assert (a.version, a.v4_info, a.flags, a.signature, a.big_endian, a.bit_big_endian) == \
+           (b.version, b.v4_info, b.flags, b.signature, b.big_endian, b.bit_big_endian)
+    assert [(e.entry_id, e.path, e.flags) for e in a.entries] == [(e.entry_id, e.path, e.flags) for e in b.entries]
+    da = decompress(src.read_bytes())[0]
+    db = decompress(out.read_bytes())[0]
+    print(f"{out.name}: dcx={b.dcx_type.name} raw {len(da)} -> {len(db)} bytes, {len(b.entries)} entries")
+    return a, b
+
+
+def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits: dict[int, int]):
+    """Only WeaponGenParam changes, and in it only the slot bytes of the planned rows; afterwards every firearm row
+    +1..+10 has exactly one open slot, and each changed row has its model row's slots."""
+    a, b = same_container(src, out)
+    changed = [PureWindowsPath(x.path).name for x, y in zip(a.entries, b.entries)
+               if x.get_uncompressed_data() != y.get_uncompressed_data()]
+    assert changed == (["WeaponGenParam.param"] if edits else []), changed
+    old = find_entry(a, "WeaponGenParam.param").get_uncompressed_data()
+    new = find_entry(b, "WeaponGenParam.param").get_uncompressed_data()
+    expected = Binder.from_path(src)
+    apply_gun_gems(expected, edits)
+    assert new == find_entry(expected, "WeaponGenParam.param").get_uncompressed_data()
+    offsets = param_row_offsets(old)
+    assert {r for r, o in offsets.items() if old[o:o + GEN_ROW_SIZE] != new[o:o + GEN_ROW_SIZE]} == set(edits)
+    gen = TypedParam(WEAPON_GEN_PARAM_ST).from_bytes(new)
+    for row_id, model_id in edits.items():
+        row, model = gen.rows[row_id], gen.rows[model_id]
+        assert row.WeaponParamID == row_id
+        assert [row[f] for f in GEN_FIELDS[1:]] == [model[f] for f in GEN_FIELDS[1:]], row_id
+    for ids in families.values():
+        for row_id in ids:
+            if row_id % 10000:
+                assert len(open_slots(gen.rows[row_id])) == 1, row_id
+    print(f"gameparam OK: only WeaponGenParam changed, {len(edits)} rows; every firearm +1..+10 has one gem slot")
+
+
+def verify(talk_src, talk_out, msg_src, msg_out):
     for src, out in ((talk_src, talk_out), (msg_src, msg_out)):
-        a, b = Binder.from_path(src), Binder.from_path(out)
-        assert a.dcx_type == b.dcx_type, (a.dcx_type, b.dcx_type)
-        assert (a.version, a.v4_info, a.flags, a.signature, a.big_endian, a.bit_big_endian) == \
-               (b.version, b.v4_info, b.flags, b.signature, b.big_endian, b.bit_big_endian)
-        assert [(e.entry_id, e.path, e.flags) for e in a.entries] == [(e.entry_id, e.path, e.flags) for e in b.entries]
-        da = decompress(src.read_bytes())[0]
-        db = decompress(out.read_bytes())[0]
-        print(f"{out.name}: dcx={b.dcx_type.name} raw {len(da)} -> {len(db)} bytes, {len(b.entries)} entries")
+        same_container(src, out)
 
     # Talk: every entry except the Doll is byte-identical; Doll differs only by the intended edit.
     a, b = Binder.from_path(talk_src), Binder.from_path(talk_out)
