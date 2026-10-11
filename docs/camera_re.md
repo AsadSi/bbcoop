@@ -30,7 +30,9 @@ which the log shows at ~240 FPS.
 - **Reset:** a stick below 0.998 resets it at once (`0x143cd5e`).
 - **Effect:** a full stick for 0.6 s more than doubles the turn speed.
 
-This is most likely what Asad sees. `src/runtime_camera.c` sets `+0x1e8` to 1e9 s in both init blocks, so the
+This is most likely what Asad sees. Measured in the game on 2026-10-11:
+- With the vanilla ramp, RotHiSpeedRate reaches 1.0 within about 0.5 s of a full stick, and turning goes to ~270°/s.
+- With the ramp off, turning stays at ~120°/s. `src/runtime_camera.c` sets `+0x1e8` to 1e9 s in both init blocks, so the
 camera keeps one speed (`BB_CAMERA_ACCEL=1` restores the ramp).
 
 ### Per-frame chase fractions (tuned for 30 FPS)

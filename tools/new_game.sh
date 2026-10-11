@@ -21,6 +21,8 @@ pkill -x bb-probe; sleep 2; pkill -9 -x bb-probe; sleep 1
 rm -rf -- "$user"
 [[ $mode == continue ]] && cp -a "$snapshot" "$user"
 : > out/pad
+# The scripted input below expects the online/offline choice (upstream 0.5 skips it by default).
+BB_SKIP_NETWORK_CHOICE=${BB_SKIP_NETWORK_CHOICE:-0} \
 BB_USER_DIR=$user BB_IME_TEXT=${BB_IME_TEXT:-Hunter} BB_PAD_FILE=$PWD/out/pad BB_FRAME_STATS=1 \
     setsid stdbuf -oL -eL bash run.sh "$@" > out/session.log 2>&1 < /dev/null &
 
