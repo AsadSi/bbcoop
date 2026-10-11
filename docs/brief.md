@@ -117,9 +117,9 @@ Supporting pieces:
   - **Stat reset:** 150 → 10 for 1 Insight.
   - **Respec menu:** works after the upstream merge.
   - **Frame rate:** 108–117 FPS, worst frame ~16–22 ms.
+- **Verified by Asad 2026-10-11:** a gem fits in a new gun slot. He used the gem-test save (`out/gem-test`, from `BB_TEST_ENDGAME`; launcher `~/.local/bin/bloodborne-gemtest.sh`).
 - **Still not verified in game:**
   - A refund with a full inventory or storage. Gems and materials then go to storage. A gem with no room anywhere stops the refund, and the weapon stays as it is.
-  - Fitting a gem in a new gun slot. The test character had no droplet gem.
   - Whether the messengers Asad sees vanish by the 5 m rule (`BB_MESSENGER_RADIUS`).
   - The AppImage build does not ship `tools/respec_mod.py` or soulstruct, so the Doll's new options are missing there. Asad doesn't use the AppImage.
 
