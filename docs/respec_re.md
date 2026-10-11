@@ -154,6 +154,10 @@ The level-up commit (0x1c13d00) changes current HP by the change in max HP, clam
 - The Doll wakes when the Dream loads with flag 9401 set and Insight ≥ 1.
 - Her first talk plays an intro that ends in Level Up.
 - Talk prompt: walk to her and press Cross. The menu appears after her greeting line, about 3 s later.
+- The Workshop's Fortify, Repair and Blood Gem menus are at the blue-lit workbench with a lantern, right of the Workshop entrance, by the fireplace. They are not at the candle altar at the back, which is the rune altar.
+- To reach the workbench with scripted input from the Dream's lamp arrival: talk to the Doll (forward-right), go up the stairs behind her, enter the door on the left, walk past Gehrman toward the fireplace, then step back from the bench and walk into its front (`lx=255`), and press Cross.
+- In the Fortify list, the d-pad left/right switches between right-hand and left-hand weapons.
+- `BB_TEST_ENDGAME` also gives a Cannon +1 and a Flamesprayer +10, and logs whether their first gem slot is open (the gun gems).
 - `SprjLuaEventUpdateTask::_STEP_Update` (0x1393fd0) never runs in this game. The per-update hook is inside SosStatus.Update (0x187236d), which runs offline too.
 
 ## Event flags, the frame hook, sessions and saving

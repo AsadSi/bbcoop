@@ -10,7 +10,8 @@
  *   rate' = 1 - (1 - rate)^(dt * 30), which equals the game's own rate at 30 FPS.
  *   BB_CAMERA_RATES=0 turns it off; run.sh does for the fixed 30/60/90 FPS modes, whose patches tune
  *   the rates themselves.
- * Every site's bytes are checked before anything is written; any mismatch leaves the camera vanilla. */
+ * Every site's bytes are checked before anything is written; any mismatch leaves the camera vanilla.
+ * BB_CAMERA_TRACE=1 logs the camera's state from the hook about twice a second. */
 #define _GNU_SOURCE
 #include "hooks.h"
 #include "runtime_camera.h"
@@ -101,9 +102,25 @@ void camera_rates_apply(unsigned char *camera, float dt) {
     }
 }
 
+static int trace;
+static unsigned trace_frames;
+
 static void camera_update(HookRegs *regs) {
     float dt = hook_saved_xmm(regs, 0)[0];
-    if (regs->rdi) camera_rates_apply((unsigned char *)(uintptr_t)regs->rdi, dt);
+    if (!regs->rdi) return;
+    unsigned char *camera = (unsigned char *)(uintptr_t)regs->rdi;
+    camera_rates_apply(camera, dt);
+    /* BB_CAMERA_TRACE=1: about twice a second, the frame time, the chase rates in use, the turn ramp
+     * (RotHiSpeedRate +0x138, its time +0x1e8) and the yaw (+0x144). */
+    if (trace && ++trace_frames % 60 == 1) {
+        float f[CAMERA_RATE_FIELDS], ramp, ramp_time, yaw;
+        for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i) memcpy(&f[i], camera + camera_rate_fields[i], 4);
+        memcpy(&ramp, camera + 0x138, 4);
+        memcpy(&ramp_time, camera + 0x1e8, 4);
+        memcpy(&yaw, camera + 0x144, 4);
+        printf("Camera: trace %p dt %.4f rates %.4f %.4f %.4f %.4f %.4f ramp %.3f (time %g) yaw %.3f\n", (void *)camera,
+               dt, f[0], f[1], f[2], f[3], f[4], ramp, ramp_time, yaw);
+    }
 }
 
 static int flag(const char *name, int fallback) {
@@ -113,6 +130,7 @@ static int flag(const char *name, int fallback) {
 
 const char *camera_install(unsigned char *image, uint64_t size) {
     int ramp = !flag("BB_CAMERA_ACCEL", 0), rates = flag("BB_CAMERA_RATES", 1);
+    trace = flag("BB_CAMERA_TRACE", 0);
     if (!ramp && !rates) return NULL;
     size_t count = sizeof(ramp_patches) / sizeof(ramp_patches[0]);
     for (size_t i = 0; i < count; ++i) {

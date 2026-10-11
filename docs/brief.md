@@ -105,10 +105,23 @@ Supporting pieces:
   - Every firearm already fortifies to +10.
   - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`.
   - Shields and the Torch stay as they are.
-- **Respec, not yet verified in game:**
-  - A full inventory or storage. Gems and materials then go to storage. A gem with no room anywhere stops the refund, and the weapon stays as it is.
-  - The Workshop altar's own Fortify menu after a refund. Refund mode lives only in memory while the Doll's menu is open, and the altar's talk script now also turns it off before opening Fortify (`tools/respec_mod.py`), so the altar's menu should be unchanged. It was not opened in a test: the altar is up the stairs, and reaching it with scripted input was not finished.
-  - The AppImage build does not ship `tools/respec_mod.py` or soulstruct, so the Doll's new options are missing there.
+- **Verified in game 2026-10-11** (throwaway profile, `BB_TEST_ENDGAME`, 2160p, FSR 4, 120 FPS cap):
+  - **Camera:**
+    - With a full stick, turning stays at ~120°/s.
+    - With `BB_CAMERA_ACCEL=1`, the vanilla ramp reaches 1.0 within about 0.5 s and turning jumps to ~270°/s.
+    - The chase rates follow dt (`BB_CAMERA_TRACE=1`).
+  - **Gun gems:**
+    - The Cannon +1 and Flamesprayer +10 show 0/1 slots in Fortify and in Blood Gem Fortification.
+    - Refunding the Flamesprayer at the Doll returned 16/16/16/1 materials.
+    - The Workshop workbench's own Fortify then upgraded it normally to +1 (normal confirm text, Echoes and Shards spent), and the slot was back.
+  - **Stat reset:** 150 → 10 for 1 Insight.
+  - **Respec menu:** works after the upstream merge.
+  - **Frame rate:** 108–117 FPS, worst frame ~16–22 ms.
+- **Still not verified in game:**
+  - A refund with a full inventory or storage. Gems and materials then go to storage. A gem with no room anywhere stops the refund, and the weapon stays as it is.
+  - Fitting a gem in a new gun slot. The test character had no droplet gem.
+  - Whether the messengers Asad sees vanish by the 5 m rule (`BB_MESSENGER_RADIUS`).
+  - The AppImage build does not ship `tools/respec_mod.py` or soulstruct, so the Doll's new options are missing there. Asad doesn't use the AppImage.
 
 - **Online in the real game (2026-10-09, US 1.09, local server):** NP sign-in, `ss.info` (`/bb-us/ss.info`), `/basic_utils/login` and `/basic_utils/sync_chara_id` (needs `PublishCharacterIdList` of `PublishCharaId`) are accepted. Next blocker: the `BloodMessSearchAdd` response (`/blood_messenger/exist_messages`) is rejected ("Failed to record note search information") even with `LostBloodMessIdList: []`; the parser takes the array (type 6) at image 0x1e84f12, so the cause is elsewhere (ResKind meaning?). Response keys are UTF-16 in the eboot at file offset 0x49d0d40. Reach it with the title, main menu Log In, then Continue (the title remembers Play Offline).
 

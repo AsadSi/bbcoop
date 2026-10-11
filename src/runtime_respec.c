@@ -355,6 +355,8 @@ static void make_endgame_character(uint64_t pgd) {
         {CATEGORY_WEAPON, 7011000, 1},  /* Uncanny Saw Cleaver +10 */
         {CATEGORY_WEAPON, 14001000, 1}, /* Hunter Pistol +10 */
         {CATEGORY_WEAPON, 23000500, 1}, /* Beasthunter Saif +5 (DLC) */
+        {CATEGORY_WEAPON, 15000100, 1}, /* Cannon +1: gun gems (tools/respec_mod.py) open a slot */
+        {CATEGORY_WEAPON, 18101000, 1}, /* Flamesprayer +10: likewise */
         {CATEGORY_GOODS, RESPEC_GOODS_SHARD, 2},
         {CATEGORY_GOODS, 4103, 1},      /* Blood Gem Workshop Tool */
     };
@@ -391,6 +393,16 @@ static void make_endgame_character(uint64_t pgd) {
         }
         printf("Respec: BB_TEST_ENDGAME: gem %#x fitted in the Uncanny Saw Cleaver +10\n", read_u32(weapon, 0x3C));
     } else printf("Respec: BB_TEST_ENDGAME: no open Radial slot for a gem\n");
+    /* Gun gems: the slotless guns get the pistol's slot from +1 when the mod is in (BB_GUN_GEMS). */
+    static const int32_t guns[] = {15000100, 18101000};
+    for (size_t i = 0; i < sizeof(guns) / sizeof(guns[0]); ++i) {
+        int32_t index = find_weapon(pgd, guns[i]);
+        uint64_t gun = index >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
+                                                                  (uint32_t)index), 0) & 0xFFFF) * 8) : 0;
+        uint32_t type = gun >= 0x10000 ? read_u32(gun, 0x38) : 0;
+        printf("Respec: BB_TEST_ENDGAME: gun %d first gem slot %#x (%s)\n", guns[i], type,
+               gun < 0x10000 ? "weapon not found" : type & 0x80000000u ? "closed" : "open");
+    }
     /* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
      * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
      * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
