@@ -63,7 +63,7 @@ what's still open.
   `BB_CAMERA_TRACE=1` logs the camera's frame time, rates, ramp and yaw. `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
   `docs/messengers_re.md`).
   `BB_IK_HEIGHT` (`src/runtime_ik.c`, `docs/animation_re.md`): characters' foot-IK height correction gains
-  follow the frame time by default; `0` turns the correction off (diagnostic), `vanilla` keeps the per-frame gains.
+  follow the frame time by default; `0` or `off` turns the correction off (diagnostic), `vanilla` keeps the per-frame gains.
 - Tests on the Mac: `scripts/docker-test.sh` runs the x86-64 build and C tests.
 
 ## References (siblings, read-only, shallow clones)

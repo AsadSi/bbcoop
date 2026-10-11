@@ -10,7 +10,7 @@
  *   on = 1 - (1 - 0.1)^(dt * 30), off = 0.6^(dt * 30), the game's own gains at 30 FPS.
  * They are computed from the game's constants each call, with no shared state, so character updates on
  * several threads stay correct (a character with another time scale may take another's gains for a frame).
- *   BB_IK_HEIGHT=0        no height correction at all (gains 0; feet may float on slopes): a diagnostic
+ *   BB_IK_HEIGHT=0 (off)  no height correction at all (gains 0; feet may float on slopes): a diagnostic
  *   BB_IK_HEIGHT=vanilla  the game's per-frame gains
  * Every site's bytes are checked before anything is written; any mismatch leaves the game vanilla. */
 #define _GNU_SOURCE
@@ -54,7 +54,8 @@ void ik_gains_for(float dt, float *on, float *off) {
 
 static void chr_ctrl_update(HookRegs *regs) {
     float dt = hook_saved_xmm(regs, 0)[0];
-    if (!(dt > 0.0005f && dt < 0.25f)) return; /* no frame time worth rescaling for: the last gains */
+    /* dt 0 (a character in hit-stop or frozen by its time module): on 0, off 1, the correction pauses. */
+    if (!(dt >= 0.0f && dt < 0.25f)) return; /* no usable frame time: the last gains */
     float on, off;
     ik_gains_for(dt, &on, &off);
     __atomic_store(&gains[0], &on, __ATOMIC_RELAXED);
@@ -63,7 +64,8 @@ static void chr_ctrl_update(HookRegs *regs) {
 
 const char *ik_install(unsigned char *image, uint64_t size) {
     const char *env = getenv("BB_IK_HEIGHT");
-    int vanilla = env && !strcmp(env, "vanilla"), none = env && !strcmp(env, "0");
+    int vanilla = env && !strcmp(env, "vanilla");
+    int none = env && (!strcmp(env, "0") || !strcmp(env, "off") || !strcmp(env, "false"));
     if (vanilla) {
         printf("IK height: vanilla (BB_IK_HEIGHT=vanilla)\n");
         return NULL;

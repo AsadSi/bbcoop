@@ -31,7 +31,10 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
   on the ChrCtrl::Update entry writes `ON = 1 − 0.9^(30·dt)` and `OFF = 0.6^(30·dt)` from that call's dt before every
   character update. The gains are computed from the game's constants with no shared state, because characters may update
   on several threads.
-- **Switches:** `BB_IK_HEIGHT=0` sets both gains to 0, which turns the correction off (a diagnostic; feet may float on
+- **Frozen characters:** a character in hit-stop gets dt 0, so on = 0 and off = 1, and its correction pauses with it.
+- **Debug menu:** with "Restore Debug Menu", the menu's two gain items point at the globals, and the hook overwrites any edit
+  at the next character update.
+- **Switches:** `BB_IK_HEIGHT=0` (or `off`) sets both gains to 0, which turns the correction off (a diagnostic; feet may float on
   slopes). `BB_IK_HEIGHT=vanilla` keeps the per-frame gains. `tests/test_ik.c` covers this.
 
 ## Candidate 2: our Uncap FPS++ is out of date

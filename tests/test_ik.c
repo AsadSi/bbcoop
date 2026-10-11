@@ -55,11 +55,13 @@ int main(void) {
     assert(gain(image, 0) == on && gain(image, 1) == off);
     update(NULL, 1.0f / 30.0f);
     assert(near(gain(image, 0), 0.1f) && near(gain(image, 1), 0.6f));
-    /* Out-of-range frame times leave the last gains. */
-    update(NULL, 0.0f);
+    /* Out-of-range frame times leave the last gains; dt 0 pauses the correction. */
     update(NULL, NAN);
     update(NULL, 1.0f);
+    update(NULL, -0.01f);
     assert(near(gain(image, 0), 0.1f) && near(gain(image, 1), 0.6f));
+    update(NULL, 0.0f);
+    assert(gain(image, 0) == 0.0f && gain(image, 1) == 1.0f);
 
     /* One site differs: nothing is written. */
     image = fresh();
@@ -76,6 +78,10 @@ int main(void) {
     image = fresh();
     assert(!ik_install(image, SIZE));
     assert(gain(image, 0) == 0.0f && gain(image, 1) == 0.0f && !memcmp(image + 0x1514DA0, entry, 10));
+    setenv("BB_IK_HEIGHT", "off", 1);
+    image = fresh();
+    assert(!ik_install(image, SIZE));
+    assert(gain(image, 0) == 0.0f && gain(image, 1) == 0.0f);
     setenv("BB_IK_HEIGHT", "vanilla", 1);
     image = fresh();
     assert(!ik_install(image, SIZE));
