@@ -45,6 +45,7 @@ const char *seamless_apply(unsigned char *image, uint64_t size); /* bbcoop: runt
 const char *seamless_hooks_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_seamless_hooks.c */
 const char *camera_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_camera.c */
 const char *messenger_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_messenger.c */
+const char *ik_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_ik.c */
 const char *respec_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_respec.c */
 
 /* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
@@ -555,6 +556,7 @@ int main(int argc, char **argv) {
     { const char *error = respec_install(image, size); if (error) fail(error); } /* bbcoop: BB_RESPEC=0 skips */
     { const char *error = camera_install(image, size); if (error) fail(error); } /* bbcoop: docs/camera_re.md */
     messenger_install(image, size); /* bbcoop: BB_MESSENGER_RADIUS */
+    { const char *error = ik_install(image, size); if (error) fail(error); } /* bbcoop: docs/animation_re.md */
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);

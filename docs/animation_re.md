@@ -24,9 +24,15 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
   further and faster. No patch touches this.
 - **Scope:** characters only (the Doll c8030, the bath messengers c8050). The note and bloodstain messengers
   (SprjObjMessenger) have no ChrCtrl.
-- **Fix idea:** byte-check both globals; each frame write `ON = 1 − 0.9^(30·dt)` and `OFF = 0.6^(30·dt)`, keeping the
-  game's own value as the base (as `src/runtime_camera.c` does). A diagnostic switch would set both to 0, which turns the
-  correction off; feet may then float on slopes.
+- **Checked by hand:** the two readers are `0x1515182` (`vmulss xmm0, xmm2, [rip+0x3c1299e]` → `0x5127b28`) and `0x1515195`
+  (`vmovss xmm0, [rip+0x3c1298f]` → `0x5127b2c`). `+0x1dc` is reset each frame (`0x151501d`/`0x1515059`) before err is
+  added (`0x15151e8`). The globals are in the RW segment (vaddr `0x50dc000`+, file offset = vaddr + 0x4000).
+- **Fix (`src/runtime_ik.c`):** all five sites (the update entry, both gains, both readers) are byte-checked first. Then a hook
+  on the ChrCtrl::Update entry writes `ON = 1 − 0.9^(30·dt)` and `OFF = 0.6^(30·dt)` from that call's dt before every
+  character update. The gains are computed from the game's constants with no shared state, because characters may update
+  on several threads.
+- **Switches:** `BB_IK_HEIGHT=0` sets both gains to 0, which turns the correction off (a diagnostic; feet may float on
+  slopes). `BB_IK_HEIGHT=vanilla` keeps the per-frame gains. `tests/test_ik.c` covers this.
 
 ## Candidate 2: our Uncap FPS++ is out of date
 - **What changed:** shadps4-emu/ps4_cheats commit `87bdf80` (2026-10-10) added the timestep fixes from

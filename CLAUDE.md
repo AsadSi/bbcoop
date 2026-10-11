@@ -16,6 +16,7 @@ what's still open.
   `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`),
   `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
   `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
+  `runtime_ik.c` (the foot-IK height correction at uncapped frame rates, `docs/animation_re.md`),
   and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
   files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
@@ -59,6 +60,8 @@ what's still open.
   Uncapped defaults to 120 (`run.sh`; the launcher's 0 keeps that default), `BB_FPS_LIMIT=0` means no limit.
   `BB_CAMERA_TRACE=1` logs the camera's frame time, rates, ramp and yaw. `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
   `docs/messengers_re.md`).
+  `BB_IK_HEIGHT` (`src/runtime_ik.c`, `docs/animation_re.md`): characters' foot-IK height correction gains
+  follow the frame time by default; `0` turns the correction off (diagnostic), `vanilla` keeps the per-frame gains.
 - Tests on the Mac: `scripts/docker-test.sh` runs the x86-64 build and C tests.
 
 ## References (siblings, read-only, shallow clones)
