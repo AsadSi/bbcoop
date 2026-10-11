@@ -1,4 +1,5 @@
 from paths import ROOT
+import re
 import struct
 import tempfile
 import unittest
@@ -96,7 +97,8 @@ class DebugPatchTests(unittest.TestCase):
         writes = compile_patches(XML, camera, '01.09', SEGMENTS)
         self.assertGreater(len(writes), 0)
         camera_bytes = {offset+i: byte for offset, data in writes for i, byte in enumerate(data)}
-        for patch in ('Uncap FPS++', '60 FPS++', '90 FPS++', 'Restore Debug Menu (READ NOTES)'):
+        for patch in ('Uncap FPS++', 'Uncap FPS++ (2026-08-28)', '60 FPS++', '90 FPS++', '120 FPS++',
+                      'Restore Debug Menu (READ NOTES)'):
             for offset, data in compile_patches(XML, [patch], '01.09', SEGMENTS):
                 for i, byte in enumerate(data):
                     if offset+i in camera_bytes:
@@ -129,6 +131,68 @@ class DebugPatchTests(unittest.TestCase):
     def test_conflicting_enemy_control_patch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'conflicts with Enemy Control'):
             validate_patch_requirements(['Enemy Control', 'Restore Debug Camera'], Path('.'))
+
+
+def covered(names):
+    return {offset+i: byte for offset, data in compile_patches(XML, names, '01.09', SEGMENTS)
+            for i, byte in enumerate(data)}
+
+
+def runtime_sites():
+    """(file, name, image offset, length) of the byte-checked sites in src/runtime_*.c."""
+    sites = []
+    for path in sorted((ROOT / 'src').glob('runtime_*.c')):
+        source = path.read_text(encoding='utf-8')
+        defines = dict(re.findall(r'#define\s+(\w+)\s+(0x[0-9A-Fa-f]+)', source))
+        for name, offset, length in re.findall(r'\{\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*(\d+)\s*,', source):
+            value = defines.get(offset, offset)
+            if value.startswith('0x'):
+                sites.append((path.name, name, int(value, 16), int(length)))
+    return sites
+
+
+class FpsPatchTests(unittest.TestCase):
+    """bbcoop: the current Uncap FPS++ (ps4_cheats 2026-10-10) by default, BB_FPS_PATCH=old the previous."""
+    NEW = ['Uncap FPS++']
+    OLD = ['Uncap FPS++ (2026-08-28)', 'Sprint Fix (High FPS)']
+
+    def test_uncap_preset_selects_the_current_patch_by_default(self):
+        self.assertEqual(patches.fps_patches('uncap', {}), self.NEW)
+        self.assertEqual(patches.fps_patches('uncap', {'BB_FPS_PATCH': 'new'}), self.NEW)
+        # The sprint fix is part of it now.
+        sprint = covered(['Sprint Fix (High FPS)'])
+        uncap = covered(self.NEW)
+        self.assertTrue(all(uncap.get(a) == b for a, b in sprint.items()))
+
+    def test_old_switch_selects_the_previous_patch(self):
+        self.assertEqual(patches.fps_patches('uncap', {'BB_FPS_PATCH': 'old'}), self.OLD)
+        # Only the uncapped preset has an old version.
+        self.assertEqual(patches.fps_patches('90', {'BB_FPS_PATCH': 'old'}), patches.FPS_PRESETS['90'])
+        self.assertEqual(patches.fps_patches('120', {}), ['120 FPS++'])
+        for names in (self.NEW, self.OLD, ['120 FPS++']):
+            self.assertGreater(len(compile_patches(XML, names, '01.09', SEGMENTS)), 100, names)
+
+    def test_no_overlap_with_the_other_uncap_patches_or_runtime_sites(self):
+        others = [n for pair in patches.EFFECTS.values() for n in pair if n]
+        others += list(patches.MODEL_LOD.values())
+        others += [patches.INTEL_TONEMAP, patches.SKIP_NETWORK_CHOICE, RESOLUTION_TEMPLATE,
+                   'Increased Graphics Heap Sizes']
+        sites = runtime_sites()
+        self.assertGreater(len(sites), 40)
+        for names in (self.NEW, self.OLD):
+            fps = covered(names)
+            for other in others:
+                with self.subTest(fps=names[0], other=other):
+                    self.assertFalse(set(fps) & set(covered([other])))
+            for path, name, offset, length in sites:
+                with self.subTest(fps=names[0], site=name):
+                    self.assertFalse(set(range(offset, offset + length)) & set(fps), path)
+
+    def test_dead_broken_call_is_left_out(self):
+        # Upstream's 0x02715D71 call has its rel32 overwritten by the following 0x02715D75 line.
+        writes = compile_patches(XML, self.NEW, '01.09', SEGMENTS)
+        self.assertNotIn(0x02715D71 - EBOOT_BASE, [offset for offset, _ in writes])
+        self.assertEqual(covered(self.NEW)[0x02715D75 - EBOOT_BASE], 0x8F)
 
 
 EXTERNAL = """<?xml version="1.0"?>

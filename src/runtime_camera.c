@@ -8,8 +8,9 @@
  *   tuned for 30 FPS, so at 120 FPS they are about 4x snappier. A hook on the camera update
  *   (0x143ac60, rdi = camera, xmm0 = frame time) rescales each fraction to the frame time:
  *   rate' = 1 - (1 - rate)^(dt * 30), which equals the game's own rate at 30 FPS.
- *   BB_CAMERA_RATES=0 turns it off; run.sh does for the fixed 30/60/90 FPS modes, whose patches tune
- *   the rates themselves.
+ *   BB_CAMERA_RATES=0 turns it off; run.sh does for the fixed 60/90/120 FPS modes, whose patches tune
+ *   the rates themselves. The current Uncap FPS++ scales four of the five by the frame time itself; the
+ *   hook leaves every field whose read the patch replaced (checked at install) and rescales the rest.
  * Every site's bytes are checked before anything is written; any mismatch leaves the camera vanilla.
  * BB_CAMERA_TRACE=1 logs the camera's state from the hook about twice a second. */
 #define _GNU_SOURCE
@@ -50,7 +51,24 @@ const unsigned camera_rate_fields[CAMERA_RATE_FIELDS] = {
     0x330, /* LockCamParam interpolation, 0.05 (0x143ae75) */
 };
 
-/* "Uncap FPS++" (patches/Bloodborne.xml, at 0x1440799) halves DirectPitchRate to 0.03 for ~60 FPS;
+/* Where the update reads each fraction (9-byte vmovss/vmulss [r13 + field]). The current Uncap FPS++ and
+ * 120 FPS++ (2026-10-10) replace the reads of 0x240, 0x1a8, 0x23c and 0x330 with jumps to their own
+ * frame-time scaling; the XML patches are applied first, so a field whose read is no longer the game's is
+ * left to the patch, and the hook only rescales the others (0x288). */
+static const struct { unsigned field; uint64_t offset; unsigned char original[9]; } rate_reads[] = {
+    {0, 0x143c30f, {0xC4,0x41,0x7A,0x10,0x95,0x40,0x02,0x00,0x00}},
+    {0, 0x143c784, {0xC4,0xC1,0x7A,0x10,0xAD,0x40,0x02,0x00,0x00}},
+    {1, 0x143cef0, {0xC4,0xC1,0x7A,0x59,0x85,0xA8,0x01,0x00,0x00}},
+    {2, 0x143f97e, {0xC4,0xC1,0x7A,0x59,0x85,0x3C,0x02,0x00,0x00}},
+    {2, 0x143fa9f, {0xC4,0xC1,0x72,0x59,0x8D,0x3C,0x02,0x00,0x00}},
+    {3, 0x143c9e6, {0xC4,0xC1,0x7A,0x10,0x95,0x88,0x02,0x00,0x00}},
+    {4, 0x143ae75, {0xC4,0xC1,0x7A,0x10,0xA5,0x30,0x03,0x00,0x00}},
+};
+
+/* The fields the hook rescales (bit i: camera_rate_fields[i]); all unless a patch took a field's reads. */
+static unsigned active_fields = (1u << CAMERA_RATE_FIELDS) - 1;
+
+/* The previous "Uncap FPS++" (2026-08-28, BB_FPS_PATCH=old; patches/Bloodborne.xml, at 0x1440799) halves DirectPitchRate to 0.03 for ~60 FPS;
  * the hook's base is the 30 FPS rate, so that value stands for the vanilla 0.06. */
 static const struct { unsigned field; uint32_t patched, vanilla; } patched_bases[] = {
     {2, 0x3CF5C28F, 0x3D75C28F},
@@ -83,6 +101,7 @@ void camera_rates_apply(unsigned char *camera, float dt) {
     if (!(dt > 0.0005f && dt < 0.25f)) return; /* no frame time worth rescaling for */
     CameraSlot *slot = slot_for((uintptr_t)camera);
     for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i) {
+        if (!(active_fields >> i & 1)) continue;
         float value;
         memcpy(&value, camera + camera_rate_fields[i], 4);
         /* A value other than the one written last is the game's (initialised or reloaded). */
@@ -145,6 +164,18 @@ const char *camera_install(unsigned char *image, uint64_t size) {
         printf("Camera: off: the camera update at %#x does not match Bloodborne 1.09\n", CAMERA_UPDATE);
         return NULL;
     }
+    active_fields = (1u << CAMERA_RATE_FIELDS) - 1;
+    for (size_t i = 0; i < sizeof(rate_reads) / sizeof(rate_reads[0]); ++i)
+        if (rate_reads[i].offset + 9 > size || memcmp(image + rate_reads[i].offset, rate_reads[i].original, 9))
+            active_fields &= ~(1u << rate_reads[i].field);
+    if (rates && active_fields != (1u << CAMERA_RATE_FIELDS) - 1) {
+        printf("Camera: chase rates at");
+        for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i)
+            if (!(active_fields >> i & 1)) printf(" %#x", camera_rate_fields[i]);
+        printf(" are scaled by the frame rate patch\n");
+    }
+    if (!active_fields) rates = 0;
+    if (!ramp && !rates) return NULL;
     if (rates) {
         /* Nothing is written when the stub area or the hook fails: the camera stays vanilla. Only a
          * failed seal, after the jump is in place, stops the game. */

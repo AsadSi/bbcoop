@@ -58,6 +58,8 @@ what's still open.
   leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
   clock instead of the monotonic one (`src/runtime_time.c`), and `BB_FPS_LIMIT` limits frames per second.
   Uncapped defaults to 120 (`run.sh`; the launcher's 0 keeps that default), `BB_FPS_LIMIT=0` means no limit.
+  Uncap FPS++ is ps4_cheats' version of 2026-10-10 (timestep fixes, Sprint Fix built in); `BB_FPS_PATCH=old` selects
+  the previous one, and `BB_FPS=120` applies 120 FPS++ (`docs/animation_re.md`).
   `BB_CAMERA_TRACE=1` logs the camera's frame time, rates, ramp and yaw. `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
   `docs/messengers_re.md`).
   `BB_IK_HEIGHT` (`src/runtime_ik.c`, `docs/animation_re.md`): characters' foot-IK height correction gains

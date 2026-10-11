@@ -16,6 +16,16 @@ static const unsigned char entry[10] = {0x55,0x48,0x89,0xE5,0x41,0x57,0x41,0x56,
 
 /* The update's prologue is followed by its mirror: pop r13; pop r14; pop r15; pop rbp; ret. */
 static const unsigned char epilogue[7] = {0x41,0x5D,0x41,0x5E,0x41,0x5F,0x5D};
+/* The update's reads of the five fractions (vmovss/vmulss [r13 + field]). */
+static const struct { unsigned field; unsigned offset; unsigned char bytes[9]; } reads[] = {
+    {0, 0x143c30f, {0xC4,0x41,0x7A,0x10,0x95,0x40,0x02,0x00,0x00}},
+    {0, 0x143c784, {0xC4,0xC1,0x7A,0x10,0xAD,0x40,0x02,0x00,0x00}},
+    {1, 0x143cef0, {0xC4,0xC1,0x7A,0x59,0x85,0xA8,0x01,0x00,0x00}},
+    {2, 0x143f97e, {0xC4,0xC1,0x7A,0x59,0x85,0x3C,0x02,0x00,0x00}},
+    {2, 0x143fa9f, {0xC4,0xC1,0x72,0x59,0x8D,0x3C,0x02,0x00,0x00}},
+    {3, 0x143c9e6, {0xC4,0xC1,0x7A,0x10,0x95,0x88,0x02,0x00,0x00}},
+    {4, 0x143ae75, {0xC4,0xC1,0x7A,0x10,0xA5,0x30,0x03,0x00,0x00}},
+};
 
 static unsigned char *fresh(void) {
     unsigned char *image = mmap(NULL, SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -25,6 +35,7 @@ static unsigned char *fresh(void) {
     memcpy(image + 0x143AC60, entry, 10);
     memcpy(image + 0x143AC6A, epilogue, 7);
     image[0x143AC71] = 0xC3;
+    for (unsigned i = 0; i < sizeof(reads) / sizeof(reads[0]); ++i) memcpy(image + reads[i].offset, reads[i].bytes, 9);
     return image;
 }
 
@@ -74,6 +85,28 @@ static void install(void) {
     assert(!camera_install(image, SIZE));
     assert(!memcmp(image + 0x143A57B, ramp_off, 10) && !memcmp(image + 0x143AC60, entry, 10));
     unsetenv("BB_CAMERA_RATES");
+
+    /* The current Uncap FPS++ replaces the reads of fields 0, 1, 2 and 4 with jumps: only field 3 is
+     * rescaled. */
+    image = fresh();
+    for (unsigned i = 0; i < sizeof(reads) / sizeof(reads[0]); ++i)
+        if (reads[i].field != 3) memcpy(image + reads[i].offset, "\xE9\x00\x00\x00\x00\x90\x90\x90\x90", 9);
+    assert(!camera_install(image, SIZE));
+    assert(image[0x143AC60] == 0xE9 && !memcmp(image + 0x143A57B, ramp_off, 10));
+    unsigned char patched[0x400] = {0};
+    for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i) set_field(patched, i, 0.3f);
+    update(patched, 1.0f / 120.0f);
+    for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i)
+        assert(near(field(patched, i), i == 3 ? 1.0f - powf(0.7f, 0.25f) : 0.3f));
+
+    /* Every read taken: no hook, the ramp patch only. */
+    image = fresh();
+    for (unsigned i = 0; i < sizeof(reads) / sizeof(reads[0]); ++i) image[reads[i].offset] = 0xE9;
+    assert(!camera_install(image, SIZE));
+    assert(!memcmp(image + 0x143AC60, entry, 10) && !memcmp(image + 0x143A57B, ramp_off, 10));
+
+    /* Back to every field for rates(). */
+    assert(!camera_install(fresh(), SIZE));
 }
 
 static void rates(void) {
