@@ -178,6 +178,7 @@ public:
         std::scoped_lock lock{mutex};
         Image& image = slot_images[image_id];
         TrackImage(image_id);
+        WatchImage(image, "update image (slow path)");
         TouchImage(image);
         RefreshImage(image);
     }
@@ -197,6 +198,7 @@ public:
 
     /// Reuploads image contents.
     void RefreshImage(Image& image);
+    void WatchImage(const Image& image, const char* what);
 
     /// Retrieves the sampler that matches the provided S# descriptor.
     /// extra_lod_bias: bbport, added to the S#'s bias (reduced scene rendering).
@@ -288,6 +290,11 @@ public:
 
     /// Runs the garbage collector.
     void RunGarbageCollector();
+
+    /// bbport: VRAM ran out (BufferCache::AllocateResidency, any thread): for the next 30 s the
+    /// collector evicts by submissions under pressure again, as before 0.5, instead of keeping
+    /// textures unused for seconds.
+    static void NoteVramShort();
 
     template <typename Func>
     void ForEachImageInRegion(VAddr cpu_addr, size_t size, Func&& func) {
@@ -421,6 +428,7 @@ private:
     const bool readback_linear_images;
     PageTable page_table;
     std::mutex mutex;
+    static inline std::atomic<u64> vram_short_until{0}; ///< steady seconds (NoteVramShort)
     // bbport: FindImage results for unchanged image registrations (guarded by `mutex`).
     struct FindImageCacheEntry {
         VAddr address = 0;

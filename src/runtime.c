@@ -178,14 +178,17 @@ static ABI __attribute__((noreturn)) void stack_fail(void) {
 }
 static ABI void *guest_memset(void *dst, int value, size_t size) {
     atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
+    runtime_memory_prepare_cpu_write((uintptr_t)dst, size);
     memset(dst, value, size); runtime_memory_note_cpu_write((uintptr_t)dst, size); return dst;
 }
 static ABI void *guest_memcpy(void *dst, const void *src, size_t size) {
     atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
+    runtime_memory_prepare_cpu_write((uintptr_t)dst, size);
     memcpy(dst, src, size); runtime_memory_note_cpu_write((uintptr_t)dst, size); return dst;
 }
 static ABI void *guest_memmove(void *dst, const void *src, size_t size) {
     atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
+    runtime_memory_prepare_cpu_write((uintptr_t)dst, size);
     memmove(dst, src, size); runtime_memory_note_cpu_write((uintptr_t)dst, size); return dst;
 }
 static ABI int guest_memcmp(const void *a, const void *b, size_t size) {
@@ -241,8 +244,6 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (memory) return memory;
     uintptr_t kernel = runtime_kernel_resolve(name);
     if (kernel) return kernel;
-    uintptr_t net = runtime_net_resolve(name); /* bbcoop: online imports first (runtime_net.c) */
-    if (net) return net;
     uintptr_t services = runtime_services_resolve(name);
     if (services) return services;
     uintptr_t ajm = runtime_ajm_resolve(name);

@@ -5,20 +5,22 @@
 Picks the game folder, edits the port's settings (bbport.ini: upscaler, preset, ...) and the
 start-up tweaks passed as environment variables to run.sh, starts and stops the game and shows
 its output. Launcher settings live in ~/.config/bbport-launcher/settings.json.
-Russian, English and Brazilian Portuguese (bbport_i18n: the Russian text is the key).
+Russian, English, Brazilian Portuguese and Simplified Chinese (bbport_i18n: the Russian
+text is the key).
 """
 
 import json
+import shutil
 import os
 import re
 import signal
 import subprocess
+import threading
 import sys
+import time
 from pathlib import Path
 from bbport_assets import fsr411_problem
-import bbcoop_online
 from bbport_i18n import language, set_language, tr
-from bbport_vulkan import amd_gpu
 
 import gi
 
@@ -30,25 +32,22 @@ PORT_DIR = Path(__file__).resolve().parent.parent  # native_probe (or the packag
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 from mods import discover as discover_mods  # noqa: E402
 import game_check  # noqa: E402
+import online  # noqa: E402  (the online module: addresses and the connection test)
 from patches import external_patches  # noqa: E402
 # Packaged (AppImage): generated files, saves and bbport.ini live in BB_DATA_DIR.
 PACKAGED = bool(os.environ.get("BB_PREBUILT"))
 DATA_DIR = Path(os.environ.get("BB_DATA_DIR", PORT_DIR))
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "bbport-launcher"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
-# bbcoop: the co-op server binary (scripts/build-server.sh) and its data while hosting.
-SERVER_BINARY = Path(os.environ.get("BB_SHADNET_BIN", DATA_DIR / "server" / "build-linux" / "shadnet"))
-SERVER_DIR = CONFIG_DIR / "server"
-COOP_MODES = [("Off", "off"), ("Host", "host"), ("Join", "join")]
 MAX_LOG_LINES = 5000
-# The new memory and translation model runs on AMD GPUs only for now (None: unknown).
-AMD_GPU = amd_gpu()
-PC_MODEL_SUBTITLE = ("Эксперимент, только видеокарты AMD. Видеокарта работает с памятью игры "
-                     "напрямую, как в игре для ПК, а команды графики переводятся, а не "
-                     "эмулируются; возможны ошибки. Выключено — старая модель памяти, как в 0.3, "
-                     "со всеми исправлениями")
-PC_MODEL_NO_AMD = ("Только для видеокарт AMD, а на этом компьютере её нет. Используется старая "
-                   "модель памяти, как в 0.3, со всеми исправлениями")
+# The memory model (run.sh: BB_PC_MODEL): "auto" leaves it to the GPU (the new one on AMD, the
+# 0.3 one elsewhere), or either by hand. The new one goes through the layer's memory module on
+# every GPU (no sparse binding of the game's memory; BB_LAYER_MEMORY=0: AMD's sparse arena).
+PC_MODEL_SUBTITLE = ("Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды "
+                     "графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми "
+                     "исправлениями. Если драйвер не проходит проверку при запуске — старая")
+MEMORY_MODELS = [("Авто: новая на AMD, старая на других", "auto"), ("Новая", "new"),
+                 ("Старая (как в 0.3)", "old")]
 # FSR 4.1.1 assets built from the user's AMD DLL (tools/fsr4cap, also in the package).
 FSR4CAP_DIR = PORT_DIR / "tools" / "fsr4cap"
 sys.path.insert(0, str(FSR4CAP_DIR))
@@ -79,8 +78,10 @@ FSR411_BUILD_ERRORS = {
 }
 
 # Choices: (label, value). The first entry is the default. Labels are translated when shown.
-UI_LANGUAGES = [("Как в системе", ""), ("Русский", "ru"), ("English", "en"), ("Português (Brasil)", "pt_BR")]
+UI_LANGUAGES = [("Как в системе", ""), ("Русский", "ru"), ("English", "en"), ("Português (Brasil)", "pt_BR"),
+                ("简体中文", "zh_CN")]
 UPSCALERS = [("FSR 4", "fsr4"), ("FSR 4.1.1", "fsr411"), ("FSR 3", "fsr3"),
+             ("DLSS (NVIDIA RTX)", "dlss"),
              ("TAA (нативное сглаживание)", "taa"), ("Выключен", "off")]
 PRESETS = [("Native AA", 0), ("Quality (x1.5)", 1), ("Balanced (x1.7)", 2),
            ("Performance (x2)", 3), ("Ultra Performance (x3)", 4)]
@@ -129,6 +130,8 @@ DEFAULTS = {
     "present_mode": "Mailbox",
     "gamepad": "",
     "gamepad_name": "",
+    "display": "",
+    "skip_network_choice": True,
     "fps_mode": "uncap",
     "fps_limit": 120,  # bbcoop: uncapped frames above 120 FPS sped the camera up
     "draw_pipe": "",
@@ -138,14 +141,20 @@ DEFAULTS = {
     "frame_stats": False,
     "save_log": False,
     "crash_diag": False,
-    "pc_model": False,
+    "memory_model": "auto",
     "as_0_3": False,
     "gpu_profile": False,
     "vk_validation": False,
     "extra_env": "",
-    # bbcoop: online co-op (launcher/bbcoop_online.py)
-    "coop_mode": "off", "coop_name": "", "coop_host": "", "coop_join_invite": "",
-    "coop_invite": "", "coop_password": "",
+    # Online play (Online page, the online module gpu/bbnet): off by default; shadPS4's public
+    # shadNet server and The Hunter's Dream.
+    "online": False,
+    "online_community": online.COMMUNITY_SERVER,
+    "online_server": online.SHADNET_SERVER,
+    "online_webapi": "",
+    "online_npid": "",
+    "online_password": "",
+    "online_upnp": True,
 }
 
 # bbport.ini keys the launcher edits; the rest of the file is kept.
@@ -159,6 +168,9 @@ INI_DEFAULTS = {
     "output_res": "1920x1080",
     "model_lod": "0",
     "live_resolution": "0",
+    "mouse_look": "1",
+    "mouse_sensitivity": "1.00",
+    "mouse_invert_y": "0",
     **{key: "1" if default else "0" for key, _, default in EFFECTS},
 }
 
@@ -166,7 +178,7 @@ INI_DEFAULTS = {
 def load_settings():
     settings = dict(DEFAULTS)
     try:
-        settings.update(json.loads(CONFIG_FILE.read_text()))
+        settings.update(json.loads(CONFIG_FILE.read_text(encoding='utf-8')))
     except (OSError, ValueError):
         pass
     return settings
@@ -174,7 +186,9 @@ def load_settings():
 
 def save_settings(settings):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False))
+    CONFIG_FILE.touch(mode=0o600)
+    CONFIG_FILE.chmod(0o600)  # it holds the shadNet password
+    CONFIG_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def ini_path():
@@ -185,7 +199,7 @@ def load_ini():
     values = dict(INI_DEFAULTS)
     lines = []
     try:
-        lines = ini_path().read_text().splitlines()
+        lines = ini_path().read_text(encoding='utf-8').splitlines()
     except OSError:
         pass
     for line in lines:
@@ -214,11 +228,33 @@ def save_ini(values, lines):
     for key, value in values.items():
         if key not in written and value is not None:
             out.append(f"{key}={value}")
-    ini_path().write_text("\n".join(out) + "\n")
+    ini_path().write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 def patches_dir(settings):
     return Path(settings.get("patches_dir") or DATA_DIR / "patches").expanduser()
+
+
+# DLSS (vk_dlss.cpp): the bridge (libbbport_dlss.so) and NVIDIA's runtime library
+# libnvidia-ngx-dlss.so.<version>, beside bb-probe (the package, a build with DLSS_SDK_ROOT) or the
+# player's own in <user>/dlss, which the game prefers. Linux needs the .so from NVIDIA's DLSS SDK
+# (github.com/NVIDIA/DLSS, lib/Linux_x86_64/rel); a game's nvngx_dlss.dll is Windows-only.
+NGX_PREFIX = "libnvidia-ngx-dlss.so."
+DLSS_SDK_URL = "https://github.com/NVIDIA/DLSS/tree/main/lib/Linux_x86_64/rel"
+
+
+def binaries_dir():
+    return PORT_DIR / ("bin" if PACKAGED else "out")
+
+
+def ngx_libraries(directory):
+    """NVIDIA's DLSS runtime libraries in directory, newest version last."""
+    def version(path):
+        return tuple(int(p) if p.isdigit() else 0 for p in path.name[len(NGX_PREFIX):].split("."))
+    try:
+        return sorted((p for p in Path(directory).iterdir() if p.name.startswith(NGX_PREFIX)), key=version)
+    except OSError:
+        return []
 
 
 def fsr411_dir():
@@ -246,6 +282,11 @@ def fsr411_build_command(upscaler, loader=None):
     return command + ([str(loader)] if loader else []), env
 
 
+def online_module():
+    """The online module beside the GPU library (gpu/bbnet; a build without its libraries has none)."""
+    return (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / "libbbnet.so").is_file()
+
+
 def game_environment(s):
     """Environment for run.sh from the launcher settings."""
     env = dict(os.environ)
@@ -264,6 +305,9 @@ def game_environment(s):
     env["BB_PRESENT_MODE"] = s["present_mode"]
     if s.get("gamepad"):
         env["BB_GAMEPAD"] = s["gamepad"]
+    if s.get("display"):
+        env["BB_DISPLAY"] = s["display"]
+    env["BB_SKIP_NETWORK_CHOICE"] = "1" if s.get("skip_network_choice", True) else "0"
     if s["hdr"]:
         env["BB_HDR"] = "1"
     env["BB_FPS"] = s["fps_mode"]
@@ -280,10 +324,13 @@ def game_environment(s):
         env["BB_FRAME_STATS"] = "1"
     if s.get("save_log"):
         env["BB_SAVE_LOG"] = "1"
-    # The new memory and translation model (experimental, AMD GPUs only, off by default); the
-    # model of 0.3 with the fixes made since otherwise. "pc_memory", "old_memory_model",
-    # "new_memory_model" and "legacy_memory_model" of older settings are ignored.
-    env["BB_PC_MODEL"] = "1" if s.get("pc_model") and AMD_GPU is not False else "0"
+    # The memory model: "auto" is run.sh's choice by GPU (the new one on AMD, the 0.3 one
+    # elsewhere). "pc_model", "pc_memory", "old_memory_model", "new_memory_model" and
+    # "legacy_memory_model" of older settings are ignored (0.5: auto for everyone).
+    # BB_PC_MODEL from the shell (or the extra variables) still wins over "auto".
+    model = s.get("memory_model", "auto")
+    if model in ("new", "old"):
+        env["BB_PC_MODEL"] = "1" if model == "new" else "0"
     # Synchronisation and memory as released in 0.3 (run.sh: BB_AS_0_3), for comparisons.
     if s.get("as_0_3"):
         env["BB_AS_0_3"] = "1"
@@ -295,7 +342,16 @@ def game_environment(s):
         env["BB_GPU_PROFILE"] = "1"
     if s["vk_validation"]:
         env["BB_VK_VALIDATION"] = "1"
-    env.update(bbcoop_online.environment(s))
+    if s.get("online") and online_module():
+        server = s["online_server"].strip() or online.SHADNET_SERVER
+        community = online.community_address(s["online_community"])
+        env["BB_ONLINE"] = "1"
+        env["BB_SHADNET_SERVER"] = server
+        env["BB_SHADNET_WEBAPI"] = online.webapi_setting(s["online_webapi"], server, community)
+        env["BB_SHADNET_NPID"] = s["online_npid"].strip()
+        env["BB_SHADNET_PASSWORD"] = s["online_password"]
+        env["BB_UPNP"] = "1" if s["online_upnp"] else "0"
+        env["BB_COMMUNITY_SERVER"] = community
     for item in s["extra_env"].split():
         if "=" in item:
             key, value = item.split("=", 1)
@@ -341,23 +397,24 @@ def combo_value(row):
 
 
 # Controls (runtime_pad.c): input, label, default keyboard keys, default gamepad buttons (SDL names).
-# bbport.ini key.<input>= / pad.<input>= replace a default; no line keeps it.
+# bbport.ini key.<input>= / pad.<input>= replace a default; no line keeps it. Mouse buttons and the
+# wheel are keys ("Mouse Left", "Wheel Down"); they act while the game holds the mouse.
 CONTROLS = [
     ("cross", "Крест", "Space", "a"),
     ("circle", "Круг", "Left Shift", "b"),
     ("square", "Квадрат", "E", "x"),
     ("triangle", "Треугольник", "Q", "y"),
-    ("l1", "L1", "1", "leftshoulder"),
-    ("r1", "R1", "3", "rightshoulder"),
-    ("l2", "L2", "R", "lefttrigger"),
-    ("r2", "R2", "F", "righttrigger"),
+    ("l1", "L1", "1, Mouse X2", "leftshoulder"),
+    ("r1", "R1", "3, Mouse Left", "rightshoulder"),
+    ("l2", "L2", "R, Mouse Right", "lefttrigger"),
+    ("r2", "R2", "F, Mouse X1", "righttrigger"),
     ("l3", "L3", "Z", "leftstick"),
-    ("r3", "R3", "C", "rightstick"),
+    ("r3", "R3", "C, Mouse Middle", "rightstick"),
     ("options", "Options", "Return", "start"),
     ("touchpad", "Тачпад, левая половина (жесты)", "Tab", "back, touchpad"),
     ("touchpad_right", "Тачпад, правая половина (личные вещи)", "Backspace", ""),
-    ("up", "Крестовина вверх", "I", "dpup"),
-    ("down", "Крестовина вниз", "K", "dpdown"),
+    ("up", "Крестовина вверх", "I, Wheel Up", "dpup"),
+    ("down", "Крестовина вниз", "K, Wheel Down", "dpdown"),
     ("left", "Крестовина влево", "J", "dpleft"),
     ("right", "Крестовина вправо", "L", "dpright"),
     ("move_up", "Движение вперёд", "W", None),
@@ -379,6 +436,21 @@ def connected_gamepads():
     except (OSError, subprocess.SubprocessError):
         return []
     return [tuple(line.split("\t", 1)) for line in run.stdout.splitlines() if "\t" in line]
+
+
+def connected_displays():
+    """(BB_DISPLAY value, label) of the monitors (bb-gpu-capabilities --displays), [] if unknown.
+    The value is the monitor's name, or its number when two monitors share a name."""
+    tool = PORT_DIR / ("bin" if PACKAGED else "out") / "bb-gpu-capabilities"
+    try:
+        run = subprocess.run([str(tool), "--displays"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    rows = [line.split("\t") for line in run.stdout.splitlines() if line.count("\t") == 2]
+    names = [name for name, _, _ in rows]
+    return [(name if names.count(name) == 1 else str(number),
+             f"{number}: {name} ({size})" + (tr(", основной") if primary == "1" else ""))
+            for number, (name, size, primary) in enumerate(rows, 1)]
 
 
 class FolderList:
@@ -407,7 +479,6 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.ini, self.ini_lines = load_ini()
         self.process = None
         self.stream = None
-        self.server = None  # bbcoop: the co-op server while hosting
         self.fsr411_build = None  # tools/fsr4cap/build_assets.sh while it runs
         self.build()
         self.connect("close-request", self.on_close)
@@ -429,10 +500,11 @@ class LauncherWindow(Adw.ApplicationWindow):
         toolbar.set_content(self.toasts)
         self.set_content(toolbar)
 
-        log_text = self.log_view.get_buffer().get_text(
-            *self.log_view.get_buffer().get_bounds(), False) if hasattr(self, "log_view") else ""
+        log_text = self.log_text() if hasattr(self, "log_view") else ""
         self.stack.add_titled_with_icon(self.build_settings_page(), "settings", tr("Настройки"),
                                         "preferences-system-symbolic")
+        self.stack.add_titled_with_icon(self.build_online_page(), "online", tr("Онлайн"),
+                                        "network-workgroup-symbolic")
         self.stack.add_titled_with_icon(self.build_log_page(), "log", tr("Журнал"),
                                         "utilities-terminal-symbolic")
         self.log_view.get_buffer().set_text(log_text)
@@ -451,67 +523,6 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.launch_button.set_sensitive(self.fsr411_build is None)
         if hasattr(self, "fsr411_button"):
             self.fsr411_button.set_sensitive(not running)
-
-    # --- co-op (bbcoop) -------------------------------------------------------------------
-
-    def build_coop_group(self):
-        if bbcoop_online.ensure_secrets(self.settings):
-            save_settings(self.settings)
-        group = Adw.PreferencesGroup(
-            title="Co-op", description="Play the whole game together. The host shares an address and "
-                                       "invite code; friends enter them. Connect over Tailscale.")
-        self.coop_mode_row = combo_row("Mode", None, COOP_MODES, self.settings["coop_mode"])
-        self.coop_mode_row.connect("notify::selected", lambda *_: self.update_coop_rows())
-        group.add(self.coop_mode_row)
-        self.coop_name_row = Adw.EntryRow(title="Player name", text=self.settings["coop_name"])
-        group.add(self.coop_name_row)
-        self.coop_share_row = Adw.ActionRow(title="Share with friends")
-        self.coop_share_row.add_suffix(flat_button("edit-copy-symbolic", "Copy", self.on_copy_coop_share))
-        group.add(self.coop_share_row)
-        self.coop_host_row = Adw.EntryRow(title="Host address", text=self.settings["coop_host"])
-        group.add(self.coop_host_row)
-        self.coop_invite_row = Adw.EntryRow(title="Invite code", text=self.settings["coop_join_invite"])
-        group.add(self.coop_invite_row)
-        self.update_coop_rows()
-        return group
-
-    def update_coop_rows(self):
-        mode = combo_value(self.coop_mode_row)
-        self.coop_name_row.set_visible(mode != "off")
-        self.coop_share_row.set_visible(mode == "host")
-        self.coop_host_row.set_visible(mode == "join")
-        self.coop_invite_row.set_visible(mode == "join")
-        if mode == "host":
-            self.coop_share = f"{bbcoop_online.share_address()}  ·  {self.settings['coop_invite']}"
-            self.coop_share_row.set_subtitle(f"Address and invite code: {self.coop_share}")
-
-    def on_copy_coop_share(self, _button):
-        self.get_clipboard().set(self.coop_share)
-        self.toasts.add_toast(Adw.Toast(title="Copied"))
-
-    def start_coop_server(self):
-        """Hosting: starts the server before the game. False (with a toast) when it cannot."""
-        error = bbcoop_online.problem(self.settings, SERVER_BINARY)
-        if error:
-            self.toasts.add_toast(Adw.Toast(title=error))
-            return False
-        if self.settings["coop_mode"] != "host":
-            return True
-        SERVER_DIR.mkdir(parents=True, exist_ok=True)
-        self.server = bbcoop_online.HostServer(SERVER_BINARY, SERVER_DIR)
-        try:
-            with open(SERVER_DIR / "server.log", "a") as log:
-                self.server.start(self.settings["coop_invite"], log)
-        except (OSError, RuntimeError) as error:
-            self.server = None
-            self.toasts.add_toast(Adw.Toast(title=f"Co-op server: {error}"))
-            return False
-        return True
-
-    def stop_coop_server(self):
-        if self.server:
-            self.server.stop()
-            self.server = None
 
     # --- settings page -------------------------------------------------------------------
 
@@ -551,17 +562,12 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.language_row = combo_row(tr("Язык системы"), None, LANGUAGES, self.settings["language"])
         game.add(self.language_row)
         page.add(game)
-        page.add(self.build_coop_group())
 
-        # Off: the memory model of 0.3 (with the fixes made since); on: the new one.
+        # Auto: the new memory model on AMD, the 0.3 one elsewhere; or either by hand.
         mode = Adw.PreferencesGroup(title=tr("Режим работы"))
-        self.pc_model_row = Adw.SwitchRow(
-            title=tr("Новая модель памяти и трансляции"),
-            subtitle=tr(PC_MODEL_SUBTITLE if AMD_GPU is not False else PC_MODEL_NO_AMD),
-            active=self.settings.get("pc_model", False) and AMD_GPU is not False)
-        # Without an AMD GPU it shows the mode in use (off); the saved choice is kept.
-        self.pc_model_row.set_sensitive(AMD_GPU is not False)
-        mode.add(self.pc_model_row)
+        self.memory_model_row = combo_row(tr("Модель памяти и трансляции"), tr(PC_MODEL_SUBTITLE),
+                                          MEMORY_MODELS, self.settings.get("memory_model", "auto"))
+        mode.add(self.memory_model_row)
         page.add(mode)
 
         self.mods_group = Adw.PreferencesGroup(
@@ -612,6 +618,12 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.fullscreen_row = Adw.SwitchRow(title=tr("Полноэкранный режим"),
                                             active=self.settings["fullscreen"])
         screen.add(self.fullscreen_row)
+        # Issue #69: the window (and fullscreen) went to the monitor SDL calls primary.
+        self.display_row = Adw.ComboRow(title=tr("Монитор"))
+        self.display_row.add_suffix(flat_button("view-refresh-symbolic", tr("Обновить список"),
+                                                lambda _button: self.fill_displays()))
+        self.fill_displays()
+        screen.add(self.display_row)
         self.present_row = combo_row(tr("Режим показа кадров"), None, PRESENT_MODES,
                                      self.settings["present_mode"])
         screen.add(self.present_row)
@@ -630,7 +642,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         controls.add(self.gamepad_row)
         # Bindings: "Assign" waits for a key or button (bb-gpu-capabilities --read-input).
         self.control_rows = {}
-        for kind, title, icon in (("key", tr("Клавиатура"), "input-keyboard-symbolic"),
+        for kind, title, icon in (("key", tr("Клавиатура и мышь"), "input-keyboard-symbolic"),
                                   ("pad", tr("Геймпад"), "input-gaming-symbolic")):
             expander = Adw.ExpanderRow(title=title,
                                        subtitle=tr("Назначение кнопок; применяется при запуске игры"))
@@ -647,6 +659,25 @@ class LauncherWindow(Adw.ApplicationWindow):
                 self.control_rows[(kind, name)] = (row, default)
                 self.show_control(kind, name)
             controls.add(expander)
+        # Mouse look (runtime_pad.c): a click in the game takes the mouse, F1 lets it go.
+        self.mouse_look_row = Adw.SwitchRow(
+            title=tr("Камера мышью"),
+            subtitle=tr("Щелчок в окне игры захватывает мышь, F1 — отпускает"),
+            active=self.ini.get("mouse_look", "1") == "1")
+        controls.add(self.mouse_look_row)
+        self.mouse_sensitivity_row = Adw.SpinRow.new_with_range(0.1, 10.0, 0.05)
+        self.mouse_sensitivity_row.set_title(tr("Чувствительность мыши"))
+        self.mouse_sensitivity_row.set_digits(2)
+        self.mouse_sensitivity_row.set_value(float(self.ini.get("mouse_sensitivity", "1.0")))
+        controls.add(self.mouse_sensitivity_row)
+        self.mouse_invert_row = Adw.SwitchRow(title=tr("Инвертировать мышь по вертикали"),
+                                              active=self.ini.get("mouse_invert_y") == "1")
+        controls.add(self.mouse_invert_row)
+        def mouse_rows_sensitive(*_):
+            for row in (self.mouse_sensitivity_row, self.mouse_invert_row):
+                row.set_sensitive(self.mouse_look_row.get_active())
+        self.mouse_look_row.connect("notify::active", mouse_rows_sensitive)
+        mouse_rows_sensitive()
         page.add(controls)
 
         upscaler = Adw.PreferencesGroup(
@@ -663,6 +694,15 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.fsr411_row.set_visible((FSR4CAP_DIR / "build_assets.sh").is_file())
         upscaler.add(self.fsr411_row)
         self.update_fsr411_row()
+        # DLSS: NVIDIA's library, chosen like the FSR 4.1.1 DLL (the package may bring one).
+        self.dlss_row = Adw.ActionRow(title=tr("DLSS: библиотека NVIDIA"))
+        self.dlss_row.add_suffix(flat_button("document-open-symbolic", tr("Выбрать файл…"),
+                                             lambda _b: self.choose_ngx()))
+        self.dlss_reset_button = flat_button("edit-undo-symbolic", tr("Убрать выбранную"),
+                                             lambda _b: self.reset_ngx())
+        self.dlss_row.add_suffix(self.dlss_reset_button)
+        upscaler.add(self.dlss_row)
+        self.update_dlss_row()
         self.preset_row = combo_row(tr("Пресет"), None, PRESETS, int(self.ini.get("preset", "4")))
         self.preset_row.connect("notify::selected", lambda *_: self.update_upscaler_status())
         self.output_row.connect("notify::selected", lambda *_: self.update_upscaler_status())
@@ -695,10 +735,16 @@ class LauncherWindow(Adw.ApplicationWindow):
             row = Adw.SwitchRow(title=tr(title),
                                 active=self.ini.get(key, "1" if default else "0") == "1")
             if key == "debug_menu":
-                row.set_subtitle(tr("Установите DbgFont14h.ccm и DbgFont14h.tpf в dvdroot_ps4/font "
-                                    "из мода Nexus #253"))
+                row.set_subtitle(tr("Нужна папка adhoc из мода Nexus #253 (шрифты adhoc/font) — в "
+                                    "dvdroot_ps4 игры или модом; без неё патч не применяется"))
             self.effect_rows[key] = row
             effects.add(row)
+        # The title's "play online / play offline": the port has no PSN.
+        self.skip_network_row = Adw.SwitchRow(
+            title=tr("Пропускать выбор «по сети / вне сети»"),
+            subtitle=tr("Игра сразу открывает главное меню в режиме вне сети (патч игры)"),
+            active=self.settings.get("skip_network_choice", True))
+        effects.add(self.skip_network_row)
         page.add(effects)
 
         frames = Adw.PreferencesGroup(title=tr("Частота кадров"))
@@ -836,6 +882,14 @@ class LauncherWindow(Adw.ApplicationWindow):
                                      int(combo_value(self.preset_row)))
             hint = tr("Ассеты для выбранного режима найдены") if not problem else (
                 tr("{}. Соберите FSR 4.1.1 из своей DLL кнопкой «Выбрать DLL…» ниже").format(problem))
+        elif value == "dlss":
+            # The game looks for the bridge and NVIDIA's library next to bb-probe (vk_dlss.cpp); the
+            # AppImage has neither (NVIDIA's DLSS SDK is not bundled): DLSS then falls back to FSR 3.1.
+            binaries = PORT_DIR / ("bin" if PACKAGED else "out")
+            found = (binaries / "libbbport_dlss.so").is_file() and bool(
+                ngx_libraries(self.user_dir() / "dlss") or ngx_libraries(binaries))
+            hint = tr("DLSS найден (нужна видеокарта NVIDIA RTX)") if found else tr(
+                "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1")
         else:
             hint = tr("Сглаживание в разрешении вывода без модели FSR") if value == "taa" else None
         self.preset_row.set_sensitive(value not in ("taa", "off"))
@@ -869,8 +923,10 @@ class LauncherWindow(Adw.ApplicationWindow):
             tooltip = {
                 "missing_update": tr("Нужно обновление 1.09: скопируйте файлы дампа обновления 1.09 в папку игры с заменой (найдена версия {})").format(version),
                 "wrong_eboot": tr("eboot.bin не от версии 1.09: скопируйте eboot.bin из дампа обновления 1.09 в папку игры с заменой"),
-                "other_title": tr("Поддерживается только CUSA03173 с обновлением 1.09 (найдено {})").format(title),
+                "patched_eboot": tr("eboot.bin с вшитым патчем 60 FPS от Lance McDonald: из-за него игра падает в меню жестов. Скопируйте чистый eboot.bin из дампа обновления 1.09 в папку игры с заменой"),
+                "other_title": tr("Это не магазинное издание Bloodborne (найдено {}): нужен Bloodborne любого региона с обновлением 1.09").format(title),
                 "unreadable": tr("eboot.bin не читается как расшифрованный исполняемый файл PS4: сделайте дамп заново"),
+                "damaged_files": tr("Файлы игры повреждены при распаковке: шейдеры не распаковываются, игра зависнет на загрузке. Распакуйте игру и обновление 1.09 заново исправленным инструментом (issue #81)"),
             }[kind]
             self.game_row.set_subtitle(f"{path}\n{tooltip}")
         else:
@@ -906,7 +962,6 @@ class LauncherWindow(Adw.ApplicationWindow):
             process = Gio.Subprocess.new([str(tool), "--read-input", kind],
                                          Gio.SubprocessFlags.STDOUT_PIPE)
         except GLib.Error as error:
-            self.stop_coop_server()
             self.toasts.add_toast(Adw.Toast(title=tr("Не удалось запустить: {}").format(error.message)))
             return
         row, _default = self.control_rows[(kind, name)]
@@ -939,6 +994,17 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.gamepad_row.set_selected(self.gamepad_row.values.index(current) if current in self.gamepad_row.values else 0)
         self.show_gamepad()
 
+    def fill_displays(self):
+        """The monitor choices: the primary one, the connected ones, and the saved choice while it
+        is not connected."""
+        current = self.settings.get("display", "")
+        choices = [(tr("Основной"), "")] + [(label, value) for value, label in connected_displays()]
+        if current and current not in [value for _, value in choices]:
+            choices.append((tr("{} (не подключён)").format(current), current))
+        self.display_row.set_model(Gtk.StringList.new([label for label, _ in choices]))
+        self.display_row.values = [value for _, value in choices]
+        self.display_row.set_selected(self.display_row.values.index(current) if current in self.display_row.values else 0)
+
     def show_gamepad(self):
         names = getattr(self.gamepad_row, "names", None)
         selected = names[self.gamepad_row.get_selected()] if names else ""
@@ -949,6 +1015,8 @@ class LauncherWindow(Adw.ApplicationWindow):
         s = self.settings
         s["gamepad"] = combo_value(self.gamepad_row)
         s["gamepad_name"] = self.gamepad_row.names[self.gamepad_row.get_selected()]
+        s["display"] = combo_value(self.display_row)
+        s["skip_network_choice"] = self.skip_network_row.get_active()
         s["language"] = combo_value(self.language_row)
         s["fullscreen"] = self.fullscreen_row.get_active()
         s["present_mode"] = combo_value(self.present_row)
@@ -962,17 +1030,19 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["frame_stats"] = self.stats_row.get_active()
         s["save_log"] = self.save_log_row.get_active()
         s["crash_diag"] = self.crash_diag_row.get_active()
-        if self.pc_model_row.get_sensitive():
-            s["pc_model"] = self.pc_model_row.get_active()
+        s["memory_model"] = combo_value(self.memory_model_row)
         s["as_0_3"] = self.as_0_3_row.get_active()
         s["gpu_profile"] = self.profile_row.get_active()
         s["vk_validation"] = self.validation_row.get_active()
         s["extra_env"] = self.extra_row.get_text().strip()
-        s["coop_mode"] = combo_value(self.coop_mode_row)
-        s["coop_name"] = self.coop_name_row.get_text().strip()
-        s["coop_host"] = self.coop_host_row.get_text().strip()
-        s["coop_join_invite"] = self.coop_invite_row.get_text().strip()
         s["mods_enabled"] = self.mods_enabled_row.get_active()
+        s["online"] = self.online_row.get_active()
+        s["online_community"] = self.community_row.get_text().strip()
+        s["online_server"] = self.server_row.get_text().strip()
+        s["online_webapi"] = self.webapi_row.get_text().strip()
+        s["online_npid"] = self.npid_row.get_text().strip()
+        s["online_password"] = self.password_row.get_text()
+        s["online_upnp"] = self.upnp_row.get_active()
         self.save_mod_profile()
         self.save_patch_profile()
         save_settings(s)
@@ -986,6 +1056,9 @@ class LauncherWindow(Adw.ApplicationWindow):
             "output_res": combo_value(self.output_row),
             "model_lod": combo_value(self.lod_row),
             "live_resolution": combo_value(self.live_row),
+            "mouse_look": "1" if self.mouse_look_row.get_active() else "0",
+            "mouse_sensitivity": f"{self.mouse_sensitivity_row.get_value():.2f}",
+            "mouse_invert_y": "1" if self.mouse_invert_row.get_active() else "0",
             **{key: "1" if row.get_active() else "0" for key, row in self.effect_rows.items()},
         })
         save_ini(self.ini, self.ini_lines)
@@ -1004,13 +1077,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         rows = self.mod_list.rows
         profile = {"order": [name for name, _ in rows],
                    "disabled": [name for name, row in rows if not row.get_active()]}
-        (DATA_DIR / "mods.json").write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n")
+        (DATA_DIR / "mods.json").write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     def refresh_mods(self):
         self.mod_list.clear()
         self.mods_folder_row.set_subtitle(str(self.mods_dir()))
         try:
-            profile = json.loads((DATA_DIR / "mods.json").read_text())
+            profile = json.loads((DATA_DIR / "mods.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
         available = discover_mods(self.mods_dir())
@@ -1057,7 +1130,7 @@ class LauncherWindow(Adw.ApplicationWindow):
                 (enabled if row.get_active() else disabled).append(key)
         path = DATA_DIR / "patches.json"
         try:
-            profile = json.loads(path.read_text())
+            profile = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
         # Patches of files not listed now (another folder) keep their choice.
@@ -1065,13 +1138,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         profile = {"enabled": sorted({k for k in profile.get("enabled", []) if k not in shown} | set(enabled)),
                    "disabled": sorted({k for k in profile.get("disabled", []) if k not in shown} | set(disabled))}
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n")
+        path.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     def refresh_patches(self):
         self.patch_list.clear()
         directory = patches_dir(self.settings)
         try:
-            profile = json.loads((DATA_DIR / "patches.json").read_text())
+            profile = json.loads((DATA_DIR / "patches.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
         found = external_patches(directory)
@@ -1105,6 +1178,102 @@ class LauncherWindow(Adw.ApplicationWindow):
 
     # --- log page ------------------------------------------------------------------------
 
+    # --- online page ---------------------------------------------------------------------
+
+    def build_online_page(self):
+        s = self.settings
+        page = Adw.PreferencesPage()
+        play = Adw.PreferencesGroup(description=tr(
+            "Сообщения, пятна крови и призраки приходят с The Hunter's Dream; колокола и призывы "
+            "идут через сервер shadNet. Игра по сети совместима с версией для Windows: нужны версия "
+            "игры 1.09 и тот же сервер"))
+        self.online_row = Adw.SwitchRow(title=tr("Играть онлайн"),
+                                        subtitle=tr("Выключено: игра остаётся офлайн, как раньше"),
+                                        active=s["online"])
+        play.add(self.online_row)
+        if not online_module():
+            self.online_row.set_sensitive(False)
+            self.online_row.set_subtitle(tr("Эта сборка без модуля онлайна (libbbnet.so): игра только офлайн"))
+        page.add(play)
+
+        game = Adw.PreferencesGroup(title=tr("Игровой сервер (сообщения, пятна крови, призраки)"))
+        self.community_row = Adw.EntryRow(title=tr("Игровой сервер"), text=s["online_community"])
+        game.add(self.community_row)
+        page.add(game)
+
+        coop = Adw.PreferencesGroup(
+            title=tr("Сервер кооператива (колокола и призывы)"),
+            description=tr("srv.shadps4.net:31313 — публичный сервер shadPS4. Для частного сервера "
+                           "укажите host:port от его владельца. WebAPI: оставьте пустым, тогда "
+                           "берётся адрес сервера с портом 31315"))
+        self.server_row = Adw.EntryRow(title=tr("Адрес сервера"), text=s["online_server"])
+        self.webapi_row = Adw.EntryRow(title=tr("Адрес WebAPI"), text=s["online_webapi"])
+        coop.add(self.server_row)
+        coop.add(self.webapi_row)
+        page.add(coop)
+
+        account = Adw.PreferencesGroup(
+            title=tr("Учётная запись"),
+            description=tr("Имя учётной записи shadNet, не email. Зарегистрируйтесь на "
+                           "shadnet.shadps4.net или спросите владельца частного сервера. Пароль "
+                           "хранится на этом компьютере вместе с настройками лаунчера"))
+        self.npid_row = Adw.EntryRow(title=tr("Online ID (NPID)"), text=s["online_npid"])
+        self.password_row = Adw.PasswordEntryRow(title=tr("Пароль"), text=s["online_password"])
+        account.add(self.npid_row)
+        account.add(self.password_row)
+        page.add(account)
+
+        connection = Adw.PreferencesGroup(
+            title=tr("Соединение"),
+            description=tr("У всех в сессии должны быть одна версия игры (1.09) и один сервер. "
+                           "Читы меняют игру и для других игроков: выключайте их при совместной игре"))
+        self.upnp_row = Adw.SwitchRow(title=tr("UPnP (открыть порт на роутере автоматически)"),
+                                      subtitle=tr("Выключите при Tailscale или другом VPN"),
+                                      active=s["online_upnp"])
+        connection.add(self.upnp_row)
+        test = Adw.ActionRow(title=tr("Проверить соединение"))
+        self.test_button = Gtk.Button(label=tr("Проверить"), valign=Gtk.Align.CENTER)
+        self.test_button.connect("clicked", self.on_test_connection)
+        test.add_suffix(self.test_button)
+        connection.add(test)
+        self.test_rows = []
+        self.connection_group = connection
+        page.add(connection)
+        return page
+
+    def online_addresses(self):
+        server = self.server_row.get_text().strip() or online.SHADNET_SERVER
+        community = online.community_address(self.community_row.get_text())
+        webapi = online.webapi_setting(self.webapi_row.get_text(), server, community)
+        return server, webapi, community
+
+    def on_test_connection(self, _button):
+        server, webapi, community = self.online_addresses()
+        names = {"game": tr("Игровой сервер"), "shadnet": tr("Сервер shadNet"), "webapi": "WebAPI"}
+        for row in self.test_rows:
+            self.connection_group.remove(row)
+        self.test_rows = []
+        self.test_button.set_sensitive(False)
+        self.test_button.set_label(tr("Проверка…"))
+
+        def show(results):
+            for name, address, ok, detail in results:
+                # Plain text: an error such as "<urlopen error ...>" is not Pango markup.
+                row = Adw.ActionRow(title=GLib.markup_escape_text(f"{names[name]}: {address}"),
+                                    subtitle=GLib.markup_escape_text(
+                                        tr("доступен") if ok else f'{tr("недоступен")} ({detail})'))
+                row.add_prefix(Gtk.Image(icon_name="object-select-symbolic" if ok else "dialog-warning-symbolic"))
+                self.connection_group.add(row)
+                self.test_rows.append(row)
+            self.test_button.set_sensitive(True)
+            self.test_button.set_label(tr("Проверить"))
+            return False
+
+        def work():
+            results = online.check(server, webapi, community)
+            GLib.idle_add(show, results)
+        threading.Thread(target=work, daemon=True).start()
+
     def build_log_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.log_view = Gtk.TextView(editable=False, monospace=True, cursor_visible=False,
@@ -1115,7 +1284,52 @@ class LauncherWindow(Adw.ApplicationWindow):
         scroller = Gtk.ScrolledWindow(vexpand=True, child=self.log_view)
         self.log_scroller = scroller
         box.append(scroller)
+        bar = Gtk.ActionBar()
+        self.export_log_button = Gtk.Button(label=tr("Экспорт журнала…"))
+        self.export_log_button.connect("clicked", self.on_export_log)
+        bar.pack_end(self.export_log_button)
+        self.copy_log_button = Gtk.Button(label=tr("Копировать"))
+        self.copy_log_button.connect("clicked", self.on_copy_log)
+        bar.pack_end(self.copy_log_button)
+        box.append(bar)
+        buffer = self.log_view.get_buffer()
+        buffer.connect("changed", self.on_log_changed)
+        self.on_log_changed(buffer)
         return box
+
+    def on_log_changed(self, buffer):
+        has_text = buffer.get_char_count() > 0
+        self.copy_log_button.set_sensitive(has_text)
+        self.export_log_button.set_sensitive(has_text)
+
+    def log_text(self):
+        buffer = self.log_view.get_buffer()
+        return buffer.get_text(*buffer.get_bounds(), False)
+
+    def on_copy_log(self, _button):
+        self.get_clipboard().set(self.log_text())
+        self.toasts.add_toast(Adw.Toast(title=tr("Журнал скопирован")))
+
+    def on_export_log(self, _button):
+        text = self.log_text()
+        dialog = Gtk.FileDialog(title=tr("Экспорт журнала"))
+        dialog.set_initial_name(f"bbport-{time.strftime('%Y%m%d_%H%M%S')}.log")
+
+        def finish(dialog, result):
+            try:
+                chosen = dialog.save_finish(result)
+            except GLib.Error:
+                return
+            if not chosen or not chosen.get_path():
+                return
+            try:
+                Path(chosen.get_path()).write_text(text, encoding="utf-8")
+            except OSError as error:
+                self.toasts.add_toast(Adw.Toast(
+                    title=tr("Не удалось сохранить журнал: {}").format(error.strerror or error)))
+                return
+            self.toasts.add_toast(Adw.Toast(title=tr("Журнал сохранён: {}").format(chosen.get_path())))
+        dialog.save(self, None, finish)
 
     def append_log(self, text):
         buffer = self.log_view.get_buffer()
@@ -1132,9 +1346,31 @@ class LauncherWindow(Adw.ApplicationWindow):
         if self.process:
             self.stop_game()
             return
-        self.store()
-        if not self.start_coop_server():
+        npid = self.npid_row.get_text().strip()
+        if online_module() and not self.online_row.get_active() and npid and hasattr(Adw, "AlertDialog"):
+            dialog = Adw.AlertDialog(heading="Bloodborne", body=tr(
+                "Учётная запись для игры онлайн указана, но «Играть онлайн» выключено"))
+            dialog.add_response("cancel", tr("Отмена"))
+            dialog.add_response("offline", tr("Играть офлайн"))
+            dialog.add_response("online", tr("Играть онлайн"))
+            dialog.set_response_appearance("online", Adw.ResponseAppearance.SUGGESTED)
+
+            def on_response(_dialog, response):
+                if response != "cancel":
+                    self.online_row.set_active(response == "online")
+                    self.start_game()
+            dialog.connect("response", on_response)
+            dialog.present(self)
             return
+        self.start_game()
+
+    def start_game(self):
+        if self.online_row.get_active() and "@" in self.npid_row.get_text():
+            self.alert("Bloodborne", tr("Online ID — это имя учётной записи (NPID), "
+                                        "зарегистрированное на сервере, а не адрес email"))
+            self.stack.set_visible_child_name("online")
+            return
+        self.store()
         self.log_view.get_buffer().set_text("")
         launcher = Gio.SubprocessLauncher.new(
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE)
@@ -1190,7 +1426,6 @@ class LauncherWindow(Adw.ApplicationWindow):
             pass
         status = process.get_exit_status() if process.get_if_exited() else -1
         self.process = None
-        self.stop_coop_server()
         self.update_launch_button()
         self.update_game_status()
         self.append_log(tr("\n— игра завершилась (код {}) —\n").format(status))
@@ -1199,7 +1434,6 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.store()
         if self.process:
             self.stop_game()
-        self.stop_coop_server()
         if self.fsr411_build:
             self.stop_fsr411_build()
         return False
@@ -1224,6 +1458,79 @@ class LauncherWindow(Adw.ApplicationWindow):
             dialog.present(self)
         else:
             self.toasts.add_toast(Adw.Toast(title=f"{heading}: {body}", timeout=10))
+
+    def update_dlss_row(self):
+        own = ngx_libraries(self.user_dir() / "dlss")
+        bundled = ngx_libraries(binaries_dir())
+        bridge = (binaries_dir() / "libbbport_dlss.so").is_file()
+        if own:
+            text = tr("Своя: {}").format(own[-1].name[len(NGX_PREFIX):])
+        elif bundled:
+            text = tr("Из сборки: {}").format(bundled[-1].name[len(NGX_PREFIX):])
+        else:
+            text = tr("Нет: выберите libnvidia-ngx-dlss.so.* из DLSS SDK NVIDIA ({})").format(DLSS_SDK_URL)
+        if not bridge:
+            text += "\n" + tr("Эта сборка без моста DLSS (libbbport_dlss.so): DLSS работать не будет")
+        self.dlss_row.set_subtitle(text)
+        self.dlss_reset_button.set_sensitive(bool(own))
+        if hasattr(self, "sharpness_row"):  # built after this row
+            self.update_upscaler_status()
+
+    def choose_ngx(self):
+        dialog = Gtk.FileDialog(title=tr("Библиотека DLSS NVIDIA (libnvidia-ngx-dlss.so.*)"))
+        files = Gtk.FileFilter()
+        files.set_name("libnvidia-ngx-dlss.so.*, nvngx_dlss.dll")
+        for pattern in ("libnvidia-ngx-dlss.so*", "*.dll", "*.DLL"):
+            files.add_pattern(pattern)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(files)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(files)
+
+        def finish(dialog, result):
+            try:
+                chosen = dialog.open_finish(result)
+            except GLib.Error:
+                return
+            if chosen and chosen.get_path():
+                self.install_ngx(Path(chosen.get_path()))
+        dialog.open(self, None, finish)
+
+    def install_ngx(self, path):
+        if path.suffix.lower() == ".dll":
+            self.alert(tr("Нужна библиотека для Linux"), tr(
+                "{} — библиотека DLSS для Windows; на Linux NVIDIA её не загружает. Нужна "
+                "libnvidia-ngx-dlss.so.<версия> из DLSS SDK NVIDIA: {}").format(path.name, DLSS_SDK_URL))
+            return
+        try:
+            with open(path, "rb") as f:
+                elf = f.read(4) == b"\x7fELF"
+        except OSError as error:
+            self.alert(tr("Не удалось прочитать файл"), str(error))
+            return
+        if not path.name.startswith(NGX_PREFIX) or not elf:
+            self.alert(tr("Это не библиотека DLSS"), tr(
+                "Нужен файл libnvidia-ngx-dlss.so.<версия> из DLSS SDK NVIDIA: {}").format(DLSS_SDK_URL))
+            return
+        target = self.user_dir() / "dlss"
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            for old in ngx_libraries(target):
+                old.unlink()
+            shutil.copy2(path, target / path.name)
+        except OSError as error:
+            self.alert(tr("Не удалось скопировать библиотеку"), str(error))
+            return
+        self.toasts.add_toast(Adw.Toast(title=tr("DLSS {}: готово").format(path.name[len(NGX_PREFIX):])))
+        self.update_dlss_row()
+
+    def reset_ngx(self):
+        for old in ngx_libraries(self.user_dir() / "dlss"):
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        self.update_dlss_row()
 
     def choose_dll(self, title, done):
         dialog = Gtk.FileDialog(title=title)

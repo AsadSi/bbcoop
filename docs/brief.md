@@ -83,6 +83,16 @@ Supporting pieces:
   - **Missing:** `src/runtime_coop.c` (lamp sync, mirrored loot, flag sync, death rules), HP/damage scaling, extra enemies, and a real two-player session.
   - **Blocker:** the reply to `/blood_messenger/exist_messages`, below.
   - **Commits:** kept local, not pushed (Asad, 2026-10-11).
+  - **Upstream 0.51** was merged on 2026-10-11, bringing atomic saves, stutter and crash fixes, the System-menu settings and DLC. Its online module `gpu/bbnet` replaced our vendored copy of the same shadp2p libraries, which is kept at the tag `bbcoop-online-0.4`.
+  - **To port into `gpu/bbnet` when online resumes:**
+    - the private-only HTTP guard (ss4 to our own WebAPI; refuse any other host), `BB_SEAMLESS` acceptance and `BB_CAPTURE_ONLINE` in `http.cpp`
+    - the co-op relay: `np_handler` `onCoopRelay`, the shadNet client and proto relay, `bbcoop_sync.cpp`
+    - the NpLookup success stub
+    - `bbcoop_set_game_info`
+    - pointing its placement code at libbbgpu's `bbcoop_placement_*`
+    - the end-to-end test (`tests/online_client.cpp`, `scripts/test-online.sh`)
+    - the launcher's Host/Join tab (`launcher/bbcoop_online.py`, now unloaded) against upstream's Online page
+  - **Seamless co-op with upstream online** will need `BB_SKIP_NETWORK_CHOICE=0`.
 - **Camera speed-up and messengers (Asad, 2026-10-10/11):**
   - The camera suddenly turns faster.
   - Messengers vanish at odd distances, everywhere.

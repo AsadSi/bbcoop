@@ -5,6 +5,7 @@ tuning and respec. Read `docs/brief.md` first. It has the decisions, what's out 
 what's still open.
 
 ## Remotes
+- Commits stay local for now; don't push (Asad, 2026-10-11).
 - `origin` is AsadSi/bbcoop, private. Friends who get a build get the source (GPL-2.0+).
 - `upstream` is deadinside28/bloodborne_pc, which changes daily. Merge `upstream/master`
   often.
@@ -12,8 +13,8 @@ what's still open.
 ## Keep rebases cheap
 - New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
   without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
-  `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`) and
-  `runtime_net.c`, `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
+  `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`),
+  `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
   `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
   and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
@@ -34,23 +35,19 @@ what's still open.
   byte-identical (same `SUPPORTED_IMAGE` hash), so one set of offsets serves both.
   `scripts/game_check.py` rejects any other build.
 
-## Online (M2)
-- `gpu/shadps4/core/libraries/{network,np}` and `gpu/shadps4/shadnet` hold shadp2p's online
-  libraries. They're mostly unmodified, and every edit is marked `bbcoop`. They're adapted
-  through shims in `gpu/shim/` and registered by `gpu/shim/bbcoop_network.cpp`.
-- `src/runtime_net.c` routes the game's network imports to them, but only when
-  `BB_SHADNET_SERVER` is set.
-- `server/` is the vendored shadnet-p2p server (Qt 6.9). Its FromSoft game-server routes are in
-  `server/src/webapi_routes_fromsoft.cpp`.
-- Environment variables:
-  - `BB_SHADNET_SERVER=host[:31313]`
-  - `BB_SHADNET_NPID`
-  - `BB_SHADNET_PASSWORD`
-  - `BB_SHADNET_INVITE`: the server's `RegistrationSecretKey`; it creates the account on
-    first contact.
-  - `BB_SHADNET_WEBAPI`: defaults to `http://host:31315`.
-  - `BB_SEAMLESS=1`
-  - `BB_CAPTURE_ONLINE=1`: captures every HTTP request.
+## Online (M2): parked (2026-10-11)
+- Online and co-op are on hold. Since the merge of upstream 0.51, online play is upstream's own
+  module, `gpu/bbnet` (`libbbnet.so`, `BB_ONLINE=1`; `src/runtime_net.c` is upstream's).
+- Our vendored shadp2p libraries are gone from the tree. Before the merge they were under
+  `gpu/shadps4/core/libraries/{network,np}`, `gpu/shadps4/shadnet` and `gpu/shim/bbcoop_network.cpp`, with
+  `tests/online_client.cpp` and `scripts/test-online.sh`; they are kept at the tag `bbcoop-online-0.4`.
+  What has to be ported into `gpu/bbnet` is listed in `docs/brief.md` (Open).
+- Kept: `server/` (the shadnet-p2p server, standalone), `launcher/bbcoop_online.py` (not loaded by
+  the launcher), and `gpu/shim/bbcoop_placement.*` with `gpu/shim/core/bloodborne_re.h`, which the
+  seamless hooks use.
+- `BB_SEAMLESS=1` still applies the 13 byte patches and 5 hooks.
+- Private only: `run.sh` keeps `BB_ONLINE` off unless `BB_SHADNET_SERVER` and `BB_COMMUNITY_SERVER` are set
+  and neither is a public default (shadps4.net, thehuntersdream). Never weaken this.
 - Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
   `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
   level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
@@ -60,12 +57,7 @@ what's still open.
   leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
   clock instead of the monotonic one (`src/runtime_time.c`), and `BB_FPS_LIMIT` limits frames per second.
   Uncapped defaults to 120 (`run.sh`, the launcher); 0 means no limit.
-- Private only: while online, HTTP to any host other than the shadNet server is refused, in
-  `RunRealHttpRequest`. Never weaken this.
-- Tests on the Mac:
-  - `scripts/docker-test.sh` runs the x86-64 build and C tests.
-  - `scripts/test-online.sh` is the end-to-end run, with the server plus host and guest
-    `tests/online_client.cpp`.
+- Tests on the Mac: `scripts/docker-test.sh` runs the x86-64 build and C tests.
 
 ## References (siblings, read-only, shallow clones)
 - `../shadp2p-ref` is shadPS4 with Bloodborne co-op. See `src/core/bloodborne_re.cpp`,
