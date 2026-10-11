@@ -148,6 +148,9 @@ def runtime_sites():
             value = defines.get(offset, offset)
             if value.startswith('0x'):
                 sites.append((path.name, name, int(value, 16), int(length)))
+    # Hook entries not in a {"name", offset, length} table.
+    sites += [('runtime_camera.c', 'camera update entry', 0x143ac60, 10),
+              ('runtime_ik.c', 'ChrCtrl update entry (hook)', 0x1514da0, 10)]
     return sites
 
 
@@ -179,7 +182,7 @@ class FpsPatchTests(unittest.TestCase):
                    'Increased Graphics Heap Sizes']
         sites = runtime_sites()
         self.assertGreater(len(sites), 40)
-        for names in (self.NEW, self.OLD):
+        for names in (self.NEW, self.OLD, ['120 FPS++']):
             fps = covered(names)
             for other in others:
                 with self.subTest(fps=names[0], other=other):
