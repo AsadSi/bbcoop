@@ -5,7 +5,9 @@ game was not run. The symptom: the camera "suddenly speeds up" (Asad, 2026-10-10
 which the log shows at ~240 FPS.
 
 ## How the frame rate reaches the game
-- **Patches:** `fps_mode uncap` applies "Uncap FPS++" and "Sprint Fix (High FPS)" (`scripts/patches.py:19`).
+- **Patches:** `fps_mode uncap` applies "Uncap FPS++" (`scripts/patches.py`). Since 2026-10-11 that is ps4_cheats' version
+  of 2026-10-10, with the Sprint Fix built in. `BB_FPS_PATCH=old` selects the previous one with the separate "Sprint Fix
+  (High FPS)".
 - **Frame timer** `0x2034770` (object `*(u64*)0x55404f8`):
   - It targets 1/240 s with a `sceKernelUsleep` limiter (`0x2034b90`), so the game never runs above 240 FPS.
   - `[+0x264]` is the raw `gettimeofday` delta.
@@ -56,8 +58,16 @@ Left alone:
 - **ChrTransChaseRate** `+0x198`: the game rewrites it every frame (`0x143e27f`, `0x143e2c2`).
 - **The CamDist lerp constant** `0x4925e68`.
 - **A 32-frame position average** in `0x1439430`.
-- **Uncap FPS++ and DirectPitchRate:** the patch also sets DirectPitchRate to 0.03 (half of vanilla, for ~60 FPS) in
-  the parameter builder (`0x1440799`, called from `0x14366a0` for the same camera). The hook reads 0.03 there
-  as the vanilla 0.06, so the rate isn't halved twice.
-- **The 30/60/90 FPS++ presets** halve several rates themselves at a fixed frame time, so `run.sh` turns the
+- **The previous Uncap FPS++ and DirectPitchRate** (`BB_FPS_PATCH=old`): that patch sets DirectPitchRate to 0.03 (half
+  of vanilla, for ~60 FPS) in the parameter builder (`0x1440799`, called from `0x14366a0` for the same camera). The hook
+  reads 0.03 there as the vanilla 0.06, so the rate isn't halved twice.
+- **The current Uncap FPS++ (2026-10-10)** scales four of the five chase rates by the frame time itself.
+  - **Values:** it sets `+0x23c` to 0.04, `+0x240` to 0.15 and `+0x1a8` to 0.05.
+  - **Reads:** it replaces the reads of `+0x240` (`0x143c30f`, `0x143c784`), `+0x1a8` (`0x143cef0`), `+0x23c` (`0x143f97e`,
+    `0x143fa9f`) and `+0x330` (`0x143ae75`) with jumps to its own frame-time scaling.
+  - **What the hook does:** `camera_install` runs after the XML patches. It leaves every field whose read is no longer the
+    game's 9-byte `vmovss`/`vmulss [r13+field]` and rescales the rest; with the current patch that is `+0x288` only.
+  - **Other patch edits:** it also hooks the `+0x198`/`+0x1c4` reads and changes `+0x19c`–`+0x1d0` and `+0x238`. The
+    turn ramp (`+0x1e8`) is still ours.
+- **The 60/90/120 FPS++ presets** halve several rates themselves at a fixed frame time, so `run.sh` turns the
   hook off for them (`BB_CAMERA_RATES=0` unless set).

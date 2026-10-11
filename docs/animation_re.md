@@ -48,6 +48,17 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
 - **Still open there:** "physics-like data (`0x2c7807a`, `0x2cbc4b3`) changes 1.3–1.9× between 60 and 120 FPS".
 - **Broken edit:** Paleblood's QUIRKS.md reports that the Uncap FPS++ edit at `0x02715D71` (`call 0x027166f7`, grass
   sway) jumps into a static initialiser; our file has the same bytes.
+- **Updated 2026-10-11:** `patches/Bloodborne.xml` now has ps4_cheats' Uncap FPS++ and 120 FPS++ as of commit `e3446394`
+  (2026-10-10 19:38, the follow-up to `87bdf80`, with two more camera hooks). The Sprint Fix is built in.
+  - **Left out:** one line, the broken `0x02715D71` call. Its rel32 is overwritten by the next line, and the code is dead
+    after the `0x02713D76` rewrite.
+  - **Switches:** `BB_FPS_PATCH=old` selects the previous version, kept as "Uncap FPS++ (2026-08-28)" with the separate
+    Sprint Fix. `BB_FPS=120` applies 120 FPS++ (fixed timestep, vblank 120).
+  - **Checked** (`tests/test_patches.py`): no overlap with the other uncap-preset patches or with any byte-checked
+    `src/runtime_*.c` site. Its caves (`0x05490000`–`0x05490AC5`, `0x054A0000`–`0x054A00F3`) lie in the zero run at the end
+    of the text segment, which nothing else uses.
+  - **Camera:** it scales four of the camera chase rates itself (see `docs/camera_re.md`).
+  - **Still at the 2026-08-28 versions:** 60 FPS++ and 90 FPS++.
 - **Not reported anywhere:** no public report of the dip itself was found (shadPS4 issues, the compatibility repo, bbport
   #1–#149, Reddit, Paleblood).
 

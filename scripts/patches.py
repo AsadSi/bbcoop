@@ -17,7 +17,17 @@ EBOOT_BASE=0x400000
 # Above 60 FPS the sprint fix always goes with the frame rate patch: without it sprinting drops to
 # half speed (the game's wall detector measured distance per frame, a 30 FPS rule).
 FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)'],
-             'uncap':['Uncap FPS++','Sprint Fix (High FPS)']}
+             'uncap':['Uncap FPS++'],'120':['120 FPS++']}
+# bbcoop: Uncap FPS++ and 120 FPS++ are ps4_cheats' of 2026-10-10, with yogesh1239's timestep fixes
+# and the sprint fix built in. BB_FPS_PATCH=old selects the previous Uncap FPS++ (2026-08-28).
+OLD_FPS_PRESETS={'uncap':['Uncap FPS++ (2026-08-28)','Sprint Fix (High FPS)']}
+
+
+def fps_patches(fps, env=os.environ):
+    """The frame rate patches for a BB_FPS preset (BB_FPS_PATCH=old: the previous version)."""
+    if env.get('BB_FPS_PATCH','')=='old' and fps in OLD_FPS_PRESETS:
+        return list(OLD_FPS_PRESETS[fps])
+    return list(FPS_PRESETS[fps])
 # Upscaler presets (bbport.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
@@ -343,7 +353,7 @@ def main():
         size=render_size(settings)
         if size: print(f'{size[0]}x{size[1]}')
         return
-    names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
+    names=fps_patches(a.fps)+[n.strip() for n in a.extra.split(';') if n.strip()]  # bbcoop: BB_FPS_PATCH
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
     if intel_tonemap_fix() and INTEL_TONEMAP not in names:
         names.append(INTEL_TONEMAP)
