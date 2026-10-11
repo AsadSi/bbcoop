@@ -108,4 +108,6 @@ if [[ ${1:-} == --test ]]; then
     out/camera-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_messenger.c src/runtime_messenger.c -o out/messenger-test # bbcoop
     out/messenger-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_ik.c src/runtime_ik.c src/runtime_hooks.c -lm -o out/ik-test # bbcoop
+    out/ik-test
 fi
