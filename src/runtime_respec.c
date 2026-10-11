@@ -349,16 +349,23 @@ static int32_t find_weapon(uint64_t pgd, int32_t id) {
 
 /* BB_TEST_ENDGAME: a late-game character for testing respec on a throwaway profile. */
 static void make_endgame_character(uint64_t pgd) {
-    static const RespecStats stats = {150, {50, 40, 40, 40, 15, 15}};
+    static const RespecStats stats = {150, {50, 40, 25, 40, 30, 15}};
     static const struct { uint32_t category; int32_t id, count; } items[] = {
         {CATEGORY_WEAPON, 7001000, 1},  /* Saw Cleaver +10 */
         {CATEGORY_WEAPON, 7011000, 1},  /* Uncanny Saw Cleaver +10 */
-        {CATEGORY_WEAPON, 14001000, 1}, /* Hunter Pistol +10 */
+        {CATEGORY_WEAPON, 14001000, 1}, /* Hunter Pistol +10: the vanilla gun slot */
         {CATEGORY_WEAPON, 23000500, 1}, /* Beasthunter Saif +5 (DLC) */
-        {CATEGORY_WEAPON, 15000100, 1}, /* Cannon +1: gun gems (tools/respec_mod.py) open a slot */
-        {CATEGORY_WEAPON, 18101000, 1}, /* Flamesprayer +10: likewise */
+        /* The firearms that get a gem slot from the gun gems (tools/respec_mod.py). */
+        {CATEGORY_WEAPON, 15000100, 1}, /* Cannon +1 */
+        {CATEGORY_WEAPON, 18101000, 1}, /* Flamesprayer +10 */
+        {CATEGORY_WEAPON, 18001000, 1}, /* Rosmarinus +10 (DLC) */
+        {CATEGORY_WEAPON, 20001000, 1}, /* Hunter's Torch +10 */
+        {CATEGORY_WEAPON, 34001000, 1}, /* Fist of Gratia +10 (DLC) */
+        {CATEGORY_WEAPON, 35001000, 1}, /* Church Cannon +10 (DLC) */
         {CATEGORY_GOODS, RESPEC_GOODS_SHARD, 2},
         {CATEGORY_GOODS, 4103, 1},      /* Blood Gem Workshop Tool */
+        {CATEGORY_GOODS, 900, 20},      /* Quicksilver Bullets */
+        {CATEGORY_GOODS, 1000, 20},     /* Blood Vial */
     };
     char where[1200];
     printf("Respec: BB_TEST_ENDGAME: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
@@ -393,8 +400,37 @@ static void make_endgame_character(uint64_t pgd) {
         }
         printf("Respec: BB_TEST_ENDGAME: gem %#x fitted in the Uncanny Saw Cleaver +10\n", read_u32(weapon, 0x3C));
     } else printf("Respec: BB_TEST_ENDGAME: no open Radial slot for a gem\n");
+    /* Loose gems to fit by hand, one GemGenParam row each with a fixed shape and fixed effects: Droplet
+     * (slot type 0x8, the guns' shape), Radial, Triangle and Waning. */
+    static const int32_t loose_gems[] = {
+        110037, /* Droplet: Blood ATK UP +27% */
+        110033, /* Droplet: Blood ATK UP +16.2% */
+        134002, /* Droplet: Blood ATK UP +15.1% */
+        136003, /* Droplet: Physical ATK UP +8.8%, Blood ATK UP +11.3% */
+        124004, /* Droplet: Blood ATK UP +12.6% */
+        110007, /* Radial: Physical ATK UP +22.5% */
+        126004, /* Radial: ATK UP +15% */
+        127001, /* Radial: SKL scaling +12 */
+        110017, /* Triangle: Fire ATK UP +22.5% */
+        136004, /* Triangle: Arcane ATK UP +4.1%, Add arcane ATK +47.3 */
+        128000, /* Waning: Bolt ATK UP +16.5% */
+        110027, /* Waning: HP continues to recover +4 */
+    };
+    int loose = 0;
+    for (size_t i = 0; i < sizeof(loose_gems) / sizeof(loose_gems[0]); ++i) {
+        static const struct { uint32_t id, pad; uint64_t row; } none = {UINT32_MAX, 0, 0};
+        uint32_t gem = 0;
+        NATIVE(GemGenerate, GEM_GENERATE)(&gem, instances, &none, &none, (const void *)(uintptr_t)(image_base + GEM_FEATURES),
+                                          loose_gems[i]);
+        if (!gem) continue;
+        /* The inventory takes its own reference, as for a refunded gem. */
+        if (NATIVE(AddHandle, ADD_HANDLE)(pgd + PGD_INVENTORY, &gem, 1, 0, 0) >= 0) ++loose;
+        NATIVE(HandleRelease, HANDLE_RELEASE)(&gem);
+    }
+    printf("Respec: BB_TEST_ENDGAME: %d of %zu loose gems in the inventory\n", loose,
+           sizeof(loose_gems) / sizeof(loose_gems[0]));
     /* Gun gems: the slotless guns get the pistol's slot from +1 when the mod is in (BB_GUN_GEMS). */
-    static const int32_t guns[] = {15000100, 18101000};
+    static const int32_t guns[] = {15000100, 18101000, 18001000, 20001000, 34001000, 35001000};
     for (size_t i = 0; i < sizeof(guns) / sizeof(guns[0]); ++i) {
         int32_t index = find_weapon(pgd, guns[i]);
         uint64_t gun = index >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
