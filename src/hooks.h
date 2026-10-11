@@ -15,6 +15,12 @@ typedef void (*HookHandler)(HookRegs *regs);
 /* The game's rsp at the hook site (above the stub's slots and the 128-byte red zone). */
 static inline uint64_t hook_guest_rsp(const HookRegs *regs) { return (uint64_t)(uintptr_t)(&regs->rax + 1) + 128; }
 
+/* The game's ymm<n> (n < 16) at the hook site, as 8 floats; xmm<n> is the first 4. bbcoop_hook_entry
+ * saves them at (regs - 544) aligned down to 32 bytes, 32 bytes each; changes are restored too. */
+static inline float *hook_saved_xmm(HookRegs *regs, unsigned n) {
+    return (float *)((((uintptr_t)regs - 544) & ~(uintptr_t)31) + 32 * (uintptr_t)n);
+}
+
 /* Reserves a stub area within rel32 reach of the image. Call once per set of hooks (seamless, respec;
  * each call maps its own area), after relocation and
  * while the image is still writable. Returns NULL or an error message. */

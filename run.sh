@@ -61,6 +61,8 @@ respec_talk=$game/dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx
 if [[ -f $respec_talk ]] && command -v realpath cksum stat > /dev/null 2>&1; then
     respec_stamp="$(realpath -- "$game" 2>/dev/null || true) $(cksum < tools/respec_mod.py) $(stat -c '%s %Y' -- \
         "$respec_talk" "$game/dvdroot_ps4/msg/engus/menu.msgbnd.dcx" 2>/dev/null || true)"
+    # bbcoop: gun gems (a gem slot on every firearm, in its gameparam; BB_GUN_GEMS=0: none) rebuild it too.
+    respec_stamp+=" gun_gems=${BB_GUN_GEMS:-1} $(stat -c '%s %Y' -- "$game/dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx" 2>/dev/null || true)"
     if [[ ! -d $respec_mod/dvdroot_ps4 || $(cat -- "$respec_mod/.stamp" 2>/dev/null) != "$respec_stamp" ]]; then
         if [[ -x $re_python ]] && "$re_python" -I tools/respec_mod.py "$game" "$respec_mod.new" > "$out/respec_mod.log" 2>&1; then
             printf '%s' "$respec_stamp" > "$respec_mod.new/.stamp"
@@ -179,6 +181,9 @@ export BB_GPU_WRITE_TWINS=${BB_GPU_WRITE_TWINS:-1} BB_GPU_WRITE_TWINS_MAX=${BB_G
 if [[ -z ${BB_VBLANK_HZ:-} ]]; then
     case $fps in uncap) export BB_VBLANK_HZ=480 ;; 90) export BB_VBLANK_HZ=90 ;; *) export BB_VBLANK_HZ=60 ;; esac
 fi
+# bbcoop: uncapped frames are limited to 120 FPS unless BB_FPS_LIMIT is set (0 = no limit). The
+# camera sped up at times while uncapped (Asad, 2026-10-10); src/runtime_camera.c has the fix.
+if [[ $fps == uncap ]]; then export BB_FPS_LIMIT=${BB_FPS_LIMIT-120}; fi
 # FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
 if [[ -z ${BB_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
     bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2

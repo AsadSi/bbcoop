@@ -78,10 +78,21 @@ Supporting pieces:
 
 ## Open
 
-- **Later (Asad, 2026-10-10):**
-  - A camera that suddenly starts moving faster.
-  - Glitches with the messengers.
-  - Make every firearm upgradable and give firearms gem slots.
+- **Online and co-op are on hold (Asad, 2026-10-11).** Plan: `~/.claude/plans/make-a-plan-on-scalable-kurzweil.md`.
+  - **Done:** the launcher's Host/Join, the server, the ported NP libraries, and the seamless patches and hooks.
+  - **Missing:** `src/runtime_coop.c` (lamp sync, mirrored loot, flag sync, death rules), HP/damage scaling, extra enemies, and a real two-player session.
+  - **Blocker:** the reply to `/blood_messenger/exist_messages`, below.
+  - **Commits:** kept local, not pushed (Asad, 2026-10-11).
+- **Camera speed-up and messengers (Asad, 2026-10-10/11):**
+  - The camera suddenly turns faster.
+  - Messengers vanish at odd distances, everywhere.
+  - Asad's settings: uncapped frame rate, 2160p output, FSR 4. The log shows the game at ~240 FPS.
+  - The renderer drops no draws by distance, and occlusion queries are faked as always visible. Both bugs point at game logic that counts per frame above ~120 FPS, like the wall detector behind "Sprint Fix (High FPS)".
+  - Uncapped now defaults to a 120 FPS limit (`run.sh`, launcher). `BB_FPS_LIMIT=0` removes it.
+- **Firearm gem slots (Asad, 2026-10-11):**
+  - Every firearm already fortifies to +10.
+  - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`.
+  - Shields and the Torch stay as they are.
 - **Respec, not yet verified in game:**
   - A full inventory or storage. Gems and materials then go to storage. A gem with no room anywhere stops the refund, and the weapon stays as it is.
   - The Workshop altar's own Fortify menu after a refund. Refund mode lives only in memory while the Doll's menu is open, and the altar's talk script now also turns it off before opening Fortify (`tools/respec_mod.py`), so the altar's menu should be unchanged. It was not opened in a test: the altar is up the stairs, and reaching it with scripted input was not finished.
@@ -89,4 +100,3 @@ Supporting pieces:
 
 - **Online in the real game (2026-10-09, US 1.09, local server):** NP sign-in, `ss.info` (`/bb-us/ss.info`), `/basic_utils/login` and `/basic_utils/sync_chara_id` (needs `PublishCharacterIdList` of `PublishCharaId`) are accepted. Next blocker: the `BloodMessSearchAdd` response (`/blood_messenger/exist_messages`) is rejected ("Failed to record note search information") even with `LostBloodMessIdList: []`; the parser takes the array (type 6) at image 0x1e84f12, so the cause is elsewhere (ResKind meaning?). Response keys are UTF-16 in the eboot at file offset 0x49d0d40. Reach it with the title, main menu Log In, then Continue (the title remembers Play Offline).
 
-- Everything that runs the game is blocked until Asad's Linux PC and v1.09 dump are available. The Mac is arm64 and can't run the game.

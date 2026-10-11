@@ -14,7 +14,8 @@ what's still open.
   without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
   `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`) and
   `runtime_net.c`, `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
-  `docs/respec_re.md`), and later `runtime_coop.c`. Data mods go in
+  `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
+  and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
   files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
   into `mods/bbcoop-respec/` (git-ignored).
@@ -53,7 +54,12 @@ what's still open.
 - Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
   `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
   level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
-  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh).
+  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_GUN_GEMS=0` (the respec
+  mod leaves out the gem slot it gives every firearm).
+- Camera and frame rate: `BB_CAMERA_ACCEL=1` keeps the game's turn ramp (off by default), `BB_CAMERA_RATES=0`
+  leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
+  clock instead of the monotonic one (`src/runtime_time.c`), and `BB_FPS_LIMIT` limits frames per second.
+  Uncapped defaults to 120 (`run.sh`, the launcher); 0 means no limit.
 - Private only: while online, HTTP to any host other than the shadNet server is refused, in
   `RunRealHttpRequest`. Never weaken this.
 - Tests on the Mac:
