@@ -133,7 +133,7 @@ DEFAULTS = {
     "display": "",
     "skip_network_choice": True,
     "fps_mode": "uncap",
-    "fps_limit": 120,  # bbcoop: uncapped frames above 120 FPS sped the camera up
+    "fps_limit": 0,
     "draw_pipe": "",
     "readbacks": "",
     "preupload": "",
@@ -311,7 +311,8 @@ def game_environment(s):
     if s["hdr"]:
         env["BB_HDR"] = "1"
     env["BB_FPS"] = s["fps_mode"]
-    env["BB_FPS_LIMIT"] = str(max(0, s["fps_limit"]))  # bbcoop: 0 = no limit, run.sh defaults to 120
+    if s["fps_limit"] > 0:  # bbcoop: 0 leaves run.sh's default (120 when uncapped)
+        env["BB_FPS_LIMIT"] = str(s["fps_limit"])
     if s["draw_pipe"]:
         env["BB_DRAW_PIPE"] = s["draw_pipe"]
     if s["readbacks"]:
@@ -753,7 +754,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         frames.add(self.fps_row)
         self.limit_row = Adw.SpinRow.new_with_range(0, 480, 1)
         self.limit_row.set_title(tr("Ограничение FPS"))
-        self.limit_row.set_subtitle(tr("0 — без ограничения; укажите число, чтобы ограничить FPS"))
+        self.limit_row.set_subtitle(tr("0 — по умолчанию (120 без патча фиксированной частоты); укажите число, чтобы ограничить FPS"))
         self.limit_row.set_value(self.settings["fps_limit"])
         frames.add(self.limit_row)
         page.add(frames)

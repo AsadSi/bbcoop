@@ -8,7 +8,8 @@
  *   tuned for 30 FPS, so at 120 FPS they are about 4x snappier. A hook on the camera update
  *   (0x143ac60, rdi = camera, xmm0 = frame time) rescales each fraction to the frame time:
  *   rate' = 1 - (1 - rate)^(dt * 30), which equals the game's own rate at 30 FPS.
- *   BB_CAMERA_RATES=0 turns it off.
+ *   BB_CAMERA_RATES=0 turns it off; run.sh does for the fixed 30/60/90 FPS modes, whose patches tune
+ *   the rates themselves.
  * Every site's bytes are checked before anything is written; any mismatch leaves the camera vanilla. */
 #define _GNU_SOURCE
 #include "hooks.h"
@@ -48,19 +49,30 @@ const unsigned camera_rate_fields[CAMERA_RATE_FIELDS] = {
     0x330, /* LockCamParam interpolation, 0.05 (0x143ae75) */
 };
 
+/* "Uncap FPS++" (patches/Bloodborne.xml, at 0x1440799) halves DirectPitchRate to 0.03 for ~60 FPS;
+ * the hook's base is the 30 FPS rate, so that value stands for the vanilla 0.06. */
+static const struct { unsigned field; uint32_t patched, vanilla; } patched_bases[] = {
+    {2, 0x3CF5C28F, 0x3D75C28F},
+};
+
 typedef struct {
     uintptr_t camera;
+    uint64_t used;
     float base[CAMERA_RATE_FIELDS], written[CAMERA_RATE_FIELDS];
 } CameraSlot;
 
+/* The camera update runs on the game thread only (its two callers, 0x1436c00 and 0x1436e15). */
 static CameraSlot slots[CAMERA_SLOTS];
-static unsigned next_slot;
+static uint64_t frames;
 
 static CameraSlot *slot_for(uintptr_t camera) {
-    for (unsigned i = 0; i < CAMERA_SLOTS; ++i)
-        if (slots[i].camera == camera) return &slots[i];
-    CameraSlot *slot = &slots[next_slot++ % CAMERA_SLOTS];
+    CameraSlot *slot = &slots[0];
+    for (unsigned i = 0; i < CAMERA_SLOTS; ++i) {
+        if (slots[i].camera == camera) { slots[i].used = ++frames; return &slots[i]; }
+        if (slots[i].used < slot->used) slot = &slots[i]; /* least recently used */
+    }
     slot->camera = camera;
+    slot->used = ++frames;
     /* NaN never equals a field, so every field is taken as the game's own value on first sight. */
     for (unsigned i = 0; i < CAMERA_RATE_FIELDS; ++i) slot->written[i] = NAN;
     return slot;
@@ -73,7 +85,15 @@ void camera_rates_apply(unsigned char *camera, float dt) {
         float value;
         memcpy(&value, camera + camera_rate_fields[i], 4);
         /* A value other than the one written last is the game's (initialised or reloaded). */
-        if (value != slot->written[i]) slot->base[i] = value;
+        if (value != slot->written[i]) {
+            slot->base[i] = value;
+            for (unsigned k = 0; k < sizeof(patched_bases) / sizeof(patched_bases[0]); ++k) {
+                uint32_t bits;
+                memcpy(&bits, &value, 4);
+                if (patched_bases[k].field == i && patched_bases[k].patched == bits)
+                    memcpy(&slot->base[i], &patched_bases[k].vanilla, 4);
+            }
+        }
         float base = slot->base[i];
         float rate = base > 0.0f && base < 1.0f ? 1.0f - powf(1.0f - base, dt * 30.0f) : base;
         memcpy(camera + camera_rate_fields[i], &rate, 4);
@@ -108,10 +128,15 @@ const char *camera_install(unsigned char *image, uint64_t size) {
         return NULL;
     }
     if (rates) {
+        /* Nothing is written when the stub area or the hook fails: the camera stays vanilla. Only a
+         * failed seal, after the jump is in place, stops the game. */
         const char *failure = hooks_init(image, size);
         if (!failure) failure = hooks_install(CAMERA_UPDATE, update_entry, sizeof(update_entry), camera_update);
-        if (!failure) failure = hooks_seal();
-        if (failure) return failure;
+        if (failure) {
+            printf("Camera: off: %s\n", failure);
+            return NULL;
+        }
+        if ((failure = hooks_seal())) return failure;
     }
     if (ramp)
         for (size_t i = 0; i < count; ++i) memcpy(image + ramp_patches[i].offset, ramp_patches[i].patched, ramp_patches[i].length);

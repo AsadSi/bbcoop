@@ -106,4 +106,6 @@ if [[ ${1:-} == --test ]]; then
     out/respec-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_camera.c src/runtime_camera.c src/runtime_hooks.c -lm -o out/camera-test # bbcoop
     out/camera-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_messenger.c src/runtime_messenger.c -o out/messenger-test # bbcoop
+    out/messenger-test
 fi

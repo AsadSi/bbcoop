@@ -99,6 +99,8 @@ Supporting pieces:
   - Asad's settings: uncapped frame rate, 2160p output, FSR 4. The log shows the game at ~240 FPS.
   - The renderer drops no draws by distance, and occlusion queries are faked as always visible. Both bugs point at game logic that counts per frame above ~120 FPS, like the wall detector behind "Sprint Fix (High FPS)".
   - Uncapped now defaults to a 120 FPS limit (`run.sh`, launcher). `BB_FPS_LIMIT=0` removes it.
+  - **Camera:** the game's own turn ramp (0.6 s at full stick, 120 to 260°/s) is off, and the 30 FPS chase rates follow the frame time (`src/runtime_camera.c`, `docs/camera_re.md`).
+  - **Messengers:** the notes' and bloodstains' messengers emerge within 5 m and sink beyond it, by design. Static analysis found no frame-rate, Intel-math or renderer cause (`docs/messengers_re.md`). `BB_MESSENGER_RADIUS` tests it in the game.
 - **Firearm gem slots (Asad, 2026-10-11):**
   - Every firearm already fortifies to +10.
   - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`.
