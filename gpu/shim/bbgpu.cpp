@@ -1,8 +1,10 @@
 #include "bbport_write_log.h"
+#include "bbport_game_menu.h"
 #include "bbport_gnm_hooks.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
+#include "game_profile.h"
 #include "bbport_copy.h"
 #include <sys/resource.h>
 #include "bbport_free_check.h"
@@ -88,18 +90,6 @@ public:
         info.psf_attributes.raw = config.psf_attributes;
     }
 };
-} // namespace Core
-
-// bbcoop: game identity without a GPU (tests/online_client.cpp; shadNet login sends it). The
-// game itself gets it from bbgpu_init, which runs before its imports resolve.
-extern "C" void bbcoop_set_game_info(const char* serial, const char* title) {
-    BbGpuConfig config{};
-    config.serial = serial;
-    config.title = title;
-    Core::Emulator::FillElfInfo(config);
-}
-
-namespace Core {
 
 void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     rasterizer = rasterizer_;
@@ -200,6 +190,9 @@ void MemoryManager::CopySparseMemory(VAddr source, u8* dest, u64 size) {
         CopySparseSerial(source + offset, dest + offset, std::min(Chunk, size - offset));
     });
 }
+void MemoryManager::ReadBacking(VAddr address, void* data, u64 size) {
+    runtime_memory_read_backing(address, data, size);
+}
 bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
     BbWriteLog::Note(reinterpret_cast<uintptr_t>(address), data, size, BbWriteLog::Backing);
     return runtime_memory_write_backing(reinterpret_cast<uintptr_t>(address), data, size) != 0;
@@ -271,6 +264,8 @@ static void StartProfileWriter() {
 
 extern "C" int bbgpu_init(const BbGpuConfig* config) {
     BbSettings::Load();
+    // What the translator knows about this game (games/), before anything asks for it.
+    Game::Select(config->serial);
 #ifdef BB_PGO_GENERATE
     StartProfileWriter();
 #endif
@@ -341,6 +336,7 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
 
 extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
     BbGnmHooks::PatchImage(image, size);
+    BbGameMenu::PatchImage(image, size);
 }
 
 extern "C" unsigned bbgpu_symbol_count(void) {
@@ -400,6 +396,26 @@ ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
 
 extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
+}
+
+extern "C" void bbgpu_mouse_take(double* dx, double* dy, int* wheel_up, int* wheel_down) {
+    double x = 0, y = 0;
+    int up = 0, down = 0;
+    if (g_window) {
+        g_window->TakeMouse(x, y, up, down);
+    }
+    *dx = x;
+    *dy = y;
+    *wheel_up = up;
+    *wheel_down = down;
+}
+
+extern "C" int bbgpu_mouse_captured(void) {
+    return g_window && g_window->MouseCaptured() ? 1 : 0;
+}
+
+extern "C" void bbgpu_mouse_look_enable(int enabled) {
+    Frontend::WindowSDL::EnableMouseLook(enabled != 0);
 }
 
 extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {

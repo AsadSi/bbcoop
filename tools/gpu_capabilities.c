@@ -1,7 +1,10 @@
 /* Check whether native-size depth/stencil images can be blitted to reduced
  * renderer targets. The renderer needs both directions for live presets.
  * --gamepads: the connected gamepads, "GUID<tab>name" per line (the launcher's controller list,
- * BB_GAMEPAD). --read-input: one key or button for the launcher's controls (below). */
+ * BB_GAMEPAD). --displays: the monitors, "name<tab>WxH<tab>primary (1 or 0)" per line in SDL's
+ * order (the launcher's monitor list, BB_DISPLAY; issue #69). --read-input: one key or button for the
+ * launcher's controls (below). --device: "vendorID<tab>name" of the GPU the game takes (run.sh:
+ * memory model and driver workarounds by vendor and chip). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,7 +93,27 @@ static int list_gamepads(void) {
     return 0;
 }
 
-/* --read-input key|pad: a small window; prints "key <SDL key name>" or "pad <SDL button name>"
+static int list_displays(void) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "displays: %s\n", SDL_GetError());
+        return 1;
+    }
+    const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    int count = 0;
+    SDL_DisplayID *ids = SDL_GetDisplays(&count);
+    for (int i = 0; ids && i < count; ++i) {
+        const char *name = SDL_GetDisplayName(ids[i]);
+        const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(ids[i]);
+        printf("%s\t%dx%d\t%d\n", name && *name ? name : "?", mode ? mode->w : 0,
+               mode ? mode->h : 0, ids[i] == primary);
+    }
+    SDL_free(ids);
+    SDL_Quit();
+    return 0;
+}
+
+/* --read-input key|pad: a small window; prints "key <SDL key name>" ("Mouse Left", "Wheel Up", ...
+ * for the mouse) or "pad <SDL button name>"|pad: a small window; prints "key <SDL key name>" or "pad <SDL button name>"
  * (lefttrigger/righttrigger for the triggers) for the first key or gamepad button pressed, the
  * names bbport.ini's key.* and pad.* lines take. Escape, closing it or 15 s: nothing. */
 static int read_input(const char *kind) {
@@ -101,8 +124,8 @@ static int read_input(const char *kind) {
     }
     SDL_Window *window = NULL;
     SDL_Renderer *renderer = NULL;
-    const char *prompt = want_key && want_pad ? "Press a key or a gamepad button"
-                         : want_key           ? "Press a key"
+    const char *prompt = want_key && want_pad ? "Press a key, a mouse button or a gamepad button"
+                         : want_key           ? "Press a key or a mouse button"
                                               : "Press a gamepad button";
     if (!SDL_CreateWindowAndRenderer("bbport", 520, 90, 0, &window, &renderer)) {
         fprintf(stderr, "read-input: %s\n", SDL_GetError());
@@ -140,6 +163,21 @@ static int read_input(const char *kind) {
                     done = 1;
                 }
                 break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN: /* the names runtime_pad.c's key.* lines take */
+                if (want_key && e.button.button >= SDL_BUTTON_LEFT && e.button.button <= SDL_BUTTON_X2) {
+                    static const char *const names[] = {"", "Mouse Left", "Mouse Middle", "Mouse Right",
+                                                        "Mouse X1", "Mouse X2"};
+                    printf("key %s\n", names[e.button.button]);
+                    done = 1;
+                }
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (want_key && e.wheel.y != 0) {
+                    const float y = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
+                    printf("key %s\n", y > 0 ? "Wheel Up" : "Wheel Down");
+                    done = 1;
+                }
+                break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
                 if (want_pad) {
                     printf("pad %s\n", SDL_GetGamepadStringForButton((SDL_GamepadButton)e.gbutton.button));
@@ -172,7 +210,11 @@ int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--gamepads")) {
         return list_gamepads();
     }
+    if (argc > 1 && !strcmp(argv[1], "--displays")) {
+        return list_displays();
+    }
     const int live_mode = argc > 1 && !strcmp(argv[1], "--live-resolution");
+    const int device_mode = argc > 1 && !strcmp(argv[1], "--device");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "bbport scene scaling probe",
@@ -215,6 +257,14 @@ int main(int argc, char **argv) {
     } else {
         for (uint32_t i = 1; i < count; ++i)
             if (better_device(devices[i], selected)) selected = devices[i];
+    }
+    if (device_mode) {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(selected, &props);
+        printf("%#06x\t%s\n", props.vendorID, props.deviceName);
+        free(devices);
+        vkDestroyInstance(instance, NULL);
+        return 0;
     }
     if (live_mode) {
         printf("%d\n", live_resolution_suits(selected));
