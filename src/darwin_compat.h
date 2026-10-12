@@ -30,9 +30,10 @@
 #define TIMER_ABSTIME 1
 #endif
 
-/* Apple Silicon reserves [0x1000000000, 0x7000000000) for the GPU (the "GPU carveout"),
- * also in Rosetta processes, so the guest ranges below 1 TiB move above it. */
-#define LOW_MIN UINT64_C(0x7000000000)
+/* Apple Silicon reserves [0x1000000000, 0x7000000000) for the GPU (the "GPU carveout"), also
+ * in Rosetta processes. The low range (image, stacks, host objects) keeps Linux's addresses below
+ * it, so the code that knows the image at 0x800000000 holds; the direct-memory range moves above. */
+#define DARWIN_LOW_END UINT64_C(0x1000000000)
 #define DARWIN_USER_MIN UINT64_C(0x7800000000)
 
 static inline pid_t darwin_gettid(void) {

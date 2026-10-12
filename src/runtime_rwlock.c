@@ -45,10 +45,10 @@ static Rwlock *find_locked(Rwlock *handle) {
     return NULL;
 }
 static int create_locked(Rwlock **out) {
-    Rwlock *r=calloc(1,sizeof(*r));
+    Rwlock *r=GUEST_CALLOC(1,sizeof(*r));
     if (!r) return ENOMEM;
     int e=pthread_rwlock_init(&r->native,NULL);
-    if (e) { free(r); return e; }
+    if (e) { GUEST_FREE(r); return e; }
     r->next=registry; registry=r; *out=r; ++created; return 0;
 }
 static ABI int32_t rw_init(Rwlock **out, void *const *attr, const char *name) {
@@ -64,7 +64,7 @@ static void prune_locked(Rwlock *r, Holder *h) {
     if (h->readers || h->writer || h->pending) return;
     Holder **link=&r->holders;
     while (*link!=h) link=&(*link)->next;
-    *link=h->next; free(h);
+    *link=h->next; GUEST_FREE(h);
 }
 enum Operation { READ, WRITE, TRY_READ, TRY_WRITE, TIMED_READ, TIMED_WRITE };
 static int32_t acquire(Rwlock **handle, enum Operation op, const GuestTime *time) {
@@ -84,7 +84,7 @@ static int32_t acquire(Rwlock **handle, enum Operation op, const GuestTime *time
     }
     if (h && h->readers==UINT_MAX) { pthread_mutex_unlock(&registry_lock); return error(EAGAIN); }
     if (!h) {
-        h=calloc(1,sizeof(*h));
+        h=GUEST_CALLOC(1,sizeof(*h));
         if (!h) { pthread_mutex_unlock(&registry_lock); return error(ENOMEM); }
         h->thread=pthread_self(); h->next=r->holders; r->holders=h;
     }
@@ -139,7 +139,7 @@ static ABI int32_t rw_destroy(Rwlock **handle) {
     if (!e) {
         Rwlock **link=&registry;
         while (*link!=r) link=&(*link)->next;
-        *link=r->next; free(r); *handle=(Rwlock *)(uintptr_t)1;
+        *link=r->next; GUEST_FREE(r); *handle=(Rwlock *)(uintptr_t)1;
     }
     pthread_mutex_unlock(&registry_lock); return error(e);
 }

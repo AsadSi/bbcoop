@@ -93,6 +93,23 @@ void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);
 void *runtime_low_map(size_t size, int prot);
+/* Host objects the guest holds pointers to (it packs them into 40 bits): below 1 TiB. Linux's
+ * malloc is (the non-PIE brk heap); macOS's is not, so low mappings are used there. */
+#ifdef __APPLE__
+void *runtime_low_malloc(size_t size);
+void *runtime_low_calloc(size_t count, size_t size);
+void runtime_low_free(void *pointer);
+void *runtime_low_aligned_alloc(size_t alignment, size_t size);
+#define GUEST_MALLOC(n) runtime_low_malloc(n)
+#define GUEST_CALLOC(n, s) runtime_low_calloc(n, s)
+#define GUEST_FREE(p) runtime_low_free(p)
+#define GUEST_ALIGNED_ALLOC(a, n) runtime_low_aligned_alloc(a, n)
+#else
+#define GUEST_MALLOC(n) malloc(n)
+#define GUEST_CALLOC(n, s) calloc(n, s)
+#define GUEST_FREE(p) free(p)
+#define GUEST_ALIGNED_ALLOC(a, n) aligned_alloc(a, n)
+#endif
 uintptr_t runtime_ajm_resolve(const char *name);
 void runtime_ajm_report(void);
 uintptr_t runtime_audio_resolve(const char *name);

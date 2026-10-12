@@ -716,15 +716,18 @@ uintptr_t runtime_memory_resolve(const char *name) {
 }
 /* Host-owned memory the guest can see (image, stacks, trampolines) lives in
  * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */
-#ifndef LOW_MIN /* macOS: darwin_compat.h, above the GPU carveout */
 #define LOW_MIN UINT64_C(0x0800000000)
+#ifdef __APPLE__
+#define LOW_END DARWIN_LOW_END /* the GPU carveout starts there; USER_MIN is above it */
+#else
+#define LOW_END USER_MIN
 #endif
 static uintptr_t low_next=LOW_MIN;
 void *runtime_low_map(size_t size, int prot) {
     size=align_up(size,PAGE);
     write_lock();
     void *p=MAP_FAILED;
-    while (low_next+size<=USER_MIN) {
+    while (low_next+size<=LOW_END) {
         p=mmap((void *)low_next,size,prot,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
         low_next+=size+PAGE; /* unmapped gap catches overruns */
         if (p!=MAP_FAILED) break;
@@ -732,6 +735,62 @@ void *runtime_low_map(size_t size, int prot) {
     write_unlock();
     return p==MAP_FAILED ? NULL : p;
 }
+#ifdef __APPLE__
+/* macOS: host objects the guest sees (thread records, TLS blocks, mutexes, rwlocks) must be
+ * below 1 TiB as the guest packs pointers into 40 bits. Linux gets that from the non-PIE brk
+ * heap (mallopt in probe.c); macOS's malloc is above it, so they come from low mappings here:
+ * size classes carved out of runtime_low_map slabs, a free list per class. */
+typedef struct LowFree { struct LowFree *next; } LowFree;
+typedef struct { uint32_t magic, size_class; uint64_t pad; } LowHeader; /* 16 bytes: alignment */
+#define LOW_MAGIC UINT32_C(0x4c4f5741)
+static const size_t low_classes[]={32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536};
+#define LOW_CLASSES (sizeof(low_classes)/sizeof(*low_classes))
+static LowFree *low_free[LOW_CLASSES];
+static pthread_mutex_t low_lock=PTHREAD_MUTEX_INITIALIZER;
+void *runtime_low_malloc(size_t size) {
+    const size_t needed=size+sizeof(LowHeader);
+    size_t c=0;
+    while (c<LOW_CLASSES && low_classes[c]<needed) ++c;
+    LowHeader *h;
+    if (c==LOW_CLASSES) { /* large: a mapping of its own, never reused */
+        h=runtime_low_map(needed,PROT_READ|PROT_WRITE);
+        if (!h) return NULL;
+    } else {
+        pthread_mutex_lock(&low_lock);
+        if (!low_free[c]) {
+            const size_t block=low_classes[c], slab=block*16>65536 ? block*16 : 65536;
+            unsigned char *p=runtime_low_map(slab,PROT_READ|PROT_WRITE);
+            if (!p) { pthread_mutex_unlock(&low_lock); return NULL; }
+            for (size_t at=0;at+block<=slab;at+=block) {
+                LowFree *f=(LowFree *)(p+at); f->next=low_free[c]; low_free[c]=f;
+            }
+        }
+        h=(LowHeader *)low_free[c]; low_free[c]=low_free[c]->next;
+        pthread_mutex_unlock(&low_lock);
+    }
+    h->magic=LOW_MAGIC; h->size_class=(uint32_t)c;
+    return h+1;
+}
+void *runtime_low_calloc(size_t count, size_t size) {
+    void *p=runtime_low_malloc(count*size);
+    if (p) memset(p,0,count*size);
+    return p;
+}
+void runtime_low_free(void *pointer) {
+    if (!pointer) return;
+    LowHeader *h=(LowHeader *)pointer-1;
+    if (h->magic!=LOW_MAGIC || h->size_class>=LOW_CLASSES) return; /* large ones stay mapped */
+    h->magic=0;
+    pthread_mutex_lock(&low_lock);
+    LowFree *f=(LowFree *)h; f->next=low_free[h->size_class]; low_free[h->size_class]=f;
+    pthread_mutex_unlock(&low_lock);
+}
+/* aligned_alloc for alignments up to 4096 (TLS blocks): over-allocated, never freed. */
+void *runtime_low_aligned_alloc(size_t alignment, size_t size) {
+    unsigned char *p=runtime_low_malloc(size+alignment);
+    return p ? (void *)(((uintptr_t)p+alignment-1)&~(uintptr_t)(alignment-1)) : NULL;
+}
+#endif
 /* ---- GPU library interface (gpu/shim/bbgpu.cpp) ---- */
 /* Optimizations switched off at run time (diagnostics): the number in the file named by
  * BB_TOGGLE_FILE, re-read every 250 ms. Bits: 1 region cache, 2 fetch shader cache,
