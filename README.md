@@ -137,6 +137,8 @@ neither has nor includes.
 ## Requirements
 
 - Linux x86-64, a Vulkan 1.3 GPU. Tested: AMD RX 7800 XT with Mesa 26 (RADV).
+  macOS on Apple Silicon (an x86-64 build under Rosetta 2, Vulkan through MoltenVK):
+  see [docs/MACOS.md](docs/MACOS.md).
   The *New memory and translation model* mode is not tested on NVIDIA yet.
   FSR 4 / 4.1.1 require shader Float16, Int8/Int16, integer dot products, linear compute
   derivatives and extended storage image formats; FSR 4.1.1 additionally requires
