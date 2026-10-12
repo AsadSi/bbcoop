@@ -412,6 +412,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         // The game's buffer copy shader, from its profile (games/).
         .buffer_copy_shader_hash = Game::BufferCopyShader(),
     };
+#ifdef __APPLE__
+    profile.skip_no_contraction = true;
+#endif
     WarmUp();
 
     auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
