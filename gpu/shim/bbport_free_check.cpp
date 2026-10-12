@@ -16,7 +16,7 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <csignal>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <unordered_set>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -761,7 +761,7 @@ void OnGcHook(void* ucontext);
 
 void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
     // BB_LABEL_TRAP=2: the breakpoints (RIP is past the int3).
-    const u64 rip = u64(static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_RIP]);
+    const u64 rip = u64(BB_GREGS(static_cast<ucontext_t*>(ucontext))[REG_RIP]);
     if (rip == FreeHook + 1) {
         OnFreeHook(ucontext);
         return;
@@ -777,7 +777,7 @@ void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
         }
         const u64 page = slot.page.exchange(0, std::memory_order_acq_rel);
         slot.tid.store(0, std::memory_order_release);
-        static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_EFL] &= ~TrapFlag;
+        BB_GREGS(static_cast<ucontext_t*>(ucontext))[REG_EFL] &= ~TrapFlag;
         auto& t = Trap();
         std::scoped_lock lk{t.mutex};
         if (page && t.read_only.count(page)) {
@@ -845,7 +845,7 @@ bool ArmStep(void* ucontext, u64 page) {
         if (slot.tid.load(std::memory_order_acquire) == tid ||
             slot.tid.compare_exchange_strong(expected, tid, std::memory_order_acq_rel)) {
             slot.page.store(page, std::memory_order_release);
-            static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_EFL] |= TrapFlag;
+            BB_GREGS(static_cast<ucontext_t*>(ucontext))[REG_EFL] |= TrapFlag;
             return true;
         }
     }
@@ -955,7 +955,7 @@ void Emit(char* line, int n, int size) {
 /// The guest allocator's release (int3): performs the replaced `mov rax, rsi`; a label block
 /// whose fence has not landed is reported with the caller.
 void OnFreeHook(void* ucontext) {
-    auto* g = static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs;
+    auto* g = BB_GREGS(static_cast<ucontext_t*>(ucontext));
     g[REG_RAX] = g[REG_RSI];
     g[REG_RIP] = greg_t(FreeHook + 3);
     const u64 block = u64(g[REG_RSI]);
@@ -983,7 +983,7 @@ void OnFreeHook(void* ucontext) {
 /// block taken as done, its first qword the label (or bit 0: a pointer to the batch's label),
 /// eax what the collector read there (4). Reported when that label's fence has not landed.
 void OnGcHook(void* ucontext) {
-    auto* g = static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs;
+    auto* g = BB_GREGS(static_cast<ucontext_t*>(ucontext));
     g[REG_RCX] = greg_t(*reinterpret_cast<const u64*>(u64(g[REG_RSP]) + 0x28));
     g[REG_RIP] = greg_t(GcHook + 5);
     const u64 node = u64(g[REG_R14]);
@@ -1043,7 +1043,7 @@ bool OnTrapFault(void* ucontext, u64 address) {
         t.read_only.erase(page);
     }
     lk.unlock();
-    const auto* g = static_cast<const ucontext_t*>(ucontext)->uc_mcontext.gregs;
+    const auto* g = BB_GREGS(static_cast<const ucontext_t*>(ucontext));
     if (!hit || !IsGuest(u64(g[REG_RIP]))) {
         return true;
     }

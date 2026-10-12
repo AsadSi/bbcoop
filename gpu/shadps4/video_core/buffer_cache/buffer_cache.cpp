@@ -39,7 +39,7 @@
 #include <string>
 #include <fmt/format.h>
 #include <sys/mman.h>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include "common/signal_context.h"
 #include "core/signals.h"
 #include <vk_mem_alloc.h>
@@ -2712,7 +2712,7 @@ bool VramTrapHandler(void* context, void* fault_address) {
             return false;
         }
     }
-    const auto* g = static_cast<const ucontext_t*>(context)->uc_mcontext.gregs;
+    const auto* g = BB_GREGS(static_cast<const ucontext_t*>(context));
     const u64 rip = u64(g[REG_RIP]);
     constexpr u64 Image = 0x800000000ull, ImageEnd = 0x810000000ull;
     u64 caller = 0;
@@ -3443,7 +3443,7 @@ void BufferCache::Preupload(u64 budget) {
         }
         while (at < end && visited < MaxRegions) {
             const VAddr region = at & ~(TRACKER_HIGHER_PAGE_SIZE - 1);
-            const VAddr stop = std::min(end, region + TRACKER_HIGHER_PAGE_SIZE);
+            const VAddr stop = std::min<VAddr>(end, region + TRACKER_HIGHER_PAGE_SIZE);
             ++visited;
             preupload_cursor = stop;
             if (memory_tracker->PreuploadCandidate(region, quiet_since, !full)) {

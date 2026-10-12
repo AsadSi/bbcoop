@@ -221,6 +221,18 @@ struct RegDirty {
         blocks.reset();
         reset = false;
     }
+    /// The first marked block at or after `from` (NumBlocks: none). libstdc++ finds it a word at
+    /// a time; other standard libraries (libc++ on macOS) have no such call.
+    size_t Next(size_t from) const {
+#ifdef __GLIBCXX__
+        return from == 0 ? blocks._Find_first() : blocks._Find_next(from - 1);
+#else
+        while (from < NumBlocks && !blocks.test(from)) {
+            ++from;
+        }
+        return from;
+#endif
+    }
 };
 
 struct RegDelta {

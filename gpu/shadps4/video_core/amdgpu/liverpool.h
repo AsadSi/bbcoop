@@ -207,7 +207,7 @@ public:
         return gpu_id;
     }
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     u32 GetGpuCommandProcessorThreadId() {
         return gpu_tid;
     }
@@ -355,7 +355,7 @@ private:
     std::condition_variable_any submit_cv;
     std::queue<Common::UniqueFunction<void>> command_queue{};
     std::thread::id gpu_id;
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     u32 gpu_tid;
 #endif
     s32 curr_qid{-1};

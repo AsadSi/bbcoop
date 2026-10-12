@@ -21,7 +21,7 @@
 #include <dlfcn.h>
 #include <string>
 #include <fmt/format.h>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <unistd.h>
 #include "core/signals.h"
 #include "video_core/page_manager.h"
@@ -103,7 +103,7 @@ struct ImageFaultSite {
 std::array<ImageFaultSite, 256> image_fault_sites;
 
 void NoteFaultSite(void* context, VAddr address) {
-    const auto* g = static_cast<const ucontext_t*>(context)->uc_mcontext.gregs;
+    const auto* g = BB_GREGS(static_cast<const ucontext_t*>(context));
     current_fault_rip = 0;
     const u64 rip = u64(g[REG_RIP]);
     const bool guest_code = rip >= GuestImage && rip < GuestImageEnd;
@@ -320,7 +320,7 @@ struct PageManager::Impl {
         }
         if (BbLayer::WriteTraps::Reasons(addr) & BbLayer::WriteTraps::QueryReads) {
             return rasterizer->OnOcclusionPageAccess(
-                addr, u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]),
+                addr, u64(BB_GREGS(static_cast<const ucontext_t*>(context))[REG_RIP]),
                 Common::IsWriteError(context), is_gpu_thread);
         }
         if (Common::IsWriteError(context)) {
@@ -335,7 +335,7 @@ struct PageManager::Impl {
             BbStats::Timer timer{BbStats::t_write_faults};
             const bool handled = rasterizer->OnWriteFault(
                 addr, is_gpu_thread,
-                u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]));
+                u64(BB_GREGS(static_cast<const ucontext_t*>(context))[REG_RIP]));
             current_fault_rip = 0;
             return handled;
         } else {

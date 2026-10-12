@@ -211,25 +211,31 @@ unsigned runtime_memory_trap_reasons(uintptr_t address);
 static sigjmp_buf trap_jump;
 static void trap_fault(int sig) { (void)sig; siglongjmp(trap_jump,1); }
 static int write_faults(volatile unsigned char *p) {
-    struct sigaction action={0}, old;
+    /* A protection fault is SIGSEGV on Linux, SIGBUS on macOS. */
+    struct sigaction action={0}, old, old_bus;
     action.sa_handler=trap_fault;
     sigemptyset(&action.sa_mask);
     sigaction(SIGSEGV,&action,&old);
+    sigaction(SIGBUS,&action,&old_bus);
     int faulted=0;
     if (sigsetjmp(trap_jump,1)) faulted=1;
     else *p=0x5a;
     sigaction(SIGSEGV,&old,NULL);
+    sigaction(SIGBUS,&old_bus,NULL);
     return faulted;
 }
 static int read_faults(volatile unsigned char *p) {
-    struct sigaction action={0}, old;
+    /* A protection fault is SIGSEGV on Linux, SIGBUS on macOS. */
+    struct sigaction action={0}, old, old_bus;
     action.sa_handler=trap_fault;
     sigemptyset(&action.sa_mask);
     sigaction(SIGSEGV,&action,&old);
+    sigaction(SIGBUS,&action,&old_bus);
     int faulted=0;
     if (sigsetjmp(trap_jump,1)) faulted=1;
     else (void)*p;
     sigaction(SIGSEGV,&old,NULL);
+    sigaction(SIGBUS,&old_bus,NULL);
     return faulted;
 }
 typedef int32_t (ABI *Protect)(const void *, uint64_t, int);

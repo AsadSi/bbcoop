@@ -15,7 +15,7 @@
 #include <mutex>
 #include <unordered_set>
 #include <sys/mman.h>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <map>
 #include <tuple>
 #include <string>
@@ -1421,7 +1421,7 @@ bool LayerTrapHandler(void* context, void* fault_address) {
         if (!layer_trap_armed.erase(block)) {
             return false;
         }
-        const auto* g = static_cast<const ucontext_t*>(context)->uc_mcontext.gregs;
+        const auto* g = BB_GREGS(static_cast<const ucontext_t*>(context));
         layer_trap_hits.emplace_back(block, u64(g[REG_RIP]));
     }
     LayerUnprotect(block); // the write runs again, now through

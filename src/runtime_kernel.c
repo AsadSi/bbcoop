@@ -16,7 +16,7 @@
 #include <sys/syscall.h>
 #include <dlfcn.h>
 #include <dirent.h>
-#include <ucontext.h>
+#include "gpu/shim/bbport_ucontext.h"
 #include <signal.h>
 #include <sys/uio.h>
 #include <sys/random.h>
@@ -335,8 +335,13 @@ static void guest_call_sites(uint64_t out[3]) {
     static _Thread_local uintptr_t stack_hi;
     if (!stack_hi) {
         pthread_attr_t attr; void *base=NULL; size_t size=0;
+#ifdef __APPLE__
+        (void)attr; (void)base; (void)size;
+        stack_hi=(uintptr_t)pthread_get_stackaddr_np(pthread_self()); /* Darwin: the stack's top */
+#else
         if (!pthread_getattr_np(pthread_self(),&attr)) { pthread_attr_getstack(&attr,&base,&size); pthread_attr_destroy(&attr); }
         stack_hi=(uintptr_t)base+size;
+#endif
     }
     const uintptr_t *sp=(const uintptr_t *)__builtin_frame_address(0);
     int found=0;
@@ -347,7 +352,7 @@ void runtime_wait_note(int kind, uint64_t ns) {
     static int enabled=-1;
     if (enabled<0) enabled=getenv("BB_FRAME_STATS")!=NULL;
     if (!enabled) return;
-    if (!wait_tid) wait_tid=(int)syscall(SYS_gettid);
+    if (!wait_tid) wait_tid=(int)gettid();
     uint64_t sites[3];
     guest_call_sites(sites);
     const uint64_t key=((sites[0]<<20)^(sites[1]*0x9E3779B1ull)^(sites[2]<<7)^((uint64_t)wait_tid<<4)^(uint64_t)kind)|1;
@@ -398,13 +403,13 @@ static _Atomic uint64_t samples_total;
 static void sample_handler(int sig, siginfo_t *info, void *context) {
     (void)sig; (void)info;
     const ucontext_t *uc=(const ucontext_t *)context;
-    uint64_t rip=(uint64_t)uc->uc_mcontext.gregs[REG_RIP];
+    uint64_t rip=(uint64_t)BB_GREGS(uc)[REG_RIP];
     const uint64_t text_lo=0x800000000ull, text_hi=0x800000000ull+0x50d96dcull;
     /* Host code: keyed with its guest caller, the first return address into the game on the stack. */
     uint64_t caller=0;
     if (rip<text_lo || rip>=text_hi) {
         uint64_t stack[256]={0};
-        struct iovec local={stack,sizeof(stack)}, remote={(void *)uc->uc_mcontext.gregs[REG_RSP],sizeof(stack)};
+        struct iovec local={stack,sizeof(stack)}, remote={(void *)BB_GREGS(uc)[REG_RSP],sizeof(stack)};
         const ssize_t got=process_vm_readv(getpid(),&local,1,&remote,1,0);
         for (ssize_t i=0;i<got/8;++i) if (stack[i]>=text_lo && stack[i]<text_hi) { caller=stack[i]-text_lo; break; }
     }
@@ -422,6 +427,11 @@ static void sample_handler(int sig, siginfo_t *info, void *context) {
 }
 static void *sampler_main(void *arg) {
     const char *name=(const char *)arg;
+#ifdef __APPLE__
+    /* Finds the thread in /proc and signals it with tgkill: Linux only. */
+    printf("Runtime: BB_SAMPLE_THREAD=%s is not available on macOS\n",name);
+    return NULL;
+#else
     pid_t tid=0;
     while (!tid) {
         DIR *dir=opendir("/proc/self/task");
@@ -444,6 +454,7 @@ static void *sampler_main(void *arg) {
         nanosleep(&t,NULL);
     }
     return NULL;
+#endif
 }
 static void sample_start(void) {
     static int started;

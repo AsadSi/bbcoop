@@ -3,6 +3,9 @@
 #include <time.h>
 #include <stdint.h>
 #include <stddef.h>
+#ifdef __APPLE__
+#include "darwin_compat.h"
+#endif
 #ifndef _WIN32
 #include <setjmp.h>
 /* Recovery point for speculative guest memory reads on this thread (probe.c fault handler). */
@@ -11,6 +14,12 @@ extern __thread sigjmp_buf *runtime_fault_recover;
 void runtime_restart(void);
 #endif
 #define ABI __attribute__((sysv_abi))
+/* Functions that top-level asm defines or calls by plain name (Mach-O prefixes C symbols with '_'). */
+#ifdef __APPLE__
+#define ASM_NAME(name) __asm__(#name)
+#else
+#define ASM_NAME(name)
+#endif
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
 uintptr_t runtime_resolve(const char *name, int is_data);

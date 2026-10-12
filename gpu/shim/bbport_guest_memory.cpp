@@ -344,6 +344,12 @@ bool RunOnce(const Vulkan::Instance& instance, Record&& record) {
 /// backing view): imported through one view, bound into a sparse buffer like the arena, written by
 /// the GPU and read by the CPU through the other view, and the other way round.
 bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
+#ifdef __APPLE__
+    // macOS: direct memory is a Mach memory entry, not a memfd; the import path is not ported yet.
+    (void)instance;
+    why = "macOS";
+    return false;
+#endif
     why = "VK_EXT_external_memory_host unavailable";
     if (!instance.IsHostMemoryImportSupported()) {
         return false;
