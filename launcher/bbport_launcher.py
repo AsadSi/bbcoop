@@ -189,6 +189,11 @@ INI_DEFAULTS = {
     "mouse_invert_y": "0",
     **{key: "1" if default else "0" for key, _, default in EFFECTS},
 }
+if sys.platform == "darwin":
+    # macOS (Apple Silicon): as the GPU library's own defaults (bbport_settings.h). FSR in Ultra
+    # Performance at 1/3 of the resolution, with object motion, looked blurred at 17-26 FPS on an
+    # M1 Pro; native resolution without them holds the game's 30.
+    INI_DEFAULTS.update({"upscaler": "off", "preset": "0", "object_motion": "0", "show_fps": "1"})
 
 
 def load_settings():
