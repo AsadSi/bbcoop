@@ -7,6 +7,10 @@ start-up tweaks passed as environment variables to run.sh, starts and stops the 
 its output. Launcher settings live in ~/.config/bbport-launcher/settings.json.
 Russian, English, Brazilian Portuguese and Simplified Chinese (bbport_i18n: the Russian
 text is the key).
+
+Without GTK (macOS, a bare system) the window is unavailable, the rest is not:
+  --set key=value ...   stores launcher settings (game_dir=..., fps_mode=60, ...)
+  --play                starts the game with the stored settings
 """
 
 import json
@@ -22,11 +26,19 @@ from pathlib import Path
 from bbport_assets import fsr411_problem
 from bbport_i18n import language, set_language, tr
 
-import gi
+try:
+    import gi
 
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+    HAVE_GTK = True
+except (ImportError, ValueError):
+    # --set and --play need no window: the window classes are defined on stand-in bases.
+    import types
+    Adw = types.SimpleNamespace(ApplicationWindow=object, Application=object)
+    Gio = GLib = Gtk = None
+    HAVE_GTK = False
 
 PORT_DIR = Path(__file__).resolve().parent.parent  # native_probe (or the package's copy)
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
@@ -155,6 +167,10 @@ DEFAULTS = {
     "online_npid": "",
     "online_password": "",
     "online_upnp": True,
+    # macOS: the x86-64 dependency prefix (build.sh: BB_MACOS_DEPS, e.g. vcpkg's
+    # installed/x64-osx) and MoltenVK's MoltenVK_icd.json (run.sh: BB_MOLTENVK_ICD).
+    "macos_deps": "",
+    "moltenvk_icd": "",
 }
 
 # bbport.ini keys the launcher edits; the rest of the file is kept.
@@ -353,6 +369,11 @@ def game_environment(s):
         env["BB_SHADNET_PASSWORD"] = s["online_password"]
         env["BB_UPNP"] = "1" if s["online_upnp"] else "0"
         env["BB_COMMUNITY_SERVER"] = community
+    if sys.platform == "darwin":
+        if s.get("macos_deps"):
+            env["BB_MACOS_DEPS"] = str(Path(s["macos_deps"]).expanduser())
+        if s.get("moltenvk_icd"):
+            env["BB_MOLTENVK_ICD"] = str(Path(s["moltenvk_icd"]).expanduser())
     for item in s["extra_env"].split():
         if "=" in item:
             key, value = item.split("=", 1)
@@ -1702,6 +1723,35 @@ def play():
     os.execvpe("bash", ["bash", str(PORT_DIR / "run.sh")], game_environment(settings))
 
 
+def set_settings(arguments):
+    """--set key=value ...: launcher settings without the window (macOS, scripts)."""
+    settings = load_settings()
+    for argument in arguments:
+        key, sep, value = argument.partition("=")
+        if not sep or key not in DEFAULTS:
+            print(f"bbport: unknown setting {argument!r}; known: {', '.join(sorted(DEFAULTS))}",
+                  file=sys.stderr)
+            return 1
+        default = DEFAULTS[key]
+        if isinstance(default, bool):
+            if value.lower() not in ("1", "0", "true", "false", "on", "off"):
+                print(f"bbport: {key} takes 1 or 0", file=sys.stderr)
+                return 1
+            settings[key] = value.lower() in ("1", "true", "on")
+        elif isinstance(default, int):
+            try:
+                settings[key] = int(value)
+            except ValueError:
+                print(f"bbport: {key} takes a number", file=sys.stderr)
+                return 1
+        else:
+            settings[key] = value
+        print(f"{key} = {settings[key]!r}")
+    save_settings(settings)
+    print(f"Saved in {CONFIG_FILE}")
+    return 0
+
+
 def build_fsr411(arguments):
     """--build-fsr411 <upscaler DLL> [loader DLL]: the launcher's FSR 4.1.1 build, without a window."""
     if not 1 <= len(arguments) <= 2:
@@ -1712,8 +1762,15 @@ def build_fsr411(arguments):
 
 
 if __name__ == "__main__":
+    if "--set" in sys.argv[1:]:
+        sys.exit(set_settings(sys.argv[sys.argv.index("--set") + 1:]))
     if "--play" in sys.argv[1:]:
         sys.exit(play())
     if "--build-fsr411" in sys.argv[1:]:
         sys.exit(build_fsr411(sys.argv[sys.argv.index("--build-fsr411") + 1:]))
+    if not HAVE_GTK:
+        print("bbport: the launcher window needs GTK 4 and libadwaita for Python (PyGObject; "
+              "macOS: brew install gtk4 libadwaita pygobject3). Without them: --set key=value "
+              "and --play.", file=sys.stderr)
+        sys.exit(1)
     sys.exit(LauncherApp().run(sys.argv))
