@@ -247,4 +247,17 @@ if [[ -n ${mod_game:-} ]]; then
     if kill -0 "$mod_pid" 2>/dev/null; then wait "$mod_pid" || mod_status=$?; fi
     exit "$mod_status"
 fi
+if [[ $(uname -s) == Darwin ]]; then
+    # macOS lets no app take the focus by itself: started from a terminal, the game's window
+    # opened behind it and the keys went to the terminal. System Events brings this process
+    # (bb-probe after the exec below keeps the PID) to the front once its window is up.
+    (
+        for _ in $(seq 30); do
+            sleep 1
+            front=$(osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $$) to true" \
+                -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null) || continue
+            [[ $front == "$$" ]] && break
+        done
+    ) </dev/null >/dev/null 2>&1 &
+fi
 exec "$probe" "${probe_args[@]}"

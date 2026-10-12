@@ -83,6 +83,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     const char* driver = SDL_GetCurrentVideoDriver();
     const SDL_PropertiesID wp = SDL_GetWindowProperties(window);
 #ifdef __APPLE__
+    // Started from a terminal (no app bundle), the process does not become the active app: the
+    // keys kept going to the terminal until the window was clicked. Raising it activates it.
+    SDL_RaiseWindow(window);
     // MoltenVK presents to a CAMetalLayer: SDL_Metal_CreateView makes the window's layer one.
     (void)wp;
     window_info.type = WindowSystemType::Metal;
