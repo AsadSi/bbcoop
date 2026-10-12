@@ -4119,4 +4119,22 @@
             <Line Type="bytes" Address="0x01f39030" Value="554889e5534883ec184889fb488d05ed2d80034889042448897424084889e6e87c0c01004889d84883c4185b5dc3"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Frame Time Step at 0x1972A7D" Author="bbcoop" Note="A/B candidate for Uncap FPS++ (BB_FPS_TRY=step1972; docs/animation_re.md, Foliage speed). The update context that 0x1972900 passes to 0x21145B0 carries a fixed 1/30 (game: mov dword [rbp-0x30], 1/30; the old Uncap FPS++ had 1/240), so whatever it advances runs 4x at 120 FPS. The hook loads the clamped frame time that Uncap FPS++ stores at 0x0575A908 each frame (0x02418E3D). Cave after Uncap FPS++'s caves; rax is dead at the site." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x01972A7D" Value="E97EE0B1039090"/>
+            <Line Type="bytes" Address="0x05490B00" Value="8B05029E2C008945D0E9761F4EFC"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Fixed Wind Offset Step 1/30" Author="bbcoop" Note="A/B candidate for Uncap FPS++ (BB_FPS_TRY=wind30; docs/animation_re.md, Foliage speed). In 0x2713870 (wind sources to per-instance shader constants) the step xmm14 scales offsets that are rebuilt every frame (step x velocity), so with the frame time they change size with every frame-time change. xmm14 gets the game's 1/30 (0x4D26364); the timers (xmm10) keep the frame time from [rbp-0x170] (0x02714B26: mov r8d,[rbp-0x1b8]; vxorps xmm10; cmp byte [0x5940DF9],0; jne; vmovss xmm10,[rbp-0x170])." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x027149EA" Value="C57A103572196102"/>
+            <Line Type="bytes" Address="0x02714B26" Value="448B8548FEFFFFC4412857D2803DC0C22203007508C57A109590FEFFFF"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Fixed Wind Offset Step 1/60" Author="bbcoop" Note="As Fixed Wind Offset Step 1/30 (BB_FPS_TRY=wind60), with the old Uncap FPS++'s 1/60 (0x4D29E70) for the offsets." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x027149EA" Value="C57A10357E546102"/>
+            <Line Type="bytes" Address="0x02714B26" Value="448B8548FEFFFFC4412857D2803DC0C22203007508C57A109590FEFFFF"/>
+        </PatchList>
+    </Metadata>
 </Patch>
