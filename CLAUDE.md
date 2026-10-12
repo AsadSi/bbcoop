@@ -52,7 +52,10 @@ what's still open.
 - Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
   `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
   level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
-  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_GUN_GEMS=0` (the respec
+  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_TEST_LOADOUT=<list>` (fills a character
+  named TEST once, on any profile: stats 99, every weapon +10 with Uncanny/Lost, all armor, full stacks of non-key items,
+  test gems; the list is `mods/bbcoop-respec/test-loadout.txt` from `tools/respec_mod.py`; launcher
+  `~/.local/bin/bloodborne-testchar.sh`), `BB_GUN_GEMS=0` (the respec
   mod leaves out the gem slot it gives every firearm).
 - Camera and frame rate: `BB_CAMERA_ACCEL=1` keeps the game's turn ramp (off by default), `BB_CAMERA_RATES=0`
   leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall

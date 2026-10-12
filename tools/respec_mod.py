@@ -32,7 +32,8 @@ from pathlib import Path, PureWindowsPath
 from soulstruct.containers import Binder
 from soulstruct.base.params.param import TypedParam
 from soulstruct.base.text.fmg import FMG
-from soulstruct.bloodborne.params.paramdef import (EQUIP_MTRL_SET_PARAM_ST, EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST,
+from soulstruct.bloodborne.params.paramdef import (EQUIP_MTRL_SET_PARAM_ST, EQUIP_PARAM_GOODS_ST,
+                                                   EQUIP_PARAM_PROTECTOR_ST, EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST,
                                                    WEAPON_GEN_PARAM_ST)
 from soulstruct.bloodborne.ezstate.esd import TalkESD
 from soulstruct.base.ezstate.esd.command import Command
@@ -508,6 +509,11 @@ def main():
 
     verify(talk_src, talk_out, msg_src, msg_out)
     print(f"wrote {talk_out}\nwrote {msg_out}")
+    loadout = test_loadout(item, Binder.from_path(GAME / GAMEPARAM_REL))
+    kinds = {k: sum(line.startswith(k + " ") for line in loadout) for k in ("weapon", "armor", "goods")}
+    (OUT.parent / LOADOUT_NAME).write_text("\n".join(loadout) + "\n", encoding="utf-8")
+    print(f"Test loadout: {kinds['weapon']} weapons, {kinds['armor']} armor, {kinds['goods']} goods: wrote "
+          f"{OUT.parent / LOADOUT_NAME}")
 
     # --- 3. WeaponGenParam: one gem slot on every firearm (BB_GUN_GEMS=0: none, and no gameparam file) ---
     param_src, param_out = GAME / GAMEPARAM_REL, OUT / GAMEPARAM_REL
@@ -561,6 +567,40 @@ def refund_texts(item: Binder, gameparam: Binder) -> dict[int, str]:
         texts[TXT_REFUND_CONFIRM + level] = "Refund this weapon's upgrades? You get back:\n" + "\n".join(
             f"{names[goods]} × {count}" for goods, count in totals.items())
     return texts
+
+
+# The test character's items (runtime_respec.c, BB_TEST_LOADOUT; a character named TEST): written next to the
+# mod's dvdroot_ps4, which is all the mod loader reads.
+LOADOUT_NAME = "test-loadout.txt"
+ARMOR_NAME_ENTRY_ID = 12          # item.msgbnd entry 12 = armor names
+BARE_FISTS = 1000000
+GOODS_KEY_ITEM = 1                # EquipParamGoods goodsType: 0 tools and consumables, 1 key items, 2 materials,
+LOADOUT_GOODS_TYPES = (0, 2, 6)   # 6 chalices
+GESTURES = range(800, 900)        # goods rows too (Point Forward .. League Oath), not inventory items
+
+
+def test_loadout(item: Binder, gameparam: Binder) -> list[str]:
+    """Every named weapon at its highest level (normal, Uncanny and Lost; shields and the plain Torch at +0), every
+    named armor piece, and every named non-key goods row at its full stack (maxNum), gestures left out."""
+    names = {e.entry_id: FMG.from_bytes(e.get_uncompressed_data()).entries for e in item.entries}
+    named = lambda entry, i: (n := names[entry].get(i)) and n not in ("*", "NOT NEEDED") and not n.startswith("en")
+    weapons = load_param(gameparam, "EquipParamWeapon", EQUIP_PARAM_WEAPON_ST).rows
+    armor = load_param(gameparam, "EquipParamProtector", EQUIP_PARAM_PROTECTOR_ST).rows
+    goods = load_param(gameparam, "EquipParamGoods", EQUIP_PARAM_GOODS_ST).rows
+    lines = [f"# bbcoop test character (BB_TEST_LOADOUT): weapon|armor|goods <id> <count>"]
+    for i in sorted(weapons):
+        if i % 10000 == 0 and i != BARE_FISTS and named(WEAPON_NAME_ENTRY_ID, i):
+            level = max(n for n in range(MAX_UPGRADE + 1) if i + n * 100 in weapons)
+            lines.append(f"weapon {i + level * 100} 1  # {names[WEAPON_NAME_ENTRY_ID][i]} +{level}")
+    for i in sorted(armor):
+        if named(ARMOR_NAME_ENTRY_ID, i):
+            lines.append(f"armor {i} 1  # {names[ARMOR_NAME_ENTRY_ID][i]}")
+    for i in sorted(goods):
+        row = goods[i]
+        if (row["goodsType"] in LOADOUT_GOODS_TYPES and row["maxNum"] > 0 and i not in GESTURES
+                and named(GOODS_NAME_ENTRY_ID, i)):
+            lines.append(f"goods {i} {row['maxNum']}  # {names[GOODS_NAME_ENTRY_ID][i]}")
+    return lines
 
 
 def same_container(src: Path, out: Path):
