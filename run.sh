@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
+if [[ $(uname -s) == Darwin ]]; then
+    # Rosetta 2 runs the x86-64 build; it executes AVX2 either way, this also reports it in CPUID.
+    export ROSETTA_ADVERTISE_AVX=1
+    # MoltenVK (Vulkan on Metal): BB_MOLTENVK_ICD names its MoltenVK_icd.json when the
+    # Vulkan loader does not find it in a standard location.
+    if [[ -z ${VK_DRIVER_FILES:-} && -n ${BB_MOLTENVK_ICD:-} ]]; then export VK_DRIVER_FILES=$BB_MOLTENVK_ICD; fi
+fi
 if [[ ${1:-} == --software ]]; then
     shift
     if [[ -z ${VK_DRIVER_FILES:-} ]]; then
@@ -43,7 +50,8 @@ fi
 if [[ ${BB_SAVE_LOG:-} == 1 ]]; then
     logs=$data/logs
     mkdir -p "$logs"
-    printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
+    # printf's %(...)T needs bash 4.2 (macOS has 3.2): date there.
+    printf -v stamp '%(%Y%m%d_%H%M%S)T' -1 2>/dev/null || stamp=$(date +%Y%m%d_%H%M%S)
     export BB_FRAME_STATS=1 BB_FRAME_LOG=${BB_FRAME_LOG:-$logs/$stamp.frames.csv}
     export BB_READBACK_LOG=${BB_READBACK_LOG:-$logs/$stamp.readbacks.csv}
     echo "Log: $logs/$stamp.log"
