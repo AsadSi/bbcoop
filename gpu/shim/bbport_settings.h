@@ -46,20 +46,30 @@ inline constexpr int OutputHeights[] = {720, 1080, 1440, 2160};
 inline constexpr int OutputCount = 4;
 inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
 
+/// macOS (Apple Silicon): the upscaler and its object motion vectors off and the FPS counter on
+/// by default. With them the GPU held 17-20 FPS in the Hunter's Dream on an M1 Pro, 30 without.
+#ifdef __APPLE__
+inline constexpr int DefaultUpscaler = UpscalerOff;
+inline constexpr bool DefaultObjectMotion = false, DefaultShowFps = true;
+#else
+inline constexpr int DefaultUpscaler = UpscalerFsr3;
+inline constexpr bool DefaultObjectMotion = true, DefaultShowFps = false;
+#endif
+
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::Russian};
-    std::atomic<int> upscaler{UpscalerFsr3};
+    std::atomic<int> upscaler{DefaultUpscaler};
     std::atomic<int> preset{NativeAA};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.3f};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
-    std::atomic<bool> object_motion{true};
+    std::atomic<bool> object_motion{DefaultObjectMotion};
     std::atomic<float> reactive_scale{1.0f};
     std::atomic<float> reactive_threshold{0.2f};
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
-    std::atomic<bool> show_fps{false};
+    std::atomic<bool> show_fps{DefaultShowFps};
     /// The settings menu's position (fraction of the screen), -1 until it is moved.
     std::atomic<float> menu_x{-1.0f}, menu_y{-1.0f};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
@@ -82,8 +92,8 @@ struct Values {
 
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
     int startup_preset = NativeAA;
-    int startup_upscaler = UpscalerFsr3;
-    bool startup_object_motion = true;
+    int startup_upscaler = DefaultUpscaler;
+    bool startup_object_motion = DefaultObjectMotion;
     bool startup_effects[EffectCount]{};
     int startup_model_lod = 0;
     int startup_output_res = OutputDefault;

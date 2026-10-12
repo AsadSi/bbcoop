@@ -190,8 +190,13 @@ void Menu() {
     ImGui::SetNextWindowSize(ImVec2(620.0f * base_scale, 0.0f), ImGuiCond_Appearing);
     bool keep_open = true;
     if (!ImGui::Begin(
+#ifdef __APPLE__
+            BbSettings::MenuText("Bloodborne - Graphics  (F10 / L3+R3)###bbport_settings",
+                                 "Bloodborne — настройки  (F10 / L3+R3)###bbport_settings"),
+#else
             BbSettings::MenuText("Bloodborne - Graphics  (Insert / L3+R3)###bbport_settings",
                                  "Bloodborne — настройки  (Insert / L3+R3)###bbport_settings"),
+#endif
             &keep_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
@@ -753,7 +758,11 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         return;
     }
     initialized = true;
+#ifdef __APPLE__
+    std::printf("Overlay: menu ready (F10, Insert or L3+R3)\n");
+#else
     std::printf("Overlay: menu ready (Insert or L3+R3)\n");
+#endif
 }
 
 void UpdateTextInput(SDL_Window* window) {
@@ -782,9 +791,14 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
-        if (down && !event.key.repeat &&
-            (event.key.key == SDLK_INSERT || (is_open && event.key.key == SDLK_ESCAPE))) {
-            SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
+#ifdef __APPLE__
+        // Mac keyboards have no Insert key: F10 (fn+F10) opens the menu too.
+        const bool toggle = event.key.key == SDLK_INSERT || event.key.key == SDLK_F10;
+#else
+        const bool toggle = event.key.key == SDLK_INSERT;
+#endif
+        if (down && !event.key.repeat && (toggle || (is_open && event.key.key == SDLK_ESCAPE))) {
+            SetOpen(toggle ? !is_open : false);
             return true;
         }
         if (!is_open) {
