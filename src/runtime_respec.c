@@ -13,6 +13,7 @@
 #include "hooks.h"
 #include "runtime.h"
 #include "runtime_respec.h"
+#include "runtime_saveslots.h"
 #include <dirent.h>
 #include <ftw.h>
 #include <errno.h>
@@ -110,6 +111,8 @@ typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id
 
 static uint64_t image_base;
 static int respec_free, test_endgame, endgame_done, trace;
+static int text_hook_installed; /* the menu text hook, which runtime_saveslots.c shares */
+int respec_text_hook_installed(void) { return text_hook_installed; }
 static const char *test_loadout; /* BB_TEST_LOADOUT: the item list for a character named TEST */
 /* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
@@ -667,6 +670,11 @@ static void upgrade_panel_cost(HookRegs *regs) {
  * upgrades? You get back:" and the materials for the highlighted weapon's level, instead of "Use 0
  * Blood Echoes and × 1 to fortify weapon?" (without a known level, just "Refund this weapon's upgrades?"). */
 static void text_reference(HookRegs *regs) {
+    uint32_t id = (uint32_t)regs->rdx;
+    if (saveslots_text((uint32_t)regs->rsi, &id)) { /* the Load Game list's Duplicate (runtime_saveslots.c) */
+        regs->rdx = id;
+        return;
+    }
     if ((uint32_t)regs->rdx != FORTIFY_CONFIRM_TEXT || (uint32_t)regs->rsi != MENU_DIALOGS_FMG || !refund_requested)
         return;
     int level = refund_item_key && (refund_item_key & 0xF0000000u) == CATEGORY_WEAPON
@@ -853,6 +861,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
         }
     if (!failure) failure = hooks_seal();
     if (failure) return failure;
+    text_hook_installed = 1;
     printf("Respec: %zu hooks installed%s%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
            test_endgame ? ", BB_TEST_ENDGAME" : "", test_loadout ? ", BB_TEST_LOADOUT (a character named TEST)" : "");
     return NULL;

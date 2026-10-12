@@ -39,4 +39,6 @@ int respec_upgrade_materials(int level, RespecMaterial out[RESPEC_MATERIAL_KINDS
 
 /* Installs the respec hooks (runtime_respec.c); NULL or an error. */
 const char *respec_install(unsigned char *image, uint64_t size);
+/* The menu text hook is in (runtime_saveslots.c's Duplicate needs it). */
+int respec_text_hook_installed(void);
 #endif

@@ -55,6 +55,7 @@ WORKSHOP_SM = 0x80000000 - 2      # Arcane Haze / Leave): machine x2; state 1 op
 MENU_SM = 0x80000000 - 7          # "x7" = Doll's main talk menu (Channel Blood Echoes / Talk / Give ... / Leave)
 EVENT_TEXT_ENTRY_ID = 30          # menu.msgbnd entry 30 = EventText (talk-list labels 15000xxx, dialogs 1001xxxx)
 DIALOG_TEXT_ENTRY_ID = 204        # menu.msgbnd entry 204 = MenuDialogs_SP (the Fortify confirm is 221000)
+KEYGUIDE_TEXT_ENTRY_ID = 202      # menu.msgbnd entry 202 = the SP key guide (button labels; "Delete" is 400003)
 
 # Event flags (block 72100xxx: Hunter's Dream NPC flags; 72100500-72100999 unused by every ESD/EMEVD in the game).
 FLAG_RESPEC_REQUESTED = 72100900  # ESD sets 1 after "Yes"; native code performs respec, then clears it.
@@ -79,6 +80,13 @@ NEW_TEXT = {
 # from the game's own names and costs); 221090 itself is the fallback without a list.
 TXT_REFUND_CONFIRM = 221090
 NEW_DIALOG_TEXT = {TXT_REFUND_CONFIRM: "Refund this weapon's upgrades?\nIts upgrade materials are returned."}
+# The Load Game list's Duplicate (src/runtime_saveslots.c): its button label and its confirm, which replaces
+# Delete's "OK to delete selected profile?" (406013) while Duplicate runs. 400090 and 40609x are unused.
+NEW_KEYGUIDE_TEXT = {400090: "Duplicate"}
+NEW_DIALOG_TEXT.update({
+    406090: "Duplicate selected profile?\nThe copy is added to the list as a separate profile.",
+    406091: "There is no free profile slot to duplicate into.\nDelete a profile to make room.",
+})
 GOODS_NAME_ENTRY_ID = 10          # item.msgbnd entry 10 = goods names
 MAX_UPGRADE = 10
 # The step to +n costs EquipMtrlSetParam row n*100 (first pair only), as src/runtime_respec_rules.c's table,
@@ -494,7 +502,7 @@ def main():
     for b in (msg, item):
         for e in b.entries:
             ids = FMG.from_bytes(e.get_uncompressed_data()).entries
-            clash = (set(NEW_TEXT) | set(NEW_DIALOG_TEXT)) & set(ids)
+            clash = (set(NEW_TEXT) | set(NEW_DIALOG_TEXT) | set(NEW_KEYGUIDE_TEXT)) & set(ids)
             assert not clash, (e.path, clash)
     fmg.entries.update(NEW_TEXT)
     fmg_entry.set_uncompressed_data(bytes(fmg.to_writer()))
@@ -502,6 +510,10 @@ def main():
     dialog = FMG.from_bytes(dialog_entry.get_uncompressed_data())
     assert not set(NEW_DIALOG_TEXT) & set(dialog.entries)
     dialog.entries.update(NEW_DIALOG_TEXT)
+    keyguide_entry = [e for e in msg.entries if e.entry_id == KEYGUIDE_TEXT_ENTRY_ID][0]
+    keyguide = FMG.from_bytes(keyguide_entry.get_uncompressed_data())
+    keyguide.entries.update(NEW_KEYGUIDE_TEXT)
+    keyguide_entry.set_uncompressed_data(bytes(keyguide.to_writer()))
     dialog_entry.set_uncompressed_data(bytes(dialog.to_writer()))
     msg_out = OUT / MSG_REL
     msg_out.parent.mkdir(parents=True, exist_ok=True)
@@ -688,13 +700,14 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     print(f"talk OK: only {DOLL_ESD} (x7 states {diff_states}, labels {adds}) and {WORKSHOP_ESD} "
           f"(x2 states {ws_states}, labels {ws_adds}) changed")
 
-    # Msg: every FMG except EventText and MenuDialogs_SP byte-identical; those two = vanilla + the new strings.
+    # Msg: every FMG except EventText, the key guide and MenuDialogs_SP byte-identical; those = vanilla + the new strings.
     a, b = Binder.from_path(msg_src), Binder.from_path(msg_out)
     changed = [x.entry_id for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
-    assert changed == sorted([EVENT_TEXT_ENTRY_ID, DIALOG_TEXT_ENTRY_ID]), changed
+    assert changed == sorted([EVENT_TEXT_ENTRY_ID, KEYGUIDE_TEXT_ENTRY_ID, DIALOG_TEXT_ENTRY_ID]), changed
     norm = lambda d: {k: (v or "") for k, v in d.items()}
-    for entry_id, new_text in ((EVENT_TEXT_ENTRY_ID, NEW_TEXT), (DIALOG_TEXT_ENTRY_ID, NEW_DIALOG_TEXT)):
+    for entry_id, new_text in ((EVENT_TEXT_ENTRY_ID, NEW_TEXT), (DIALOG_TEXT_ENTRY_ID, NEW_DIALOG_TEXT),
+                               (KEYGUIDE_TEXT_ENTRY_ID, NEW_KEYGUIDE_TEXT)):
         fa = FMG.from_bytes([e for e in a.entries if e.entry_id == entry_id][0].get_uncompressed_data())
         fb = FMG.from_bytes([e for e in b.entries if e.entry_id == entry_id][0].get_uncompressed_data())
         ea, eb = norm(fa.entries), norm(fb.entries)

@@ -102,7 +102,7 @@ if [[ ${1:-} == --test ]]; then
     out/hooks-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_seamless_hooks.c src/runtime_seamless_hooks.c src/runtime_hooks.c -lm -o out/seamless-hooks-test # bbcoop
     out/seamless-hooks-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_saveslots.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
     out/respec-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_camera.c src/runtime_camera.c src/runtime_hooks.c -lm -o out/camera-test # bbcoop
     out/camera-test
@@ -110,4 +110,6 @@ if [[ ${1:-} == --test ]]; then
     out/messenger-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_ik.c src/runtime_ik.c src/runtime_hooks.c -lm -o out/ik-test # bbcoop
     out/ik-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_saveslots.c src/runtime_saveslots.c src/runtime_hooks.c -o out/saveslots-test # bbcoop
+    out/saveslots-test
 fi

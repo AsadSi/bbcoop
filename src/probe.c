@@ -47,6 +47,8 @@ const char *camera_install(unsigned char *image, uint64_t size); /* bbcoop: runt
 const char *messenger_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_messenger.c */
 const char *ik_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_ik.c */
 const char *respec_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_respec.c */
+int respec_text_hook_installed(void); /* bbcoop: runtime_respec.c */
+const char *saveslots_install(unsigned char *image, uint64_t size, int text_hook); /* bbcoop: runtime_saveslots.c */
 
 /* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
  * (andn/bextr/blsr/tzcnt), MOVBE, LZCNT and POPCNT, thousands of each in eboot.bin. A CPU without
@@ -554,6 +556,7 @@ int main(int argc, char **argv) {
         if (error) fail(error);
     }
     { const char *error = respec_install(image, size); if (error) fail(error); } /* bbcoop: BB_RESPEC=0 skips */
+    { const char *error = saveslots_install(image, size, respec_text_hook_installed()); if (error) fail(error); } /* bbcoop: BB_SAVESLOTS=0 skips */
     { const char *error = camera_install(image, size); if (error) fail(error); } /* bbcoop: docs/camera_re.md */
     messenger_install(image, size); /* bbcoop: BB_MESSENGER_RADIUS */
     { const char *error = ik_install(image, size); if (error) fail(error); } /* bbcoop: docs/animation_re.md */
