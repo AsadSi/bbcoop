@@ -55,7 +55,8 @@ The origin's row is `CharaInitParam[3000 + origin index]`. The start values are 
 - **Thread:** it runs on the game thread.
 
 ## The Doll's talk script (`script/talk/m21_00_00_00.talkesdbnd.dcx`)
-- **Who's who:** t210304 is the Plain Doll (`c8030_0000`), and t210692 is the Workshop tools (Fortify Weapon, Repair, Blood Gem, Arcane Haze).
+- **Who's who:** t210304 is the Plain Doll (`c8030_0000`), and t210692 is the Workshop's workbench (machine x2: Fortify Weapon, Repair Weapons, Blood Gem Fortification, Arcane Haze, Leave; list built in state 6, choice in state 3, menu root state 2, Fortify state 1).
+- **Where:** "Reset Attributes" is in the Doll's menu (machine x7), "Refund Weapon Upgrades" in the workbench's, just before Leave (states 27–29: flag 72100901 on, `c1_48`, wait for the menu to close, flag off; the menu root and Fortify Weapon switch it off too). It was at the Doll until 2026-10-12.
 - **Commands, as bank_index:**
   - `c1_19(slot, text, flag)` adds a menu entry.
   - `c1_48()` opens the Fortify Weapon list (menu type 13, closed when `f59(13,0)==0`).
@@ -87,7 +88,7 @@ The origin's row is `CharaInitParam[3000 + origin index]`. The start values are 
   - Fitted gems are not in the inventory list.
 - **Gem slots:** they open at +1/+3/+6 (melee) or +1 (firearms). Upgrading opens slots but never closes them, so a downgrade has to close them itself.
   - Upgrade path: ChangeItemId → 0x14db020 builds a temporary instance from WeaponGenParam[new id] (0x1a876d0) and 0x1a94340 copies each of its open slots into a slot of the weapon that is still closed (0x80000000).
-  - Gun gems (`tools/respec_mod.py`, off with `BB_GUN_GEMS=0`): firearms are the `leftHandEquipable` weapons that can be upgraded (have a +1 row), which leaves out the shields and the plain Torch (+0 only). Cannon, Rosmarinus, Flamesprayer, Fist of Gratia, Church Cannon and the Hunter's Torch +1..+10 get the Hunter Pistol's row (one droplet slot, type 0x8). Every GemCategoryParam row enables all slot types, and no EquipParamWeapon field separates them from the slotted guns. A gun gets the slot at its next upgrade (or as a new instance); one already at +10 needs a refund at the Doll and a new upgrade.
+  - Gun gems (`tools/respec_mod.py`, off with `BB_GUN_GEMS=0`): firearms are the `leftHandEquipable` weapons that can be upgraded (have a +1 row), which leaves out the shields and the plain Torch (+0 only). Cannon, Rosmarinus, Flamesprayer, Fist of Gratia, Church Cannon and the Hunter's Torch +1..+10 get the Hunter Pistol's row (one droplet slot, type 0x8). Every GemCategoryParam row enables all slot types, and no EquipParamWeapon field separates them from the slotted guns. A gun gets the slot at its next upgrade (or as a new instance); one already at +10 needs a refund at the workbench and a new upgrade.
 - **Equip slots:** 15 of them. The inventory index is at EGD+0x24+4s and the handle at EGD+0x94+4s. Weapons are slots 0..7.
 
 | Function | Offset |

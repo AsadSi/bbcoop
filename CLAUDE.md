@@ -14,7 +14,7 @@ what's still open.
 - New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
   without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
   `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`),
-  `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
+  `runtime_respec.c` (the Doll's respec and the workbench's weapon refund, 7 hooks, on by default;
   `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
   `runtime_ik.c` (the foot-IK height correction at uncapped frame rates, `docs/animation_re.md`),
   and later `runtime_coop.c`. Data mods go in

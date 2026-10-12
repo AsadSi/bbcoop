@@ -1,7 +1,7 @@
 """bbcoop: tools/respec_mod.py on the game's own files. Needs the game (BB_GAME_DIR, or the US or EU
 folder next to the repository) and soulstruct in BB_RE_PYTHON (default ~/.local/share/bbcoop-re);
-skipped without them. The script itself checks that only the Doll's talk script and the EventText
-entry change, and in the gameparam only the firearms' WeaponGenParam rows; this test checks the result
+skipped without them. The script itself checks that only the Doll's and the workbench's talk scripts and
+the EventText and MenuDialogs_SP entries change, and in the gameparam only the firearms' WeaponGenParam rows; this test checks the result
 once more from the outside."""
 from paths import ROOT
 import json
@@ -77,7 +77,10 @@ class RespecModTests(unittest.TestCase):
         self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
 
     def test_builds_the_three_files(self):
-        self.assertIn('talk OK: only t210304.esd and t210692.esd', self.result.stdout)
+        # Reset Attributes at the Doll, Refund Weapon Upgrades at the workbench (just before Leave).
+        self.assertIn('talk OK: only t210304.esd (x7 states [2, 5, 31, 32], labels [15000100, 15000007, 15000008, '
+                      '15009100, 15000005]) and t210692.esd (x2 states [1, 2, 3, 6, 27, 28, 29], labels [15000110, '
+                      '15000120, 15000111, 10011050, 15009110, 15000005]) changed', self.result.stdout)
         self.assertIn("'Reset Attributes'", self.result.stdout)
         self.assertIn("'Refund Weapon Upgrades'", self.result.stdout)
         self.assertEqual(files(self.out), sorted(TALK_AND_MSG + [GAMEPARAM]))

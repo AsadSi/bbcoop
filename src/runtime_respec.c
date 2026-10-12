@@ -1,6 +1,6 @@
-/* bbcoop: respec at the Doll (Bloodborne 1.09, EU/US, one image). The Doll's talk script
- * (tools/respec_mod.py) sets event flag 72100900 for "Reset Attributes" and 72100901 while
- * "Refund Weapon Upgrades" has the weapon list open; this file does the rest on the game thread,
+/* bbcoop: respec at the Doll, weapon refund at the Workshop's workbench (Bloodborne 1.09, EU/US, one
+ * image). The talk scripts (tools/respec_mod.py) set event flag 72100900 for the Doll's "Reset
+ * Attributes" and 72100901 while the workbench's "Refund Weapon Upgrades" has the weapon list open; this file does the rest on the game thread,
  * from hooks on SetEventFlag (the talk script's c1_11 runs on the game thread) and on the per-update
  * SOS status (the session state, which also runs offline). Offsets are image offsets; every hook site and
  * every game function called is checked byte for byte first (docs/respec_re.md has the RE).
@@ -46,7 +46,7 @@
 #define HANDLE_RELEASE   0x01A8BC00
 #define GEM_FEATURES     0x0555235C /* the chalice feature block the debug "add gem" passes */
 #define ADD_ITEM_OR_STORAGE 0x01B5C8C0 /* what does not fit goes to the Messengers' storage */
-/* The "WeaponUpgrade" menu (the Workshop's Fortify Weapon; the Doll opens it too). It lists every
+/* The "WeaponUpgrade" menu (the workbench's Fortify Weapon, and its Refund Weapon Upgrades). It lists every
  * weapon; an item I holds the inventory index at +0x48, the item key at +0x4C and its cost. Hooked for
  * refund mode. (FrpgMenuDlgEquipCustomShop at 0x1736140 is a dead leftover.) */
 #define UPGRADE_LIST_FILTER_1 0x01C689E1 /* the tabs' "has a next level" filters: eax the id, esi the */
@@ -106,7 +106,7 @@ typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id
 
 static uint64_t image_base;
 static int respec_free, test_endgame, endgame_done, trace;
-/* Refund mode, from the Doll's writes of flag 72100901, which is never stored: a stored flag is saved
+/* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
 static unsigned frames, dense; /* dense: frames of every-frame tracing left after a change */
@@ -469,7 +469,7 @@ static uint64_t inventory_entry(uint64_t inventory, uint32_t index) {
                              : read_u64(inventory, 0x48) + (uint64_t)(index - key_items) * 16;
 }
 
-/* Refund mode: the Doll's "Refund Weapon Upgrades" has the Fortify menu open (she writes 72100901
+/* Refund mode: the workbench's "Refund Weapon Upgrades" has the Fortify menu open (it writes 72100901
  * before opening it and again when it closes), in the Dream, with no co-op session. */
 static int refund_mode(void) {
     return refund_requested && (current_packed_map() >> 24) == DREAM_AREA && !in_session();
@@ -532,7 +532,7 @@ static int item_level(uint64_t item, int32_t *id) {
 }
 
 /* Which weapons the list shows. The game lists a weapon when its next level's row exists; with the
- * Doll's menu open it lists those whose +0 row exists, upgraded ones (+10 too), and nothing else
+ * refund menu open it lists those whose +0 row exists, upgraded ones (+10 too), and nothing else
  * (nothing at all when a refund is not allowed, in a co-op session). */
 static void upgrade_list_filter(HookRegs *regs) {
     if (!refund_requested) return;
@@ -554,14 +554,14 @@ static void upgrade_panel_cost(HookRegs *regs) {
     if (refund_requested) blank_cost(regs->rbp - 0x150);
 }
 
-/* Menu text lookups: with the Doll's menu open, the Fortify confirm becomes "Refund this weapon's
+/* Menu text lookups: with the refund menu open, the Fortify confirm becomes "Refund this weapon's
  * upgrades?" instead of "Use 0 Blood Echoes and × 1 to fortify weapon?". */
 static void text_reference(HookRegs *regs) {
     if ((uint32_t)regs->rdx == FORTIFY_CONFIRM_TEXT && (uint32_t)regs->rsi == MENU_DIALOGS_FMG && refund_requested)
         regs->rdx = REFUND_CONFIRM_TEXT;
 }
 
-/* Each item's cost, as the list, the affordability check and the payment see it: with the Doll's
+/* Each item's cost, as the list, the affordability check and the payment see it: with the refund
  * menu open, nothing (no echoes, no Insight, an empty material list). */
 static void upgrade_item_cost(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_item_cost: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->rbx, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
@@ -577,7 +577,7 @@ static void upgrade_target(HookRegs *regs) {
     if (item_level(regs->r15, &id) >= 1) regs->rbx = (uint32_t)respec_weapon_base(id);
 }
 
-/* Just before that ChangeItemId: gems out, materials back. With the Doll's menu open anything else,
+/* Just before that ChangeItemId: gems out, materials back. With the refund menu open anything else,
  * or a failed refund, gives the game's ChangeItemId the weapon's own id, so nothing changes. */
 static void upgrade_apply(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_apply: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r14, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
@@ -601,7 +601,7 @@ static void frame_update(HookRegs *regs) {
     uint64_t pgd;
     if (trace && (frames++ % 300 == 0 || (dense && dense-- % 10 == 0))) trace_state();
     /* A new load (the Lua event manager is recreated): the flags are saved, so a game quit with the
-     * Doll's refund menu open would leave refund mode on for the Workshop's own Fortify menu. */
+     * workbench's refund menu open would leave refund mode on for its own Fortify Weapon. */
     static uint64_t loaded;
     uint64_t lua = image_pointer(LUA_EVENT_MAN);
     if (lua >= 0x10000 && lua != loaded && player_data() >= 0x10000) {
@@ -632,7 +632,7 @@ static void dump_inventory(void) {
 }
 
 /* SetEventFlag(manager rdi, flag esi, on edx). The Doll's "Yes" sets 72100900: reset the attributes
- * here. Her refund menu writes 72100901: that is refund mode. Either way the original instructions
+ * here. The workbench's refund menu writes 72100901: that is refund mode. Either way the original instructions
  * then write the flag as 0, so neither is ever stored (or saved). Other callers (about 85, some on
  * other threads) only pay for the compare. */
 static void set_event_flag(HookRegs *regs) {
