@@ -1,6 +1,6 @@
 /* bbcoop: "Duplicate" in the title screen's Load Game list (Bloodborne 1.09, EU/US, one image). Triangle
- * on a profile asks "Duplicate selected profile?"; Yes copies the character into the first free profile
- * slot as "<name> (2)" ("(3)", ...), which then shows in the list as a character of its own: loading it
+ * on a profile asks "Duplicate selected profile?"; Yes copies the character, name and all, into the first
+ * free profile slot, which then shows in the list as a character of its own: loading it
  * goes on from there and autosaves into its own slot, the original keeps its own. Every copy is kept
  * until deleted in the same list (10 slots in all). docs/saveslots_re.md has the reverse engineering.
  *
@@ -95,43 +95,10 @@ static int free_slot(uint64_t s) {
     return -1;
 }
 
-/* ---- the copy's name: "<name> (n)", n the smallest from 2 that no other profile has ---- */
-
-static size_t name_length(const uint16_t *name) {
-    size_t n = 0;
-    while (n < NAME_CHARS && name[n]) ++n;
-    return n;
-}
-
-/* `base` without a " (n)" suffix of ours. */
-static size_t base_length(const uint16_t *name, size_t n) {
-    if (n >= 4 && name[n - 1] == ')') {
-        size_t i = n - 2;
-        while (i > 0 && name[i] >= '0' && name[i] <= '9') --i;
-        if (i + 2 < n && i >= 2 && name[i] == '(' && name[i - 1] == ' ') return i - 1;
-    }
-    return n;
-}
-
-void saveslots_copy_name(const uint16_t *source, const uint16_t taken[][NAME_CHARS + 1], int count,
-                         uint16_t out[NAME_CHARS + 1]) {
-    size_t length = base_length(source, name_length(source));
-    for (int n = 2; n < 100; ++n) {
-        char suffix[8];
-        int s = snprintf(suffix, sizeof(suffix), " (%d)", n);
-        size_t keep = length + (size_t)s > NAME_CHARS ? NAME_CHARS - (size_t)s : length;
-        memset(out, 0, sizeof(uint16_t) * (NAME_CHARS + 1));
-        memcpy(out, source, keep * sizeof(uint16_t));
-        for (int i = 0; i < s; ++i) out[keep + (size_t)i] = (uint16_t)suffix[i];
-        int used = 0;
-        for (int t = 0; t < count && !used; ++t) used = !memcmp(taken[t], out, sizeof(uint16_t) * (NAME_CHARS + 1));
-        if (!used) return;
-    }
-}
-
 /* ---- the copy ---- */
 
-static int copy_file(const char *from, const char *to, const uint16_t *old_name, const uint16_t *new_name) {
+/* A byte copy (the slot file stores no slot number or ID), to a temporary file first. */
+static int copy_file(const char *from, const char *to) {
     FILE *in = fopen(from, "rb");
     if (!in) return 0;
     unsigned char *data = malloc(SLOT_FILE_SIZE + 1);
@@ -141,18 +108,6 @@ static int copy_file(const char *from, const char *to, const uint16_t *old_name,
         free(data);
         return 0;
     }
-    /* The name as the slot stores it (16 UTF-16 characters, zero-padded, a terminator): in PlayerGameData
-     * (+0xA8), and in some saves once more beside the face data. Every exact copy is renamed; the list's
-     * summary is rebuilt from PlayerGameData when the copy saves. */
-    unsigned char pattern[(NAME_CHARS + 1) * 2] = {0};
-    memcpy(pattern, old_name, name_length(old_name) * 2);
-    int hits = 0;
-    for (size_t i = 0; i + sizeof(pattern) <= SLOT_FILE_SIZE; i += 2)
-        if (!memcmp(data + i, pattern, sizeof(pattern))) {
-            memcpy(data + i, new_name, sizeof(pattern));
-            ++hits;
-        }
-    if (hits != 1) printf("Saveslots: the name was found %d times in the slot file (all renamed)\n", hits);
     char temporary[1200];
     snprintf(temporary, sizeof(temporary), "%s.tmp", to);
     FILE *out = fopen(temporary, "wb");
@@ -182,23 +137,12 @@ static void duplicate(int source) {
     snprintf(backup, sizeof(backup), "%s/backup%04d", dir, target);
     unsigned char record[RECORD_SIZE];
     if (!guest_access(s, 0x20 + (uint64_t)RECORD_SIZE * (uint64_t)source, record, sizeof(record), 0)) return;
-    uint16_t old_name[NAME_CHARS + 1] = {0}, new_name[NAME_CHARS + 1], taken[SLOTS][NAME_CHARS + 1];
-    memcpy(old_name, record, NAME_CHARS * 2);
-    int count = 0;
-    for (int i = 0; i < SLOTS; ++i)
-        if (slot_exists(s, i) && guest_access(s, 0x20 + (uint64_t)RECORD_SIZE * (uint64_t)i, taken[count],
-                                              NAME_CHARS * 2, 0)) {
-            taken[count][NAME_CHARS] = 0;
-            ++count;
-        }
-    saveslots_copy_name(old_name, (const uint16_t (*)[NAME_CHARS + 1])taken, count, new_name);
-    if (!copy_file(from, to, old_name, new_name)) {
+    if (!copy_file(from, to)) {
         printf("Saveslots: duplicate failed: could not copy %s to %s\n", from, to);
         return;
     }
     /* backupN is the game's fallback when userdataN cannot be read: an older (deleted) character. */
     unlink(backup);
-    memcpy(record, new_name, sizeof(new_name));
     uint8_t on = 1;
     if (!guest_access(s, 0x20 + (uint64_t)RECORD_SIZE * (uint64_t)target, record, sizeof(record), 1) ||
         !guest_access(s, 0x10 + (uint64_t)target, &on, 1, 1)) {
@@ -207,8 +151,11 @@ static void duplicate(int source) {
         return;
     }
     char name[NAME_CHARS + 1];
-    for (int i = 0; i <= NAME_CHARS; ++i) name[i] = new_name[i] < 128 ? (char)new_name[i] : '?';
-    printf("Saveslots: slot %d duplicated into slot %d as \"%s\" (%s); the game saves the profile list next\n",
+    int length = 0;
+    for (uint16_t c; length < NAME_CHARS && (c = (uint16_t)(record[2 * length] | record[2 * length + 1] << 8)); ++length)
+        name[length] = c < 128 ? (char)c : '?';
+    name[length] = 0;
+    printf("Saveslots: slot %d duplicated into slot %d, same name \"%s\" (%s); the game saves the profile list next\n",
            source, target, name, to);
 }
 
