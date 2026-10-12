@@ -8,12 +8,14 @@
 #include <atomic>
 #include <deque>
 #include <future>
+#include <list>
 #include <map>
 #include <mutex>
 #include <array>
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 #include <boost/container/small_vector.hpp>
 
 #include "common/interval_set.h"
@@ -66,9 +68,9 @@ public:
 
 class BufferCache {
     static constexpr u64 ADDRESS_SPACE_BITS = 40;
-    static constexpr u64 ARENA_PAGE_BITS = 32;
-    static constexpr u64 ARENA_PAGE_SIZE = u64{1} << ARENA_PAGE_BITS;
-    static constexpr u64 NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
+    /// Arena pages: 4 GiB sparse buffers. bbport: without sparse residency (MoltenVK), dense
+    /// buffers of BB_ARENA_MB (256 MiB) instead; Metal commits a buffer whole on first use.
+    static constexpr u64 SPARSE_ARENA_PAGE_BITS = 32;
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;
 
 public:
@@ -261,6 +263,15 @@ private:
     }
 
     const Buffer* GetArena(u64 first_block, u64 last_block);
+
+    /// bbport: GetArena without sparse residency: dense arenas, merged (contents copied) when a
+    /// request spans several of them (arena_span.h); the replaced ones are destroyed once the GPU
+    /// is past the work recorded so far.
+    const Buffer* GetDenseArena(u64 first_block, u64 last_block);
+
+    /// bbport: writes the BDA page table entries of resident blocks in [first_block, end_block)
+    /// for the arena now holding them.
+    void WritePageTable(const Buffer* arena, u64 first_block, u64 end_block);
 
     /// `in_place`: bind what can be in place even when Garlic (texture data, read once into an
     /// image: a VRAM copy of it would only cost an upload).
@@ -467,8 +478,9 @@ private:
     std::unique_ptr<FaultManager> fault_manager;
     std::unique_ptr<Buffer> bda_pagetable_buffer;
 
-    std::array<const Buffer*, NUM_ARENA_PAGES> address_space{};
-    std::deque<Buffer> arenas;
+    std::vector<const Buffer*> address_space;
+    std::list<Buffer> arenas; ///< bbport: a list, so merged dense arenas can be released
+    bool dense_arenas{};
     std::vector<ArenaBinds> pending_binds;
     std::mutex preupload_mutex;               ///< the map hooks come from guest threads
     std::map<VAddr, VAddr> preupload_ranges; ///< start -> end of pre-uploaded guest memory
@@ -622,6 +634,8 @@ private:
     u32 block_shift{};
     u32 blocks_per_arena_page{};
     u32 blocks_per_arena_page_shift{};
+    u32 arena_page_bits{};
+    u64 arena_page_size{};
 };
 
 } // namespace VideoCore
