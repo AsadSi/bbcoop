@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""bbcoop: builds the respec data mod: "Reset Attributes" and "Refund Weapon Upgrades" in the Plain
-Doll's talk menu (Bloodborne 1.09). The game's files are not in the repository, so the mod is made
+"""bbcoop: builds the respec data mod: "Reset Attributes" in the Plain Doll's talk menu and "Refund
+Weapon Upgrades" in the Workshop's workbench menu (Bloodborne 1.09). The game's files are not in the repository, so the mod is made
 from the player's own copy:
 
     tools/respec_mod.py GAME_DIR MOD_DIR
 
 GAME_DIR is the game folder (with dvdroot_ps4/) or dvdroot_ps4 itself; MOD_DIR gets
 dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx (Doll = t210304.esd, machine x7, the main talk
-menu) and dvdroot_ps4/msg/engus/menu.msgbnd.dcx (entry 30, EventText). The output is re-read and
+menu; workbench = t210692.esd, machine x2) and dvdroot_ps4/msg/engus/menu.msgbnd.dcx (entry 30, EventText). The output is re-read and
 checked: the new entries exist and everything else is unchanged. run.sh calls this.
 
 Gun gems (on unless BB_GUN_GEMS=0): MOD_DIR also gets dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx,
@@ -48,18 +48,20 @@ GAME = OUT = Path()  # set by main()
 TALK_REL = "script/talk/m21_00_00_00.talkesdbnd.dcx"
 MSG_REL = "msg/engus/menu.msgbnd.dcx"
 DOLL_ESD = "t210304.esd"
-WORKSHOP_ESD = "t210692.esd"      # the Workshop tools (the altar); machine x2 state 1 opens Fortify Weapon
-WORKSHOP_FORTIFY_SM = 0x80000000 - 2
+WORKSHOP_ESD = "t210692.esd"      # the Workshop's workbench (Fortify Weapon / Repair Weapons / Blood Gem Fortification /
+WORKSHOP_SM = 0x80000000 - 2      # Arcane Haze / Leave): machine x2; state 1 opens Fortify Weapon
 MENU_SM = 0x80000000 - 7          # "x7" = Doll's main talk menu (Channel Blood Echoes / Talk / Give ... / Leave)
 EVENT_TEXT_ENTRY_ID = 30          # menu.msgbnd entry 30 = EventText (talk-list labels 15000xxx, dialogs 1001xxxx)
 DIALOG_TEXT_ENTRY_ID = 204        # menu.msgbnd entry 204 = MenuDialogs_SP (the Fortify confirm is 221000)
 
 # Event flags (block 72100xxx: Hunter's Dream NPC flags; 72100500-72100999 unused by every ESD/EMEVD in the game).
 FLAG_RESPEC_REQUESTED = 72100900  # ESD sets 1 after "Yes"; native code performs respec, then clears it.
-FLAG_REFUND_MODE = 72100901       # 1 while the Doll's fortify menu is open; ESD clears on return to menu.
+FLAG_REFUND_MODE = 72100901       # 1 while the workbench's refund menu is open; ESD clears on return to menu.
 
-# Talk-list result indices (existing: 1 Channel, 2 Talk, 3 Give Ornament, 50 Leave).
-IDX_RESPEC, IDX_REFUND = 4, 5
+# Talk-list result indices. Doll: 1 Channel, 2 Talk, 3 Give Ornament, 50 Leave. Workbench: 1 Fortify, 2 Repair,
+# 3 Blood Gem Fortification, 4 Arcane Haze, 50 Leave.
+IDX_RESPEC = 4
+IDX_REFUND = 5
 
 # New EventText IDs (all unused in every FMG of menu.msgbnd and item.msgbnd).
 TXT_RESPEC_LABEL = 15009100
@@ -74,8 +76,10 @@ NEW_TEXT = {
 TXT_REFUND_CONFIRM = 221090
 NEW_DIALOG_TEXT = {TXT_REFUND_CONFIRM: "Refund this weapon's upgrades?\nIts upgrade materials are returned."}
 
-# New state IDs in machine x7 (vanilla uses 0..30).
-S_RESPEC_ASK, S_RESPEC_SET, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE = 31, 32, 33, 34, 35
+# New state IDs: the Doll's machine x7 (vanilla 0..30), the workbench's machine x2 (vanilla 0..26).
+S_RESPEC_ASK, S_RESPEC_SET = 31, 32
+S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE = 27, 28, 29
+WS_ROOT, WS_LIST, WS_CHOICE = 2, 6, 3  # workbench: menu root (after every action), list built, list choice
 
 # Gun gems. A weapon's gem slots come from its WeaponGenParam row (row id = weapon id = family*10000 + level*100);
 # upgrading opens the slots the next row has open (0x1a94340) and never closes one.
@@ -274,25 +278,15 @@ def load_esd(bnd: Binder, basename: str) -> TalkESD:
 
 def edit_doll(esd: TalkESD):
     sm = esd.state_machines[MENU_SM]
-    assert max(sm) == 30 and not set(sm) & {S_RESPEC_ASK, S_RESPEC_SET, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE}
+    assert max(sm) == 30 and not set(sm) & {S_RESPEC_ASK, S_RESPEC_SET}
 
-    # State 1 (menu root, re-entered after every action): clear refund mode so an interrupted refund never leaks into
-    # the Workshop's own fortify menu.
-    sm[1].enter_commands.append(cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
-
-    # State 5: add list entries just before "Leave" (index 50, last command).
+    # State 5: add the list entry just before "Leave" (index 50, last command).
     enter = sm[5].enter_commands
     assert bytes(enter[-1].args[0]) == num(50) + END
-    enter[-1:-1] = [
-        cmd(1, C_ADD_TALK_LIST, IDX_RESPEC, TXT_RESPEC_LABEL, -1),
-        cmd(1, C_ADD_TALK_LIST, IDX_REFUND, TXT_REFUND_LABEL, -1),
-    ]
+    enter[-1:-1] = [cmd(1, C_ADD_TALK_LIST, IDX_RESPEC, TXT_RESPEC_LABEL, -1)]
 
     # State 2 (wait for list choice): register 0 holds GetTalkListEntryResult() from the first condition.
-    sm[2].conditions += [
-        Condition(S_RESPEC_ASK, REG0_EQ(IDX_RESPEC)),
-        Condition(S_REFUND_SET, REG0_EQ(IDX_REFUND)),
-    ]
+    sm[2].conditions += [Condition(S_RESPEC_ASK, REG0_EQ(IDX_RESPEC))]
 
     # Reset attributes: Yes/No dialog -> Yes sets FLAG_RESPEC_REQUESTED -> back to menu. No/close -> back to menu.
     sm[S_RESPEC_ASK] = State(
@@ -310,7 +304,26 @@ def edit_doll(esd: TalkESD):
         enter_commands=[cmd(1, C_SET_FLAG, FLAG_RESPEC_REQUESTED, 1)],
     )
 
-    # Refund weapon upgrades: set refund flag -> open the Workshop fortify menu -> wait until closed -> clear flag.
+
+def edit_workshop(esd: TalkESD):
+    """The workbench gets "Refund Weapon Upgrades" just before "Leave": it switches refund mode on, opens the
+    Fortify list (the native refund mode follows the flag writes), waits until it is closed and switches it off.
+    The menu root and Fortify Weapon switch it off first, so an interrupted refund never leaks into a normal
+    fortify."""
+    sm = esd.state_machines[WORKSHOP_SM]
+    assert max(sm) == 26 and not set(sm) & {S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE}
+    state = sm[1]
+    assert [(c.bank, c.index) for c in state.enter_commands] == [(1, C_OPEN_FORTIFY)]
+    state.enter_commands.insert(0, cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
+    sm[WS_ROOT].enter_commands.append(cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
+
+    enter = sm[WS_LIST].enter_commands
+    assert [c.index for c in enter] == [C_ADD_TALK_LIST] * 5 and bytes(enter[-1].args[0]) == num(50) + END
+    assert not any(bytes(c.args[0]) == num(IDX_REFUND) + END for c in enter)
+    enter[-1:-1] = [cmd(1, C_ADD_TALK_LIST, IDX_REFUND, TXT_REFUND_LABEL, -1)]
+    assert sm[WS_CHOICE].conditions[1].test_ezl == REG0_EQ(1)
+    sm[WS_CHOICE].conditions += [Condition(S_REFUND_SET, REG0_EQ(IDX_REFUND))]
+
     sm[S_REFUND_SET] = State(
         S_REFUND_SET,
         conditions=[Condition(S_REFUND_MENU, ALWAYS)],
@@ -324,17 +337,9 @@ def edit_doll(esd: TalkESD):
     )
     sm[S_REFUND_DONE] = State(
         S_REFUND_DONE,
-        conditions=[Condition(1, ALWAYS)],
+        conditions=[Condition(WS_ROOT, ALWAYS)],
         enter_commands=[cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0)],
     )
-
-
-def edit_workshop(esd: TalkESD):
-    """The altar's Fortify Weapon switches refund mode off first: the native refund mode follows the
-    Doll's writes of the flag, and a talk interrupted with her menu open would otherwise leave it on."""
-    state = esd.state_machines[WORKSHOP_FORTIFY_SM][1]
-    assert [(c.bank, c.index) for c in state.enter_commands] == [(1, C_OPEN_FORTIFY)]
-    state.enter_commands.insert(0, cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -570,7 +575,7 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     for src, out in ((talk_src, talk_out), (msg_src, msg_out)):
         same_container(src, out)
 
-    # Talk: every entry except the Doll is byte-identical; Doll differs only by the intended edit.
+    # Talk: every entry except the Doll and the workbench is byte-identical; they differ only by the intended edits.
     a, b = Binder.from_path(talk_src), Binder.from_path(talk_out)
     changed = [PureWindowsPath(x.path).name for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
@@ -579,7 +584,16 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     check_next_state_pointers(new_workshop)
     expected_workshop = load_esd(a, WORKSHOP_ESD)
     edit_workshop(expected_workshop)
-    assert esd_key(TalkESD.from_bytes(new_workshop)) == esd_key(expected_workshop)
+    workshop = TalkESD.from_bytes(new_workshop)
+    assert esd_key(workshop) == esd_key(expected_workshop)
+    wo, wn = esd_key(load_esd(a, WORKSHOP_ESD))[2], esd_key(workshop)[2]
+    assert set(wo) == set(wn) and all(wo[smi] == wn[smi] for smi in wo if smi != WORKSHOP_SM)
+    ws_states = sorted(s for s in set(wo[WORKSHOP_SM]) | set(wn[WORKSHOP_SM])
+                       if wo[WORKSHOP_SM].get(s) != wn[WORKSHOP_SM].get(s))
+    assert ws_states == [1, WS_ROOT, WS_CHOICE, WS_LIST, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE], ws_states
+    ws_adds = [struct.unpack('<i', cmd_key(c)[2][1][1:5])[0]
+               for c in workshop.state_machines[WORKSHOP_SM][WS_LIST].enter_commands if cmd_key(c)[2][1][0] == 0x82]
+    assert ws_adds == [15000110, 15000120, 15000111, 10011050, TXT_REFUND_LABEL, 15000005], ws_adds
     new_bytes = find_entry(b, DOLL_ESD).get_uncompressed_data()
     check_next_state_pointers(new_bytes)
     new = TalkESD.from_bytes(new_bytes)
@@ -593,12 +607,13 @@ def verify(talk_src, talk_out, msg_src, msg_out):
         if smi != MENU_SM:
             assert ko[smi] == kn[smi], smi
     diff_states = sorted(s for s in set(ko[MENU_SM]) | set(kn[MENU_SM]) if ko[MENU_SM].get(s) != kn[MENU_SM].get(s))
-    assert diff_states == [1, 2, 5, 31, 32, 33, 34, 35], diff_states
+    assert diff_states == [2, 5, S_RESPEC_ASK, S_RESPEC_SET], diff_states
     sm = new.state_machines[MENU_SM]
     adds = [(int(cmd_key(c)[2][1][1:5].hex() and struct.unpack('<i', cmd_key(c)[2][1][1:5])[0]))
             for c in sm[5].enter_commands if c.index == C_ADD_TALK_LIST and cmd_key(c)[2][1][0] == 0x82]
-    assert adds == [15000100, 15000007, 15000008, TXT_RESPEC_LABEL, TXT_REFUND_LABEL, 15000005], adds
-    print(f"talk OK: only {DOLL_ESD} and {WORKSHOP_ESD} (fortify clears refund mode) changed; machine x7 states changed/added: {diff_states}; menu labels {adds}")
+    assert adds == [15000100, 15000007, 15000008, TXT_RESPEC_LABEL, 15000005], adds
+    print(f"talk OK: only {DOLL_ESD} (x7 states {diff_states}, labels {adds}) and {WORKSHOP_ESD} "
+          f"(x2 states {ws_states}, labels {ws_adds}) changed")
 
     # Msg: every FMG except EventText and MenuDialogs_SP byte-identical; those two = vanilla + the new strings.
     a, b = Binder.from_path(msg_src), Binder.from_path(msg_out)

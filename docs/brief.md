@@ -10,7 +10,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 - beat Father Gascoigne together without being sent home,
 - travel by lamp together,
 - both receive every pickup and boss drop,
-- respec stats or refund a weapon's materials at the Doll.
+- respec stats at the Doll, or refund a weapon's materials at the Workshop's workbench.
 
 ## Not building
 
@@ -37,7 +37,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player, plus extra enemies in chosen spots during co-op only | | Asad |
 | Extra enemies | Only along the main routes of the large areas (Central Yharnam first, then Old Yharnam, Cathedral Ward, Forbidden Woods, Yahar'gul and Cainhurst). One extra group per guest, at points where enemies already gather. Never in boss arenas | Bosses already scale through HP. Adding enemies to an arena changes the fight's design and makes friendly fire chaotic, while open areas are where co-op gets trivial | Claude |
-| Respec | At the Doll, in the Hunter's Dream, outside a session. "Reset Attributes" returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
+| Respec | In the Hunter's Dream, outside a session. "Reset Attributes" (at the Doll) returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" (at the workbench, just before Leave; moved from the Doll 2026-10-12, Asad) opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
 | Respec entry | A new option in the Doll's dialogue (her talk script), not a settings-menu button | Feels native; chosen over the faster menu button | Asad, 2026-10-09 |
 | Seamless patches | Go through `src/runtime_seamless.c`, which checks the original bytes, not bbport's XML loader | The XML path writes without checking, so a wrong address would silently corrupt the game | Claude |
 | Our code | In new `src/runtime_*.c` files, which `build.sh` already compiles, with only small marked edits to upstream files | bbport changes every day, so rebasing must stay cheap | Claude |
