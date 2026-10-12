@@ -136,3 +136,24 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
 6. `BB_FPS_TRY=wind60`;
 7. `BB_FPS_SKIP=sfx,fps60`;
 8. `BB_FPS_SKIP=hknp`.
+
+### Cloth (2026-10-12, after the first A/B runs)
+- **A/B so far:**
+  - `wind60` fixes the flowers; `step1972` alone does not.
+  - Flowers and capes flickered in sync without `wind60`: the same wind sources drive both.
+  - `BB_FPS_SKIP=cloth` makes capes too fast.
+  - With Uncap FPS++'s cloth group, the Doll's hood and skirt flicker.
+- **Cloth step:** the cloth task (FrpgHavokMan, `0x1BF9D90` → `0x13D3520` → cloth manager `0x13D5440`) gets the task
+  context's dt, which Uncap FPS++ sets to the clamped frame time (`0x02418E3D`). Execute (`0xB6E370`) divides it by the
+  substep count from the asset (setup `+0x18`, else the operator's `+0x20`; the ELF cannot tell the values).
+- **Why vanilla bytes run fast:** gravity and damping follow h, but the position-based constraints apply stiffness once
+  per substep, so more substeps a second make cloth stiffer and quicker.
+- **What Uncap FPS++ does:** it forces 1 substep and multiplies the stiffness by (min(dt,1/60)·60)², which assumes 2
+  substeps of 1/60.
+  - The factor changes every frame, and rigid links (k≈1) become springs, which is a likely cause of the flicker.
+  - The pre-step (`0xB6FBF0`) and the adapter (`0xB72225`) still read the asset count.
+- **Candidate:** `BB_FPS_TRY=clothstep`.
+  - An accumulator steps n = round(acc·120) substeps of exactly 1/120 each frame. Above 120 FPS some frames take none.
+  - Execute, the pre-step and the adapter all use n.
+  - The stiffness factor is a constant 0.25, which is Uncap FPS++'s at a steady 120 FPS.
+  - The tunables at `0x05490B10` are 120.0, 0.5, 1/120 and the factor.
