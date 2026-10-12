@@ -1400,7 +1400,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         launcher.set_cwd(str(PORT_DIR))
         try:
             # setsid: the game and its helpers form one process group, stopped together.
-            self.process = launcher.spawnv(["setsid", "bash", str(PORT_DIR / "run.sh")])
+            # macOS has no setsid command: Python's os.setsid before the exec does the same.
+            command = ["bash", str(PORT_DIR / "run.sh")]
+            if not shutil.which("setsid"):
+                command = [sys.executable, "-c",
+                           "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])",
+                           *command]
+            self.process = launcher.spawnv(command)
         except GLib.Error as error:
             self.toasts.add_toast(Adw.Toast(title=tr("Не удалось запустить: {}").format(error.message)))
             return
