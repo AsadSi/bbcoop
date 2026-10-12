@@ -80,3 +80,59 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
 2. `BB_UPSCALER=off`, and `object_motion=0` in bbport.ini. If the dip goes away, it is the upscaler's history, not geometry.
 3. `BB_PC_MODEL=0`. If the dip goes away, it is the memory model.
 4. Then the switches for candidates 1 and 2, once they are coded.
+
+## Foliage speed (2026-10-12)
+- **Report (Asad):** with the current Uncap FPS++ (465bcf7), flowers in the Hunter's Dream move "way faster than they
+  should", which reads as flickering, even when the player stands still. It was not there with the 2026-08-28 patch.
+  Normal launcher: uncapped, 120 FPS limit, 2160p output.
+- **Frame time:** `[[0x059404F8]+0x264]` is SprjFlipper's wall-clock frame time in seconds (`0x2434CF0`: µs difference /
+  1e6). The patch's caves clamp it to 1/30. `0x02418E3D` also stores the clamped value to `0x0575A908` every frame,
+  so `0x0575A908` holds min(max(dt, flipper+0x18), 1/30); `+0x18` is 0 under the patch. The 1/120 written there is
+  only its first value.
+- **Frame mode flag:** `[[0x59406C8]+0x100]` copies SprjFlipper+0x10, the flip interval (2 = 30 FPS, 1 = 60 FPS).
+  Both patches force 1.
+
+### The wind/foliage constants function `0x2713870`–`0x27165EE`
+- **Callers:** two render-instance vtables (owners built near "CSLod"/"RendMan"). Its output is 28 float4s packed
+  into per-instance shader constants (`0x2126B60`).
+- **What it does:** it reads wind sources (Perlin fBm, a jittered direction).
+  - It integrates per-slot timers, age and fade with one step: age in `.w`, a 0.1 s fade-in, a 0.75 s lifetime.
+  - Every frame it rebuilds the offsets `disp = step × velocity` and `dist = step × (speed + |random delta|)`
+    (`xmm14`, at `0x2714A66` and `0x2714AE7`). These are not integrated.
+  - There are no "grass"/"wind" strings, so the label is inferred.
+- **Steps by version:**
+  - vanilla: 1/30 a frame;
+  - both patches: flag 1, so 1/60 a frame. At 120 FPS the timers run 2× in the old patch;
+  - current patch: the clamped frame time for both (`0x02713D76`, and `0x02713DB1`/`DBB` read `0x0575A908`). The timers
+    run in real time. The offsets shrink as FPS rises and change size with every frame-time change.
+- **Candidates:**
+  - `BB_FPS_SKIP=grass`: back to 1/60 a frame;
+  - `BB_FPS_TRY=wind30` or `wind60`: a fixed offset step of 1/30 or 1/60, while the timers keep the frame time
+    (`0x027149EA`, `0x02714B26`).
+
+### Other lines of the current patch that can make something faster or unstable
+- **`0x01972A7D`:** the update context `0x1972900` passes to `0x21145B0(obj [r12+0xD0])` carries 1/30, the game's
+  value. The old patch had 1/240. It runs only when `[r12+0xC4]==1`, from one caller (`0x1D3AC10`). If that runs once a
+  frame, it is 4× real time at 120 FPS; how often it runs was not checked, and the system is not identified. Candidate: `BB_FPS_TRY=step1972`, which uses the clamped frame time (cave at `0x05490B00`).
+- **Havok Cloth (`cloth`):** stiffness × (min(dt,1/60)·60)², sub-steps forced to 1 (`0x00B6E67A`). The old patch
+  left cloth alone, and wind on plants can be cloth (`hclSimpleWindAction` is in the binary).
+- **`sfx`:** the SFX frame rate goes 30 → 60 (`0x026FB39F`; frame counts / rate = seconds). It may run 2× unless
+  something compensates. `fps60` holds the other "per second at 30" values that were doubled.
+- **`hknp`:** the default solver step 1/30 → 1/120 (`0x00F383CA`). The old patch's line hit padding at `0x011383CA`
+  (the 30/60/90 FPS++ blocks still carry that typo).
+- **`timeobj`** (`0x2677780` → `0x12BBDA0`) and **`clip`:** real time now (the old patch was 2× or 4×), so they are
+  not "faster".
+- **Not grouped:** camera, sleeps, smoothing and the 1/30 → 1/60 task contexts: character, thread or camera code,
+  slower than the old patch.
+- **Frame limiter:** `[+0x18]` = 0 removes the game's 240 FPS cap. Only `BB_FPS_LIMIT=0` exceeds it.
+
+### A/B (Hunter's Dream, by the flowers, standing still)
+`~/.local/bin/bloodborne-ab.sh ENV=VALUE...` (log `out/play-ab.log`):
+1. no settings (baseline);
+2. `BB_FPS_PATCH=old`;
+3. `BB_FPS_LIMIT=30`;
+4. `BB_FPS_TRY=step1972`;
+5. `BB_FPS_SKIP=cloth`;
+6. `BB_FPS_TRY=wind60`;
+7. `BB_FPS_SKIP=sfx,fps60`;
+8. `BB_FPS_SKIP=hknp`.
