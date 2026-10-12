@@ -157,3 +157,15 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
   - Execute, the pre-step and the adapter all use n.
   - The stiffness factor is a constant 0.25, which is Uncap FPS++'s at a steady 120 FPS.
   - The tunables at `0x05490B10` are 120.0, 0.5, 1/120 and the factor.
+
+### Result (2026-10-12)
+- **Default:** `wind60` and `clothstep` are on by default with Uncap FPS++ (`DEFAULT_FPS_TRY`). `BB_FPS_TRY=none`
+  restores the published patch.
+- **Asad's A/B:**
+  - `wind60,clothstep`: no flicker on flowers, capes or the Doll's hood and skirt.
+  - `step1972` made no visible difference, so it stays optional.
+- **Remaining difference from the PS4:** the Doll's cape sometimes clips through her dress when it flows. Likely cause:
+  the constant stiffness factor 0.25 assumes the assets use 2 substeps of 1/60. If they use more (4 → factor 1.0, which
+  is exact vanilla behaviour at 1/120), the cloth is softer than on the PS4 and stretches into the body.
+- **Next step if needed:** log the asset substep count (`ebx` at `0xB6E685`) with a runtime hook. Then set the factor
+  at `0x05490B1C` from it, or drop the stiffness hooks when it is 4.

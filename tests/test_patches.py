@@ -203,8 +203,12 @@ class FpsPatchTests(unittest.TestCase):
                 seen |= set(addresses)
 
     def test_skip_and_try_switches(self):
-        self.assertEqual(patches.fps_choices({}), (set(), []))
-        skip, variants = patches.fps_choices({'BB_FPS_SKIP': 'grass, cloth', 'BB_FPS_TRY': 'step1972'})
+        # Default: the wind and cloth fixes; "none" or an empty value: Uncap FPS++ as published.
+        self.assertEqual(patches.fps_choices({}), (set(), ['bbcoop: Fixed Wind Offset Step 1/60',
+                                                           'bbcoop: Fixed Cloth Step 1/120'], False))
+        self.assertEqual(patches.fps_choices({'BB_FPS_TRY': 'none'}), (set(), [], True))
+        self.assertEqual(patches.fps_choices({'BB_FPS_TRY': ''}), (set(), [], True))
+        skip, variants, _ = patches.fps_choices({'BB_FPS_SKIP': 'grass, cloth', 'BB_FPS_TRY': 'step1972'})
         self.assertEqual(skip, set(patches.FPS_SKIP_GROUPS['grass']) | set(patches.FPS_SKIP_GROUPS['cloth']))
         self.assertEqual(variants, ['bbcoop: Frame Time Step at 0x1972A7D'])
         with self.assertRaisesRegex(ValueError, 'BB_FPS_SKIP'):
