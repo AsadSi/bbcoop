@@ -164,6 +164,20 @@ The level-up commit (0x1c13d00) changes current HP by the change in max HP, clam
 - **Slot shapes** (GemGenParam slotTypeRateA..F = slot types 1 << 0..5): A Radial, B Triangle, C Waning, D (0x8) Droplet. The Petrified Droplet gems (goods 1678-1683) give rows 110031-110037 (JP 円型). The English description reads "Droplet blood gem. Fortifies any weapon".
 - `SprjLuaEventUpdateTask::_STEP_Update` (0x1393fd0) never runs in this game. The per-update hook is inside SosStatus.Update (0x187236d), which runs offline too.
 
+## The TEST character (BB_TEST_LOADOUT, 2026-10-12)
+- **Name:** PlayerGameData +0xA8 holds the character's name, UTF-16 (found in userdata0000: the player data block there has
+  the same layout as in memory: HP +0x14, stats +0x40.., Insight +0x84, level +0x90, Echoes +0x94).
+- **What it does:** a character named TEST (any case) is filled once, flag 72100903. It backs up the saves, sets all stats to
+  99 (level 544), 99,999,999 Echoes and 99 Insight, then gives the list.
+  - Weapons are given at +0 and changed to their final level, as the Workshop does.
+  - Armor uses category 0x10000000, goods 0x40000000.
+  - It adds the 12 test gems, sets the Dream flags and warps to the Dream (as BB_TEST_ENDGAME).
+- **The list:** `tools/respec_mod.py` writes it from the game's params and names:
+  - EquipParamWeapon rows `id % 10000 == 0` with a name, except Bare Fists, at their highest level;
+  - EquipParamProtector rows with a name;
+  - EquipParamGoods with goodsType 0, 2 or 6 (not 1, the key items), a name and maxNum > 0, gestures 800–899 left out,
+    at maxNum.
+
 ## Event flags, the frame hook, sessions and saving
 - **Flag manager:** SprjEventFlagMan is the global `0x553b100`.
   - `SetEventFlag(mgr, u32 flag, bool on)` is at `0x13cfcc0`, entry bytes `41 89 d0 8b 4f 1c`. Talk `c1_11` and Lua reach it.

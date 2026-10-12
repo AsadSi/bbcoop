@@ -63,6 +63,7 @@
 #define FLAG_RESPEC 72100900
 #define FLAG_REFUND 72100901
 #define FLAG_ENDGAME_GIVEN 72100902 /* BB_TEST_ENDGAME ran on this save */
+#define FLAG_LOADOUT_GIVEN 72100903 /* BB_TEST_LOADOUT filled this character */
 #define DREAM_AREA  0x15       /* m21_xx: the Hunter's Dream */
 #define SESSION_HOST 3
 #define SESSION_CLIENT 6
@@ -71,6 +72,7 @@
 #define NO_WEAPON_ROW 0x63 /* what the game looks up for an invalid id: no such row */
 #define BACKUPS_KEPT 20
 #define CATEGORY_WEAPON 0x00000000u
+#define CATEGORY_ARMOR  0x10000000u
 #define CATEGORY_GOODS  0x40000000u
 
 /* PlayerGameData. */
@@ -82,6 +84,7 @@ static const uint64_t pgd_stats[RESPEC_STAT_COUNT] = {0x40, 0x48, 0x58, 0x60, 0x
 #define PGD_ECHOES   0x94
 #define PGD_HP       0x14 /* current, then max */
 #define PGD_ORIGIN   0xCE
+#define PGD_NAME     0xA8 /* the character's name, UTF-16, 16 characters and a terminator */
 #define PGD_EQUIPMENT 0x1D0
 #define PGD_INVENTORY 0x328
 #define PGD_STORAGE  0x5B0
@@ -106,6 +109,7 @@ typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id
 
 static uint64_t image_base;
 static int respec_free, test_endgame, endgame_done, trace;
+static const char *test_loadout; /* BB_TEST_LOADOUT: the item list for a character named TEST */
 /* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
@@ -350,6 +354,9 @@ static int32_t find_weapon(uint64_t pgd, int32_t id) {
     return found;
 }
 
+static void give_loose_gems(uint64_t pgd, const char *who);
+static void wake_dream_and_warp(void);
+
 /* BB_TEST_ENDGAME: a late-game character for testing respec on a throwaway profile. */
 static void make_endgame_character(uint64_t pgd) {
     static const RespecStats stats = {150, {50, 40, 25, 40, 30, 15}};
@@ -403,8 +410,27 @@ static void make_endgame_character(uint64_t pgd) {
         }
         printf("Respec: BB_TEST_ENDGAME: gem %#x fitted in the Uncanny Saw Cleaver +10\n", read_u32(weapon, 0x3C));
     } else printf("Respec: BB_TEST_ENDGAME: no open Radial slot for a gem\n");
-    /* Loose gems to fit by hand, one GemGenParam row each with a fixed shape and fixed effects: Droplet
-     * (slot type 0x8, the guns' shape), Radial, Triangle and Waning. */
+    give_loose_gems(pgd, "BB_TEST_ENDGAME");
+    /* Gun gems: the slotless guns get the pistol's slot from +1 when the mod is in (BB_GUN_GEMS). */
+    static const int32_t guns[] = {15000100, 18101000, 18001000, 20001000, 34001000, 35001000};
+    for (size_t i = 0; i < sizeof(guns) / sizeof(guns[0]); ++i) {
+        int32_t index = find_weapon(pgd, guns[i]);
+        uint64_t gun = index >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
+                                                                  (uint32_t)index), 0) & 0xFFFF) * 8) : 0;
+        uint32_t type = gun >= 0x10000 ? read_u32(gun, 0x38) : 0;
+        printf("Respec: BB_TEST_ENDGAME: gun %d first gem slot %#x (%s)\n", guns[i], type,
+               gun < 0x10000 ? "weapon not found" : type & 0x80000000u ? "closed" : "open");
+    }
+    wake_dream_and_warp();
+    printf("Respec: BB_TEST_ENDGAME: level %d, echoes %d, insight %d, %zu item kinds given; warping to the Dream\n",
+           read_s32(pgd, PGD_LEVEL), read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT),
+           sizeof(items) / sizeof(items[0]));
+}
+
+/* Loose gems to fit by hand, one GemGenParam row each with a fixed shape and fixed effects: Droplet
+ * (slot type 0x8, the guns' shape), Radial, Triangle and Waning. */
+static void give_loose_gems(uint64_t pgd, const char *who) {
+    uint64_t instances = image_pointer(ITEM_INSTANCES);
     static const int32_t loose_gems[] = {
         110037, /* Droplet: Blood ATK UP +27% */
         110033, /* Droplet: Blood ATK UP +16.2% */
@@ -430,28 +456,95 @@ static void make_endgame_character(uint64_t pgd) {
         if (NATIVE(AddHandle, ADD_HANDLE)(pgd + PGD_INVENTORY, &gem, 1, 0, 0) >= 0) ++loose;
         NATIVE(HandleRelease, HANDLE_RELEASE)(&gem);
     }
-    printf("Respec: BB_TEST_ENDGAME: %d of %zu loose gems in the inventory\n", loose,
+    printf("Respec: %s: %d of %zu loose gems in the inventory\n", who, loose,
            sizeof(loose_gems) / sizeof(loose_gems[0]));
-    /* Gun gems: the slotless guns get the pistol's slot from +1 when the mod is in (BB_GUN_GEMS). */
-    static const int32_t guns[] = {15000100, 18101000, 18001000, 20001000, 34001000, 35001000};
-    for (size_t i = 0; i < sizeof(guns) / sizeof(guns[0]); ++i) {
-        int32_t index = find_weapon(pgd, guns[i]);
-        uint64_t gun = index >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
-                                                                  (uint32_t)index), 0) & 0xFFFF) * 8) : 0;
-        uint32_t type = gun >= 0x10000 ? read_u32(gun, 0x38) : 0;
-        printf("Respec: BB_TEST_ENDGAME: gun %d first gem slot %#x (%s)\n", guns[i], type,
-               gun < 0x10000 ? "weapon not found" : type & 0x80000000u ? "closed" : "open");
-    }
-    /* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
-     * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
-     * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
+}
+
+/* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
+ * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
+ * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
+static void wake_dream_and_warp(void) {
     static const int32_t flags[] = {9400, 9401, 9402, 9403, 9404, 12417810,
                                     6700, 6702, 6703, 6704, 6707, 6710, 6711, 6719};
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) set_flag(flags[i], 1);
     NATIVE(Warp, WARP_TO_RESPAWN)(2102950);
-    printf("Respec: BB_TEST_ENDGAME: level %d, echoes %d, insight %d, %zu item kinds given; warping to the Dream\n",
-           read_s32(pgd, PGD_LEVEL), read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT),
-           sizeof(items) / sizeof(items[0]));
+}
+
+/* BB_TEST_LOADOUT=<file>: fills a character named TEST (PGD+0xA8, UTF-16; any case) once, on any
+ * profile: all stats 99, the file's items (tools/respec_mod.py writes mods/bbcoop-respec/test-loadout.txt:
+ * "weapon|armor|goods <id> <count>", weapons at their final level), the test gems, the Dream with the
+ * Doll awake. Any other character is left alone. */
+static int is_test_character(uint64_t pgd) {
+    static const char name[] = "TEST";
+    for (unsigned i = 0; i <= sizeof(name) - 1; ++i) {
+        uint16_t c = (uint16_t)read_u32(pgd, PGD_NAME + 2 * (uint64_t)i);
+        int want = i < sizeof(name) - 1 ? name[i] : 0;
+        if ((c >= 'a' && c <= 'z' ? c - 32 : c) != want) return 0;
+    }
+    return 1;
+}
+
+static void make_test_loadout(uint64_t pgd, const char *path) {
+    FILE *list = fopen(path, "r");
+    if (!list) {
+        printf("Respec: BB_TEST_LOADOUT: cannot read %s\n", path);
+        return;
+    }
+    set_flag(FLAG_LOADOUT_GIVEN, 1);
+    char where[1200];
+    printf("Respec: BB_TEST_LOADOUT: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
+    static const RespecStats stats = {544, {99, 99, 99, 99, 99, 99}};
+    apply_stats(&stats);
+    fill_hp(pgd);
+    write_s32(pgd, PGD_ECHOES, 99999999);
+    write_s32(pgd, PGD_INSIGHT, MAX_INSIGHT);
+    write_s32(pgd, PGD_INSIGHT_COPY, MAX_INSIGHT);
+    char line[128], kind[16];
+    int32_t id, count;
+    int given = 0, upgraded = 0, bad = 0;
+    while (fgets(line, sizeof(line), list)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        if (sscanf(line, "%15s %d %d", kind, &id, &count) != 3 || count < 1) {
+            ++bad;
+            continue;
+        }
+        uint32_t category = !strcmp(kind, "weapon") ? CATEGORY_WEAPON : !strcmp(kind, "armor") ? CATEGORY_ARMOR
+                          : !strcmp(kind, "goods") ? CATEGORY_GOODS : UINT32_MAX;
+        if (category == UINT32_MAX) {
+            ++bad;
+            continue;
+        }
+        /* Weapons are given at +0 (the give path drops the level) and upgraded as the Workshop does. */
+        int32_t give = category == CATEGORY_WEAPON ? respec_weapon_base(id) : id;
+        if (give < 0) {
+            ++bad;
+            continue;
+        }
+        NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, category, give, count);
+        ++given;
+        if (category == CATEGORY_WEAPON && give != id) {
+            int32_t index = find_weapon(pgd, give);
+            if (index >= 0) {
+                NATIVE(ChangeItemId, CHANGE_ITEM_ID)(pgd + PGD_EQUIPMENT, (uint32_t)index, id);
+                ++upgraded;
+            } else printf("Respec: BB_TEST_LOADOUT: weapon %d not found to upgrade\n", give);
+        }
+    }
+    fclose(list);
+    give_loose_gems(pgd, "BB_TEST_LOADOUT");
+    /* What the inventory holds now, by kind (key items included). */
+    uint64_t inventory = pgd + PGD_INVENTORY;
+    uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14), kinds[16] = {0};
+    for (uint32_t i = 0; i < total && i < 4096; ++i) {
+        uint64_t entry = inventory_entry(inventory, i);
+        if (read_u32(entry, 0)) ++kinds[read_u32(entry, 4) >> 28];
+    }
+    printf("Respec: BB_TEST_LOADOUT: %d list lines given (%d weapons upgraded, %d bad lines); inventory now %u weapons, "
+           "%u armor, %u goods, %u gems (of %u slots)\n", given, upgraded, bad, kinds[0], kinds[1], kinds[4], kinds[8],
+           total);
+    wake_dream_and_warp();
+    printf("Respec: BB_TEST_LOADOUT: level %d, echoes %d, insight %d; warping to the Dream\n", read_s32(pgd, PGD_LEVEL),
+           read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT));
 }
 
 static void trace_state(void) {
@@ -613,12 +706,21 @@ static void frame_update(HookRegs *regs) {
     /* A new load (the Lua event manager is recreated): the flags are saved, so a game quit with the
      * workbench's refund menu open would leave refund mode on for its own Fortify Weapon. */
     static uint64_t loaded;
+    static int loadout_checked;
     uint64_t lua = image_pointer(LUA_EVENT_MAN);
     if (lua >= 0x10000 && lua != loaded && player_data() >= 0x10000) {
         loaded = lua;
         refund_requested = 0;
         if (get_flag(FLAG_REFUND)) set_flag(FLAG_REFUND, 0); /* saved by builds before it was never stored */
         if (get_flag(FLAG_RESPEC)) set_flag(FLAG_RESPEC, 0);
+        loadout_checked = 0;
+    }
+    /* BB_TEST_LOADOUT: checked once per load, when the character is in the world. */
+    if (test_loadout && !loadout_checked && in_game(&pgd)) {
+        loadout_checked = 1;
+        if (!is_test_character(pgd)) printf("Respec: BB_TEST_LOADOUT: this character is not named TEST: left alone\n");
+        else if (get_flag(FLAG_LOADOUT_GIVEN)) printf("Respec: BB_TEST_LOADOUT: TEST was filled before: left alone\n");
+        else make_test_loadout(pgd, test_loadout);
     }
     if (!test_endgame || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
@@ -727,6 +829,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
     image_base = (uint64_t)(uintptr_t)image;
     respec_free = (env = getenv("BB_RESPEC_FREE")) && !strcmp(env, "1");
     test_endgame = (env = getenv("BB_TEST_ENDGAME")) && !strcmp(env, "1");
+    test_loadout = (env = getenv("BB_TEST_LOADOUT")) && *env ? env : NULL;
     trace = (env = getenv("BB_RESPEC_TRACE")) && !strcmp(env, "1");
     const char *failure = hooks_init(image, size);
     for (size_t i = 0; !failure && i < count; ++i)
@@ -736,7 +839,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
         }
     if (!failure) failure = hooks_seal();
     if (failure) return failure;
-    printf("Respec: %zu hooks installed%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
-           test_endgame ? ", BB_TEST_ENDGAME" : "");
+    printf("Respec: %zu hooks installed%s%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
+           test_endgame ? ", BB_TEST_ENDGAME" : "", test_loadout ? ", BB_TEST_LOADOUT (a character named TEST)" : "");
     return NULL;
 }
