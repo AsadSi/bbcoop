@@ -64,6 +64,7 @@
 #define FLAG_REFUND 72100901
 #define FLAG_ENDGAME_GIVEN 72100902 /* BB_TEST_ENDGAME ran on this save */
 #define FLAG_LOADOUT_GIVEN 72100903 /* BB_TEST_LOADOUT filled this character */
+#define FLAG_TOOLS_GIVEN 72100904   /* BB_TEST_LOADOUT gave this character the Workshop tools */
 #define DREAM_AREA  0x15       /* m21_xx: the Hunter's Dream */
 #define SESSION_HOST 3
 #define SESSION_CLIENT 6
@@ -484,6 +485,17 @@ static int is_test_character(uint64_t pgd) {
     return 1;
 }
 
+/* The Workshop tools (key items, so not in the list): Workshop Haze Extractor, Blood Gem Workshop Tool,
+ * Rune Workshop Tool. The workbench's talk script switches Arcane Haze and Blood Gem Fortification on
+ * when it finds them (t210692 states 7/19); the Rune tool opens the Memory Altar. */
+static void give_workshop_tools(void) {
+    static const int32_t tools[] = {4102, 4103, 4104};
+    set_flag(FLAG_TOOLS_GIVEN, 1);
+    for (size_t i = 0; i < sizeof(tools) / sizeof(tools[0]); ++i)
+        NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, CATEGORY_GOODS, tools[i], 1);
+    printf("Respec: BB_TEST_LOADOUT: Workshop tools given (Haze Extractor, Blood Gem Workshop Tool, Rune Workshop Tool)\n");
+}
+
 static void make_test_loadout(uint64_t pgd, const char *path) {
     FILE *list = fopen(path, "r");
     if (!list) {
@@ -532,6 +544,7 @@ static void make_test_loadout(uint64_t pgd, const char *path) {
     }
     fclose(list);
     give_loose_gems(pgd, "BB_TEST_LOADOUT");
+    give_workshop_tools();
     /* What the inventory holds now, by kind (key items included). */
     uint64_t inventory = pgd + PGD_INVENTORY;
     uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14), kinds[16] = {0};
@@ -719,8 +732,9 @@ static void frame_update(HookRegs *regs) {
     if (test_loadout && !loadout_checked && in_game(&pgd)) {
         loadout_checked = 1;
         if (!is_test_character(pgd)) printf("Respec: BB_TEST_LOADOUT: this character is not named TEST: left alone\n");
-        else if (get_flag(FLAG_LOADOUT_GIVEN)) printf("Respec: BB_TEST_LOADOUT: TEST was filled before: left alone\n");
-        else make_test_loadout(pgd, test_loadout);
+        else if (!get_flag(FLAG_LOADOUT_GIVEN)) make_test_loadout(pgd, test_loadout);
+        else if (!get_flag(FLAG_TOOLS_GIVEN)) give_workshop_tools(); /* filled before the tools were added */
+        else printf("Respec: BB_TEST_LOADOUT: TEST was filled before: left alone\n");
     }
     if (!test_endgame || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
