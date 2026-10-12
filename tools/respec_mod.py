@@ -32,7 +32,8 @@ from pathlib import Path, PureWindowsPath
 from soulstruct.containers import Binder
 from soulstruct.base.params.param import TypedParam
 from soulstruct.base.text.fmg import FMG
-from soulstruct.bloodborne.params.paramdef import EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST, WEAPON_GEN_PARAM_ST
+from soulstruct.bloodborne.params.paramdef import (EQUIP_MTRL_SET_PARAM_ST, EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST,
+                                                   WEAPON_GEN_PARAM_ST)
 from soulstruct.bloodborne.ezstate.esd import TalkESD
 from soulstruct.base.ezstate.esd.command import Command
 from soulstruct.base.ezstate.esd.condition import Condition
@@ -72,9 +73,17 @@ NEW_TEXT = {
     TXT_REFUND_LABEL: "Refund Weapon Upgrades",
     TXT_RESPEC_CONFIRM: "Reset all attributes?\nThis costs 1 Insight.",
 }
-# The Fortify confirm in refund mode (runtime_respec.c swaps 221000 for it; 22109x is unused).
+# The Fortify confirm in refund mode (runtime_respec.c swaps 221000 for it; 221090..221100 are unused):
+# 221090 + the selected weapon's level (+1..+10) lists the materials it gives back (refund_texts() adds them
+# from the game's own names and costs); 221090 itself is the fallback without a list.
 TXT_REFUND_CONFIRM = 221090
 NEW_DIALOG_TEXT = {TXT_REFUND_CONFIRM: "Refund this weapon's upgrades?\nIts upgrade materials are returned."}
+GOODS_NAME_ENTRY_ID = 10          # item.msgbnd entry 10 = goods names
+MAX_UPGRADE = 10
+# The step to +n costs EquipMtrlSetParam row n*100 (first pair only), as src/runtime_respec_rules.c's table,
+# which refunds them: refund_texts() checks the game's rows against this.
+UPGRADE_STEPS = [(3000, 3), (3000, 5), (3000, 8), (3010, 3), (3010, 5), (3010, 8), (3020, 3), (3020, 5), (3020, 8),
+                 (3030, 1)]
 
 # New state IDs: the Doll's machine x7 (vanilla 0..30), the workbench's machine x2 (vanilla 0..26).
 S_RESPEC_ASK, S_RESPEC_SET = 31, 32
@@ -480,6 +489,7 @@ def main():
     fmg_entry = [e for e in msg.entries if e.entry_id == EVENT_TEXT_ENTRY_ID][0]
     fmg = FMG.from_bytes(fmg_entry.get_uncompressed_data())
     item = Binder.from_path(GAME / ITEM_MSG_REL)
+    NEW_DIALOG_TEXT.update(refund_texts(item, Binder.from_path(GAME / GAMEPARAM_REL)))
     for b in (msg, item):
         for e in b.entries:
             ids = FMG.from_bytes(e.get_uncompressed_data()).entries
@@ -528,6 +538,29 @@ def gun_gems(item: Binder, param_src: Path, param_out: Path):
     print(f"Gun gems: {len(edits)} rows in {len(changed)} firearm families get {name(model)}'s slot: "
           + ", ".join(name(f) for f in changed))
     print(f"wrote {param_out}")
+
+
+def refund_texts(item: Binder, gameparam: Binder) -> dict[int, str]:
+    """The refund confirm for a weapon at +1..+10 (221091..221100): what it gives back, one material a line, as
+    the Fortify confirm names its material ("<name> × <count>")."""
+    rows = load_param(gameparam, "EquipMtrlSetParam", EQUIP_MTRL_SET_PARAM_ST).rows
+    steps = []
+    for n in range(1, MAX_UPGRADE + 1):
+        row = rows[n * 100]
+        assert row["materialId02"] == -1, (n, row["materialId02"])
+        steps.append((row["materialId01"], row["itemNum01"]))
+    assert steps == UPGRADE_STEPS, steps
+    names_entry = [e for e in item.entries if e.entry_id == GOODS_NAME_ENTRY_ID][0]
+    names = FMG.from_bytes(names_entry.get_uncompressed_data()).entries
+    texts = {}
+    for level in range(1, MAX_UPGRADE + 1):
+        totals: dict[int, int] = {}
+        for goods, count in steps[:level]:
+            totals[goods] = totals.get(goods, 0) + count
+        assert all(names.get(goods) for goods in totals), totals
+        texts[TXT_REFUND_CONFIRM + level] = "Refund this weapon's upgrades? You get back:\n" + "\n".join(
+            f"{names[goods]} × {count}" for goods, count in totals.items())
+    return texts
 
 
 def same_container(src: Path, out: Path):

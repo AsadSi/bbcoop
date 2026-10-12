@@ -57,7 +57,7 @@
 #define TEXT_REFERENCE   0x01AE8CD1 /* in the menu text lookup (rdi out, esi FMG, edx text id), after its pushes */
 #define MENU_DIALOGS_FMG 204       /* MenuDialogs_SP */
 #define FORTIFY_CONFIRM_TEXT 221000 /* "Use <?demandSoul?> Blood Echoes and ... to fortify weapon?" */
-#define REFUND_CONFIRM_TEXT 221090 /* added by tools/respec_mod.py */
+#define REFUND_CONFIRM_TEXT 221090 /* added by tools/respec_mod.py; + the level (+1..+10): with the materials */
 #define UPGRADE_APPLY       0x01B5DD88 /* r14: I; rbx: equipment; edx: the target, before ChangeItemId */
 
 #define FLAG_RESPEC 72100900
@@ -109,6 +109,8 @@ static int respec_free, test_endgame, endgame_done, trace;
 /* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
+/* The item (I) the refund menu last computed a target for: the highlighted weapon, whose confirm is next. */
+static uint64_t refund_item;
 static unsigned frames, dense; /* dense: frames of every-frame tracing left after a change */
 
 /* Reads and writes into live game structures arm runtime_fault_recover, as in
@@ -555,10 +557,16 @@ static void upgrade_panel_cost(HookRegs *regs) {
 }
 
 /* Menu text lookups: with the refund menu open, the Fortify confirm becomes "Refund this weapon's
- * upgrades?" instead of "Use 0 Blood Echoes and × 1 to fortify weapon?". */
+ * upgrades? You get back:" and the materials for the highlighted weapon's level, instead of "Use 0
+ * Blood Echoes and × 1 to fortify weapon?" (without a known level, just "Refund this weapon's upgrades?"). */
 static void text_reference(HookRegs *regs) {
-    if ((uint32_t)regs->rdx == FORTIFY_CONFIRM_TEXT && (uint32_t)regs->rsi == MENU_DIALOGS_FMG && refund_requested)
-        regs->rdx = REFUND_CONFIRM_TEXT;
+    if ((uint32_t)regs->rdx != FORTIFY_CONFIRM_TEXT || (uint32_t)regs->rsi != MENU_DIALOGS_FMG || !refund_requested)
+        return;
+    int32_t id;
+    int level = refund_item ? item_level(refund_item, &id) : -1;
+    regs->rdx = REFUND_CONFIRM_TEXT + (level >= 1 && level <= RESPEC_MAX_UPGRADE ? level : 0);
+    if (trace) printf("Respec: trace refund confirm: item key %#x level %d text %u\n",
+                      refund_item ? read_u32(refund_item, 0x4C) : 0, level, (uint32_t)regs->rdx);
 }
 
 /* Each item's cost, as the list, the affordability check and the payment see it: with the refund
@@ -574,6 +582,7 @@ static void upgrade_target(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_target: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r15, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
     if (!refund_mode()) return;
     int32_t id;
+    refund_item = regs->r15;
     if (item_level(regs->r15, &id) >= 1) regs->rbx = (uint32_t)respec_weapon_base(id);
 }
 
@@ -639,6 +648,7 @@ static void set_event_flag(HookRegs *regs) {
     uint32_t flag = (uint32_t)regs->rsi, on = (uint32_t)regs->rdx != 0;
     if (flag == FLAG_REFUND) {
         refund_requested = on;
+        refund_item = 0;
         regs->rdx &= ~(uint64_t)UINT32_MAX;
         if (trace) {
             printf("Respec: trace refund mode %d\n", on);

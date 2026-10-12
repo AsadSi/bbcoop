@@ -83,6 +83,10 @@ class RespecModTests(unittest.TestCase):
                       '15000120, 15000111, 10011050, 15009110, 15000005]) changed', self.result.stdout)
         self.assertIn("'Reset Attributes'", self.result.stdout)
         self.assertIn("'Refund Weapon Upgrades'", self.result.stdout)
+        # The refund confirm per level lists what comes back (the game's names and EquipMtrlSetParam counts).
+        self.assertIn('221091: "Refund this weapon\'s upgrades? You get back:\\nBlood Stone Shard × 3"', self.result.stdout)
+        self.assertIn('221100: "Refund this weapon\'s upgrades? You get back:\\nBlood Stone Shard × 16\\n'
+                      'Twin Blood Stone Shards × 16\\nBlood Stone Chunk × 16\\nBlood Rock × 1"', self.result.stdout)
         self.assertEqual(files(self.out), sorted(TALK_AND_MSG + [GAMEPARAM]))
 
     def test_firearms_are_upgradable_left_hand_weapons(self):
