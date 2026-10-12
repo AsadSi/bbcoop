@@ -66,6 +66,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     // Before the rasterizer is bound: Liverpool enqueues buffers only once it sees it.
     draw_prep = std::make_unique<DrawPreparation>(pipeline_cache);
     scene_targets = std::make_unique<SceneTargets>(instance, scheduler, runtime, texture_cache);
+    if (!instance.IsNullDescriptorSupported()) {
+        null_resources = std::make_unique<NullResources>(instance, scheduler);
+    }
     // Object motion first: it fixes the buffer addresses the motion shader variants embed.
     object_motion = std::make_unique<ObjectMotion>(instance, scheduler);
     camera_motion = std::make_unique<CameraMotion>(instance, scheduler, texture_cache, runtime);
@@ -2703,6 +2706,12 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
             host_buffers.emplace_back(host_buffer_info->buffer->Handle());
             host_offsets.push_back(host_buffer_info->offset + buffer.base_address -
                                    host_buffer_info->base_address);
+        } else if (null_resources) {
+            host_buffers.emplace_back(null_resources->Buffer());
+            host_offsets.push_back(0);
+            host_sizes.push_back(VK_WHOLE_SIZE);
+            host_strides.push_back(buffer.GetStride());
+            continue;
         } else {
             host_buffers.emplace_back(VK_NULL_HANDLE);
             host_offsets.push_back(0);
@@ -3039,7 +3048,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 // Permutations compiled without enabled planes never read the buffer, so the
                 // declared binding is satisfied with a null descriptor instead of a copy.
                 if (Regs().clipper_control.user_clip_plane_enable == 0) {
-                    buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
+                    buffer_infos.emplace_back(null_resources ? null_resources->Buffer() : vk::Buffer{}, 0,
+                                              VK_WHOLE_SIZE);
                 } else {
                     auto& vk_buffer = buffer_cache.GetStreamBuffer();
                     std::array<float, AmdGpu::NUM_CLIP_PLANES * 4> planes{};
@@ -3097,7 +3107,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                      memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize()));
             }
             if (vsharp.base_address == 0 || vsharp.GetSize() == 0) {
-                buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
+                buffer_infos.emplace_back(null_resources ? null_resources->Buffer() : vk::Buffer{}, 0,
+                                          VK_WHOLE_SIZE);
             } else if (Shader::IsPagedBuffer(VideoCore::BufferCache::LayerPagedActive(), vsharp)) {
                 // bbport BB_LAYER_MEMORY: nearly all memory as one buffer: the shader reaches it
                 // through the page table; the descriptor holds its record. It may touch any
@@ -3266,8 +3277,22 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
 
         const auto data_fmt = tsharp.GetDataFmt();
         const auto num_fmt = tsharp.GetNumberFmt();
+        // bbport: an unbound image. Without nullDescriptor its stand-in needs the view type the
+        // shader declares and the descriptor type of the binding (storage or sampled).
+        const auto null_image_desc = [&](const Shader::ImageResource& resource,
+                                         const AmdGpu::Image& sharp) -> auto& {
+            auto& desc = image_desc_storage.emplace_back();
+            if (null_resources) {
+                desc.view_info.type = sharp.GetViewType(resource.is_array);
+                desc.view_info.format =
+                    resource.is_depth ? vk::Format::eD32Sfloat : vk::Format::eR8G8B8A8Unorm;
+                desc.type = resource.is_written ? VideoCore::TextureCache::BindingType::Storage
+                                                : VideoCore::TextureCache::BindingType::Texture;
+            }
+            return desc;
+        };
         if (tsharp.Address() == 0 || data_fmt == AmdGpu::DataFormat::FormatInvalid) {
-            image_bindings.emplace_back(VideoCore::ImageId{}, &image_desc_storage.emplace_back());
+            image_bindings.emplace_back(VideoCore::ImageId{}, &null_image_desc(image_desc, tsharp));
             image_binding_entries.push_back(nullptr);
             binding_proxy_ok.push_back(false);
             image_descriptor_array_sizes.push_back(1);
@@ -3281,7 +3306,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                         "data_format={}, num_format={}",
                         tsharp.Address(), tsharp.pitch, tsharp.width, static_cast<u32>(data_fmt),
                         static_cast<u32>(num_fmt));
-            image_bindings.emplace_back(VideoCore::ImageId{}, &image_desc_storage.emplace_back());
+            image_bindings.emplace_back(VideoCore::ImageId{}, &null_image_desc(image_desc, tsharp));
             image_binding_entries.push_back(nullptr);
             binding_proxy_ok.push_back(false);
             image_descriptor_array_sizes.push_back(1);
@@ -3386,7 +3411,14 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         const auto& desc = *desc_ptr;
         bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
         if (!image_id) {
-            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            const vk::ImageView null_view =
+                null_resources ? null_resources->View(desc.view_info.type,
+                                                      desc.view_info.format == vk::Format::eD32Sfloat)
+                               : vk::ImageView{};
+            image_infos.emplace_back(VK_NULL_HANDLE, null_view, vk::ImageLayout::eGeneral);
+            if (set_ok && binding_index < resolved.size()) {
+                resolved[binding_index].view = null_view; // the texture set memo reuses it
+            }
         } else {
             if (auto& old_image = texture_cache.GetImage(image_id);
                 old_image.binding.needs_rebind) {
@@ -3650,7 +3682,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
     for (u32 i = 0; i < count; ++i) {
         const auto& entry = set.entries[i];
         if (!entry.id) {
-            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            image_infos.emplace_back(VK_NULL_HANDLE, entry.view, vk::ImageLayout::eGeneral);
             continue;
         }
         texture_cache.MarkFound(entry.id);

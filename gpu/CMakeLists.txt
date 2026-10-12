@@ -223,6 +223,32 @@ target_include_directories(camera-motion-test PRIVATE shim shadps4 ${SHADER_INCL
 target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
 target_link_libraries(camera-motion-test PRIVATE bbgpu)
 add_dependencies(camera-motion-test host_shaders)
+set(TEST_SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_shaders)
+add_custom_command(OUTPUT ${TEST_SHADER_DIR}/null_resources_sample_comp.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_SHADER_DIR}
+    COMMAND ${GLSLANG_COMPILER} --target-env vulkan1.3 -o ${TEST_SHADER_DIR}/null_resources_sample_comp.h
+        --vn NULL_RESOURCES_SAMPLE_COMP ${CMAKE_CURRENT_SOURCE_DIR}/../tests/null_resources_sample.comp
+    COMMAND ${CMAKE_COMMAND} "-DHEADER_FILE=${TEST_SHADER_DIR}/null_resources_sample_comp.h"
+        -P ${SHADER_SRC}/AddShaderHeaderInclude.cmake
+    DEPENDS ../tests/null_resources_sample.comp VERBATIM)
+add_executable(null-resources-test EXCLUDE_FROM_ALL ../tests/test_null_resources.cpp ../tests/test_gpu_runtime_stubs.cpp
+    ${TEST_SHADER_DIR}/null_resources_sample_comp.h)
+target_include_directories(null-resources-test PRIVATE shim shadps4 third_party/gcn/include ${TEST_SHADER_DIR})
+target_compile_options(null-resources-test PRIVATE -UNDEBUG -fPIC)
+set_source_files_properties(../tests/test_null_resources.cpp PROPERTIES
+    COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
+target_link_libraries(null-resources-test PRIVATE bbgpu)
+
+if (APPLE)
+    # These tests resolve vkGetInstanceProcAddr from the loader directly (see the tests).
+    foreach(test IN ITEMS scene-resolution-test taa-shader-test camera-motion-test null-resources-test)
+        target_link_libraries(${test} PRIVATE Vulkan::Vulkan)
+    endforeach()
+    # Window on the main thread (Cocoa), with the device, presenter and swapchain.
+    add_executable(window-test EXCLUDE_FROM_ALL ../tests/test_window.cpp ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(window-test PRIVATE .. shim shadps4 third_party/gcn/include)
+    target_link_libraries(window-test PRIVATE bbgpu)
+endif()
 
 add_executable(translation-memory-test EXCLUDE_FROM_ALL ../tests/test_translation_memory.cpp
     ../tests/test_gpu_runtime_stubs.cpp)
@@ -231,6 +257,14 @@ target_compile_options(translation-memory-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_translation_memory.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(translation-memory-test PRIVATE bbgpu)
+if (APPLE)
+    # libbbgpu resolves the runtime stubs in these executables at load time (flat namespace):
+    # a Mach-O executable exports them only when asked to.
+    foreach(test IN ITEMS motion-shader-test scene-resolution-test taa-shader-test camera-motion-test
+                          null-resources-test translation-memory-test window-test)
+        target_link_options(${test} PRIVATE -Wl,-export_dynamic)
+    endforeach()
+endif()
 
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp

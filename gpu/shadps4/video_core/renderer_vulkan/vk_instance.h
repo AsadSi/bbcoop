@@ -161,6 +161,11 @@ public:
         return buffer_marker;
     }
 
+    /// bbport: VK_EXT_robustness2 nullDescriptor (absent on MoltenVK: NullResources stand in).
+    bool IsNullDescriptorSupported() const {
+        return null_descriptor;
+    }
+
     /// Returns true if VK_EXT_attachment_feedback_loop_layout is supported
     bool IsAttachmentFeedbackLoopLayoutSupported() const {
         return attachment_feedback_loop;
@@ -290,6 +295,11 @@ public:
     /// Returns true if VK_AMD_mixed_attachment_samples is supported
     bool IsMixedAnySamplesSupported() const {
         return amd_mixed_attachment_samples;
+    }
+
+    /// Returns true when shaders may write multisampled images (no on Metal/MoltenVK)
+    bool IsStorageImageMultisampleSupported() const {
+        return features.shaderStorageImageMultisample;
     }
 
     /// Returns true when geometry shaders are supported by the device
@@ -604,6 +614,7 @@ private:
     bool maintenance_5{};
     bool maintenance_8{};
     bool buffer_marker{};
+    bool null_descriptor{true};
     bool attachment_feedback_loop{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};

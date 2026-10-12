@@ -1,4 +1,4 @@
-// bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+// bbport: SDL3 window for the Vulkan swapchain (X11, Wayland, or Metal on macOS).
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -67,7 +67,12 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width_);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
+#ifdef __APPLE__
+    // A Metal view; MoltenVK's surface is made from its CAMetalLayer (SDL needs no Vulkan here).
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_METAL_BOOLEAN, true);
+#else
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
+#endif
     const char* fullscreen = std::getenv("BB_FULLSCREEN");
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, fullscreen && fullscreen[0] == '1');
     base_title = title;
@@ -77,6 +82,12 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
 
     const char* driver = SDL_GetCurrentVideoDriver();
     const SDL_PropertiesID wp = SDL_GetWindowProperties(window);
+#ifdef __APPLE__
+    // MoltenVK presents to a CAMetalLayer: SDL_Metal_CreateView makes the window's layer one.
+    (void)wp;
+    window_info.type = WindowSystemType::Metal;
+    window_info.render_surface = SDL_Metal_GetLayer(SDL_Metal_CreateView(window));
+#else
     if (driver && !std::strcmp(driver, "x11")) {
         window_info.type = WindowSystemType::X11;
         window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
@@ -88,6 +99,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     } else {
         UNREACHABLE_MSG("Unsupported SDL video driver {}", driver ? driver : "(none)");
     }
+#endif
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     width = w;
