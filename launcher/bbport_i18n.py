@@ -1108,7 +1108,8 @@ def macos_locale():
 def system_language():
     for key in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
         value = os.environ.get(key, "")
-        if value:
+        # C and POSIX (terminals often export C.UTF-8) name no language: the next source decides.
+        if value and value.split(".")[0].upper() not in ("C", "POSIX"):
             locale = value.lower().replace("-", "_")
             if locale.startswith("ru"):
                 return "ru"
