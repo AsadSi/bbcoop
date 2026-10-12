@@ -230,6 +230,13 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     GraphicsPipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
+    // bbport: a pipeline with object motion vectors, saved while they were on, cannot occur in a
+    // session without their buffer (object motion off): its vertex shader would be built without
+    // the motion varyings its fragment shader reads, which Metal rejects. Skipped, not damaged.
+    if (sel.graphics_key.motion_vectors && Shader::MotionVectors::positions_address == 0) {
+        return false;
+    }
+
     for (int stage_idx = 0; stage_idx < MaxShaderStages; ++stage_idx) {
         const auto& hash = sel.graphics_key.stage_hashes[stage_idx];
         if (!hash) {
