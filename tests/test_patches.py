@@ -286,6 +286,15 @@ class FpsPatchTests(unittest.TestCase):
                     cave = set(range(0x05490B00 - EBOOT_BASE, 0x05490B0E - EBOOT_BASE))
                     self.assertEqual(outside, cave)
                     self.assertGreater(min(cave), max(a for a in uncap if a < 0x054A0000 - EBOOT_BASE))
+                elif key == 'clothstep':
+                    # Its caves lie after the step1972 cave; inside Uncap FPS++ it replaces whole cloth lines.
+                    caves = {a for a in outside if a >= 0x05490000 - EBOOT_BASE}
+                    self.assertEqual(min(caves), 0x05490B10 - EBOOT_BASE)
+                    writes = compile_patches(XML, self.NEW, '01.09', SEGMENTS)
+                    variant = compile_patches(XML, [name], '01.09', SEGMENTS)
+                    replaced = {o + EBOOT_BASE for o, d in writes if any(o + i in ours for i in range(len(d)))}
+                    self.assertEqual(replaced, set(patches.FPS_SKIP_GROUPS['cloth']))
+                    patches.apply_fps_choices(writes, set(), variant, {o for o, _ in writes})
                 else:
                     # The wind step sites are vanilla in Uncap FPS++.
                     self.assertEqual(outside, set(ours))
@@ -300,6 +309,14 @@ class FpsPatchTests(unittest.TestCase):
         self.assertEqual(text(0x02714B26, 29).hex(),
                          '488d05ccc22203803800c4412857d2448b8548feffff7505c441796fd6')
         self.assertEqual(text(0x05490B00, 14), bytes(14))
+        # clothstep: the cloth manager's dt store, the pre-step's and adapter's substep reads, free caves,
+        # and its two floats in the zero RTTI slot of vtable 0x578CF60 (data segment).
+        self.assertEqual(text(0x013D545B, 8).hex(), 'c5fa118344010000')
+        self.assertEqual(text(0x00B6FBF0, 11).hex(), '8b401885c07504418b4720')
+        self.assertEqual(text(0x00B72225, 16).hex(), '8b40188945cc85c075068b43208945cc')
+        self.assertEqual(text(0x05490B10, 0x190), bytes(0x190))
+        data = 0x0578CF58 - EBOOT_BASE - 0x50dc000 + 0x50e0000
+        self.assertEqual(elf[data:data + 8], bytes(8))
 
     def test_dead_broken_call_is_left_out(self):
         # Upstream's 0x02715D71 call has its rel32 overwritten by the following 0x02715D75 line.

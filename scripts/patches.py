@@ -62,6 +62,9 @@ FPS_TRY_VARIANTS={
     # again (1/30: the game's; 1/60: the old patch's), its timers keep the frame time.
     'wind30':'bbcoop: Fixed Wind Offset Step 1/30',
     'wind60':'bbcoop: Fixed Wind Offset Step 1/60',
+    # Havok Cloth stepped in fixed 1/120 substeps from an accumulator, with one constant stiffness factor
+    # (Uncap FPS++'s factor follows every frame's time, so stiff cloth flickers).
+    'clothstep':'bbcoop: Fixed Cloth Step 1/120',
 }
 
 
