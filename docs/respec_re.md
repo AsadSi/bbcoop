@@ -136,6 +136,7 @@ The Workshop altar and the Doll's `c1_48` open it. It is registered at 0x1bb9d00
 
 **Refund-mode cosmetics**
 - The info panel's cost is computed separately, in 0x1c5e500 → 0x1b5eec0. At the hooked site 0x1c5e82b (r15 = I) it sits at rbp-0x150, in the same layout as at 0x1bd2d73, and refund mode blanks it.
+- The confirm lists what comes back (2026-10-12, verified in game by Asad): `tools/respec_mod.py` adds 221091..221100, one per level +1..+10, with the game's goods names and EquipMtrlSetParam counts (checked against the refund table). The target hook remembers the highlighted weapon's item key (the menu item it sees is a temporary copy, gone when the confirm opens), and the text hook picks 221090 + its level; 221090 is the fallback without a list.
 - The confirm text is MenuDialogs_SP (FMG 204) id 221000, "Use <?demandSoul?> Blood Echoes and …". The menu text lookup 0x1ae8cc0(out, fmg, id) is hooked after its pushes at 0x1ae8cd1. That hook turns it into 221090, which `tools/respec_mod.py` adds: "Refund this weapon's upgrades?".
 
 **Gems in the test character**
