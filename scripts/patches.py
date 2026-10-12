@@ -53,8 +53,8 @@ FPS_SKIP_GROUPS={
     # The character clip player 0x1915EC0: real frame time instead of 1/30 a frame.
     'clip':[0x01915FAB,0x01916030,0x01915F71],
 }
-# BB_FPS_TRY=<variant>[,<variant>] adds bbcoop candidate fixes (patches/Bloodborne.xml) for Uncap FPS++;
-# a variant's bytes replace the Uncap FPS++ lines they overlap.
+# BB_FPS_TRY=<variant>[,<variant>] picks the bbcoop fixes (patches/Bloodborne.xml) for Uncap FPS++ (default
+# DEFAULT_FPS_TRY, "none" for none); a variant's bytes replace the Uncap FPS++ lines they overlap.
 FPS_TRY_VARIANTS={
     # The update context at 0x1972A7D gets the clamped frame time (0x0575A908) instead of a fixed 1/30.
     'step1972':'bbcoop: Frame Time Step at 0x1972A7D',
@@ -68,15 +68,23 @@ FPS_TRY_VARIANTS={
 }
 
 
+# Applied with Uncap FPS++ unless BB_FPS_TRY says otherwise (BB_FPS_TRY=none: Uncap FPS++ as published). Asad's
+# A/B 2026-10-12: wind60 calms the flowers and capes, clothstep the Doll's hood and skirt.
+DEFAULT_FPS_TRY='wind60,clothstep'
+
+
 def fps_choices(env=os.environ):
-    """(skipped line addresses, variant patch names) from BB_FPS_SKIP / BB_FPS_TRY."""
-    def parse(name, table):
-        keys=[k.strip() for k in env.get(name,'').split(',') if k.strip()]
+    """(skipped line addresses, variant patch names, explicit) from BB_FPS_SKIP / BB_FPS_TRY; explicit is
+    False when only the default variants apply."""
+    def parse(name, table, default=''):
+        value=env.get(name,default)
+        keys=[] if value.strip()=='none' else [k.strip() for k in value.split(',') if k.strip()]
         unknown=[k for k in keys if k not in table]
         if unknown: raise ValueError(f'{name}: unknown {unknown}; known: {sorted(table)}')
         return keys
     skip={a for k in parse('BB_FPS_SKIP',FPS_SKIP_GROUPS) for a in FPS_SKIP_GROUPS[k]}
-    return skip,[FPS_TRY_VARIANTS[k] for k in parse('BB_FPS_TRY',FPS_TRY_VARIANTS)]
+    variants=[FPS_TRY_VARIANTS[k] for k in parse('BB_FPS_TRY',FPS_TRY_VARIANTS,DEFAULT_FPS_TRY)]
+    return skip,variants,bool(skip) or 'BB_FPS_TRY' in env
 
 
 def apply_fps_choices(writes, skip, variants, replaceable=None):
@@ -433,8 +441,8 @@ def main():
     names=validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
-    skip,variants=fps_choices()  # bbcoop: BB_FPS_SKIP / BB_FPS_TRY
-    if skip or variants:
+    skip,variants,explicit=fps_choices()  # bbcoop: BB_FPS_SKIP / BB_FPS_TRY (default: DEFAULT_FPS_TRY)
+    if (skip or variants) and ('Uncap FPS++' in names or explicit):
         if 'Uncap FPS++' not in names:
             raise ValueError('BB_FPS_SKIP / BB_FPS_TRY need the current Uncap FPS++ (BB_FPS=uncap, no BB_FPS_PATCH=old)')
         before=len(writes)
