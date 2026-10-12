@@ -172,6 +172,9 @@ The level-up commit (0x1c13d00) changes current HP by the change in max HP, clam
   - Weapons are given at +0 and changed to their final level, as the Workshop does.
   - Armor uses category 0x10000000, goods 0x40000000.
   - It adds the 12 test gems, sets the Dream flags and warps to the Dream (as BB_TEST_ENDGAME).
+  - It gives the three Workshop tools (4102, 4103, 4104; key items) under their own flag 72100904, so a TEST filled
+    before they were added gets them on its next load. The workbench's talk script sets 72100200/72100201 (Blood Gem
+    Fortification, Arcane Haze) itself when it finds them (t210692 x2 states 7/8 and 19/20).
 - **The list:** `tools/respec_mod.py` writes it from the game's params and names:
   - EquipParamWeapon rows `id % 10000 == 0` with a name, except Bare Fists, at their highest level;
   - EquipParamProtector rows with a name;
