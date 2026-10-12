@@ -1,8 +1,8 @@
 # Duplicate in Load Game: reverse-engineering notes (v1.09)
 
 Asad asked for this on 2026-10-12: pick a character in the title screen's Load Game list and press Triangle (Duplicate). The
-character is copied into the first free profile slot as "<name> (2)" (then "(3)" and so on). The copy appears in the list as
-a separate character, and every copy is kept until it is deleted. To go back to a copy, load it; from then on it autosaves
+character is copied, with the same name, into the first free profile slot (Asad: same name, 2026-10-13). The copy appears in
+the list as a separate character, and every copy is kept until it is deleted. To go back to a copy, load it; from then on it autosaves
 into its own slot. Code: `src/runtime_saveslots.c`. Addresses are image offsets (ELF vaddr), unless marked as XML addresses.
 
 ## Save files (`user/savedata/<user>/CUSA00900/SPRJ0005/`)
@@ -51,7 +51,7 @@ into its own slot. Code: `src/runtime_saveslots.c`. Addresses are image offsets 
 | 0x1b42f86 (after the Delete binding) | `48 8B BD 60 E9 FF FF` | Adds a Triangle binding labelled 202/400090 "Duplicate", reusing the idle predicate (rbx). Its action is a std::function target `{vtable, dialog}`. Our vtable has its own clones (they keep our vtable) and our call; slots 3..7 are the Delete action's. Our call runs 0x1b43230 with `duplicating` set. |
 | 0x1ae8cd1 (menu text lookup) | respec's hook | While `duplicating`, 204/406013 becomes 406090 "Duplicate selected profile?", or 406091 when no slot is free. The hook is shared: `runtime_respec.c` calls `saveslots_text` first, and without respec's hooks Duplicate stays off. |
 | 0x1b4334e (job A's slot captured) | `44 89 B5 88 FE FF FF` | While `duplicating`, the slot is tagged: +0x100, or +0x200 when no slot is free. The game's own clear in job A then does nothing (it only handles slots up to 9, and the tag never matches the last-played slot). |
-| 0x1b45ded (in job A, after Yes) | `48 8B 51 58 48 85 D2` | For a +0x100 tag, it takes the first free slot and copies `userdataM` to `userdataN` on the host (temp file, then rename). The name is changed wherever it appears in the file as a whole padded field (PlayerGameData +0xA8, and in some saves a second copy beside the face data). It deletes `backupN`, copies the 0x220-byte record with the new name, and sets `exists[N]`. The game's chain then saves `userdata0010` and refreshes the list. |
+| 0x1b45ded (in job A, after Yes) | `48 8B 51 58 48 85 D2` | For a +0x100 tag, it takes the first free slot and copies `userdataM` byte for byte to `userdataN` on the host (temp file, then rename). It deletes `backupN`, copies the 0x220-byte record as it is, and sets `exists[N]`. The game's chain then saves `userdata0010` and refreshes the list. |
 
 - **Save directory:** the host directory comes from `runtime_savedata_last_host("SPRJ0005")` (a bbcoop addition in
   `runtime_savedata.c`).

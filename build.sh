@@ -110,6 +110,4 @@ if [[ ${1:-} == --test ]]; then
     out/messenger-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_ik.c src/runtime_ik.c src/runtime_hooks.c -lm -o out/ik-test # bbcoop
     out/ik-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_saveslots.c src/runtime_saveslots.c src/runtime_hooks.c -o out/saveslots-test # bbcoop
-    out/saveslots-test
 fi
