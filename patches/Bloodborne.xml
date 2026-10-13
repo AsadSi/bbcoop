@@ -4161,4 +4161,16 @@
             <Line Type="bytes" Address="0x00B72225" Value="8B0531ADC1048945CC0F1F8000000000"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Frame Time Floor 1/240" Author="bbcoop" Note="BB_FPS_TRY=dtfloor. Uncap FPS++'s cave at 0x02418E3D stores the clamped frame time (min(max(flipper dt, +0x18), 1/30)) as the task context's dt and in 0x0575A908. The flipper's dt can be 0 (frames presented back to back), and with 0 Havok Cloth / character code divides by it: the character editor's model came out invisible or white (Asad 2026-10-13). This cave adds a floor of 1/240 and is otherwise the same code (same hook, 46 bytes at 0x02418E3D, cave at 0x05490CA0)." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x05490CA0" Value="F30F108364020000F30F5F4318F30F5D05AF5689FFF30F5F0523000000F30F1145C8F30F11053E9C2C00488D053FF84A00E99581F8FC000000000000000000008988883B"/>
+            <Line Type="bytes" Address="0x02418E3D" Value="E95E7E07039090909090909090909090909090909090909090909090909090909090909090909090909090909090"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Context dt 1/30 (test)" Author="bbcoop" Note="BB_FPS_TRY=ctx30. Uncap FPS++'s cave at 0x02418E3D stores the clamped frame time (min(max(flipper dt, +0x18), 1/30)) as the task context's dt and in 0x0575A908. The flipper's dt can be 0 (frames presented back to back), and with 0 Havok Cloth / character code divides by it: the character editor's model came out invisible or white (Asad 2026-10-13). This cave adds a floor of 1/240 and is otherwise the same code (same hook, 46 bytes at 0x02418E3D, cave at 0x05490CA0)." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x05490CA0" Value="F30F108364020000F30F5F4318F30F5D05AF5689FFF30F5F05230000009090909090F30F11053E9C2C00488D053FF84A00E99581F8FC000000000000000000008988883B"/>
+            <Line Type="bytes" Address="0x02418E3D" Value="E95E7E07039090909090909090909090909090909090909090909090909090909090909090909090909090909090"/>
+        </PatchList>
+    </Metadata>
 </Patch>

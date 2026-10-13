@@ -79,8 +79,18 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
     for source in "${atrac9[@]}"; do "$CC" -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
     ar rcs out/libatrac9.a out/atrac9/*.o
 fi
-"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/bb-probe
-echo "Built $PWD/out/bb-probe"
+# bbcoop: the probe is compiled again only when its sources, headers, this script, the compiler or the GPU
+# library changed (the full compile took about a minute on every launch). BB_REBUILD=1 forces it.
+probe_stamp=$({ cat -- src/probe.c "${runtime[@]}" src/vulkan_smoke.c src/*.h *.h build.sh out/libatrac9.a out/gpu/libbbgpu.so 2>/dev/null
+                printf '%s\n' "$CC" "${includes[@]}" "${libraries[@]}"; } | cksum)
+if [[ ${BB_REBUILD:-0} != 1 && -x out/bb-probe && $(cat out/bb-probe.stamp 2>/dev/null) == "$probe_stamp" ]]; then
+    echo "Up to date: $PWD/out/bb-probe (BB_REBUILD=1 forces a rebuild)"
+else
+    rm -f out/bb-probe.stamp
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/bb-probe
+    printf '%s' "$probe_stamp" > out/bb-probe.stamp
+    echo "Built $PWD/out/bb-probe"
+fi
 # GPU check for run.sh (live_resolution=auto) and the launcher's gamepad list (--gamepads).
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 if [[ ${1:-} == --test ]]; then

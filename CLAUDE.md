@@ -66,7 +66,7 @@ what's still open.
   the previous one, and `BB_FPS=120` applies 120 FPS++ (`docs/animation_re.md`).
   A/B switches for it (`scripts/patches.py`, "Foliage speed" in `docs/animation_re.md`): `BB_FPS_SKIP=<group>[,..]`
   leaves groups of its lines out (`cloth grass sfx fps60 hknp timeobj clip`), `BB_FPS_TRY=<variant>[,..]` picks
-  bbcoop fixes (`step1972 wind30 wind60 clothstep`); default `wind60,clothstep` (no flicker on foliage, capes or
+  bbcoop fixes (`step1972 wind30 wind60 clothstep dtfloor`); default `wind60,clothstep,dtfloor` (no flicker on foliage, capes or
   the Doll's hood, Asad 2026-10-12), `none` for Uncap FPS++ as published. `~/.local/bin/bloodborne-ab.sh ENV=VALUE...` starts the game with them.
   `BB_CAMERA_TRACE=1` logs the camera's frame time, rates, ramp and yaw. `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
   `docs/messengers_re.md`).

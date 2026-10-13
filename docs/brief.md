@@ -78,6 +78,7 @@ Supporting pieces:
 
 ## Open
 
+- **Character editor invisible/white/unchanged (Asad, 2026-10-13), USABLE.** Cause: Uncap FPS++'s frame time can be 0 when frames are presented back to back (Havok Cloth and character code divide by it); the default had the model stay unchanged on skin/gender changes. Fix: `dtfloor` (`BB_FPS_TRY`, now default; 1/240 floor, `patches/Bloodborne.xml`). Verified by Asad: changes apply. Remaining: the model flickers invisible/visible on every second change, accepted as fine. Not the cause: `BB_GPU_WRITE_TWINS_MAX`. Unfinished bisect over Uncap FPS++ units (0:81 dropped = visible; culprit among units 40-59, 70-74, 78-80) needs a rerun without other game launches (each step `pkill`s bb-probe). Build: `build.sh` skips the probe compile when unchanged (`BB_REBUILD=1` forces); a corrupt out/gpu/.ninja_deps (killed builds) made ninja recompile 180 files on every launch (58 s -> 0.7 s after deleting it).
 - **Online and co-op are on hold (Asad, 2026-10-11).** Plan: `~/.claude/plans/make-a-plan-on-scalable-kurzweil.md`.
   - **Done:** the launcher's Host/Join, the server, the ported NP libraries, and the seamless patches and hooks.
   - **Missing:** `src/runtime_coop.c` (lamp sync, mirrored loot, flag sync, death rules), HP/damage scaling, extra enemies, and a real two-player session.
