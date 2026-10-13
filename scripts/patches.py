@@ -65,12 +65,16 @@ FPS_TRY_VARIANTS={
     # Havok Cloth stepped in fixed 1/120 substeps from an accumulator, with one constant stiffness factor
     # (Uncap FPS++'s factor follows every frame's time, so stiff cloth flickers).
     'clothstep':'bbcoop: Fixed Cloth Step 1/120',
+    # The clamped frame time (0x02418E3D) gets a 1/240 floor: the flipper's dt can be 0 (character editor model invisible).
+    'ctx30':'bbcoop: Context dt 1/30 (test)',
+    'dtfloor':'bbcoop: Frame Time Floor 1/240',
 }
 
 
 # Applied with Uncap FPS++ unless BB_FPS_TRY says otherwise (BB_FPS_TRY=none: Uncap FPS++ as published). Asad's
-# A/B 2026-10-12: wind60 calms the flowers and capes, clothstep the Doll's hood and skirt.
-DEFAULT_FPS_TRY='wind60,clothstep'
+# A/B 2026-10-12: wind60 calms the flowers and capes, clothstep the Doll's hood and skirt. dtfloor (2026-10-13):
+# the character editor's model stayed unchanged or invisible when the frame time was 0; with the floor it updates.
+DEFAULT_FPS_TRY='wind60,clothstep,dtfloor'
 
 
 def fps_choices(env=os.environ):
@@ -451,6 +455,25 @@ def main():
         print(f'Patches: BB_FPS_SKIP={os.environ.get("BB_FPS_SKIP","")} BB_FPS_TRY={os.environ.get("BB_FPS_TRY","")}: '
               f'{before} -> {len(writes)} writes')
         names+=variants
+    if os.environ.get('BB_PATCH_BISECT'):  # bbcoop debug: drop units (a hook with its cave, or a plain line) lo..hi-1
+        lo,hi=map(int,os.environ['BB_PATCH_BISECT'].split(':'))
+        cur=[(o,d) for o,d in compile_patches(a.xml,['Uncap FPS++'],a.app_version,segments)]
+        caves=[(o,o+len(d)) for o,d in cur if o+EBOOT_BASE>=0x5400000]
+        def cave_of(t): return next((s for s,e in caves if s<=t<e),None)
+        units={}; order=[]
+        for o,d in cur:
+            if o+EBOOT_BASE>=0x5400000: continue
+            key=o; extra=[]
+            if len(d)>=5 and d[0] in (0xE9,0xE8):
+                t=(o+5+struct.unpack('<i',d[1:5])[0]) & 0xffffffff
+                c=cave_of(t)
+                if c is not None: extra=[c]
+            units[key]=[o]+extra; order.append(key)
+        drop=set()
+        for k in order[lo:hi]: drop.update(units[k])
+        n0=len(writes)
+        writes=[w for w in writes if w[0] not in drop]
+        print(f'Patches: BB_PATCH_BISECT={lo}:{hi}: dropped {n0-len(writes)} writes, {len(order)} units')
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
     # it into the output-size image with a viewport scaled by output / 1920

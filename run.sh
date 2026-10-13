@@ -109,7 +109,7 @@ fps=${BB_FPS:-uncap}
 # bbcoop: BB_FPS=120 applies 120 FPS++ (fixed timestep, vblank 120); BB_FPS_PATCH=old selects the previous
 # Uncap FPS++ (2026-08-28) with the separate sprint fix (scripts/patches.py reads it).
 # bbcoop A/B: BB_FPS_SKIP=<group>[,..] leaves groups of Uncap FPS++ lines out (cloth grass sfx fps60 hknp timeobj
-# clip), BB_FPS_TRY=<variant>[,..] picks bbcoop fixes (step1972 wind30 wind60 clothstep; default wind60,clothstep,
+# clip), BB_FPS_TRY=<variant>[,..] picks bbcoop fixes (step1972 wind30 wind60 clothstep dtfloor; default wind60,clothstep,dtfloor,
 # none for none); docs/animation_re.md.
 # bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is

@@ -205,7 +205,8 @@ class FpsPatchTests(unittest.TestCase):
     def test_skip_and_try_switches(self):
         # Default: the wind and cloth fixes; "none" or an empty value: Uncap FPS++ as published.
         self.assertEqual(patches.fps_choices({}), (set(), ['bbcoop: Fixed Wind Offset Step 1/60',
-                                                           'bbcoop: Fixed Cloth Step 1/120'], False))
+                                                           'bbcoop: Fixed Cloth Step 1/120',
+                                                           'bbcoop: Frame Time Floor 1/240'], False))
         self.assertEqual(patches.fps_choices({'BB_FPS_TRY': 'none'}), (set(), [], True))
         self.assertEqual(patches.fps_choices({'BB_FPS_TRY': ''}), (set(), [], True))
         skip, variants, _ = patches.fps_choices({'BB_FPS_SKIP': 'grass, cloth', 'BB_FPS_TRY': 'step1972'})
@@ -299,6 +300,14 @@ class FpsPatchTests(unittest.TestCase):
                     replaced = {o + EBOOT_BASE for o, d in writes if any(o + i in ours for i in range(len(d)))}
                     self.assertEqual(replaced, set(patches.FPS_SKIP_GROUPS['cloth']))
                     patches.apply_fps_choices(writes, set(), variant, {o for o, _ in writes})
+                elif key in ('dtfloor', 'ctx30'):
+                    # Same hook as Uncap FPS++'s frame time cave (46 bytes at 0x02418E3D, replaced), its own
+                    # cave after the cloth ones.
+                    caves = {a for a in outside if a >= 0x05490000 - EBOOT_BASE}
+                    self.assertGreaterEqual(min(caves), 0x05490C00 - EBOOT_BASE)
+                    hook = set(range(0x02418E3D - EBOOT_BASE, 0x02418E3D - EBOOT_BASE + 46))
+                    self.assertEqual(outside - caves, set())
+                    self.assertEqual(set(ours) & set(uncap), hook)
                 else:
                     # The wind step sites are vanilla in Uncap FPS++.
                     self.assertEqual(outside, set(ours))
