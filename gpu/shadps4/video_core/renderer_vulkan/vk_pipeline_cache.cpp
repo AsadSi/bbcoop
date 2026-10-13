@@ -723,6 +723,26 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     return it->second.get();
 }
 
+/// bbport: a color target or vertex buffer whose format has no Vulkan format (data 2_10_10_10 with
+/// number format float: no GCN format either, a stale descriptor) asserted and ended the game.
+/// Its draw is skipped instead, reported once per format and kind.
+static bool KnownSurfaceFormat(const char* kind, AmdGpu::DataFormat data_fmt,
+                               AmdGpu::NumberFormat num_fmt) {
+    if (LiverpoolToVK::TrySurfaceFormat(data_fmt, num_fmt) != vk::Format::eUndefined) {
+        return true;
+    }
+    static std::mutex mutex;
+    static std::unordered_set<u32> reported;
+    const u32 key = (static_cast<u32>(data_fmt) << 8 | static_cast<u32>(num_fmt)) << 1 |
+                    (kind[0] == 'v' ? 1u : 0u);
+    std::scoped_lock lock{mutex};
+    if (reported.insert(key).second) {
+        std::printf("GPU: %s with unknown format (data %u, number %u): its draws are skipped\n",
+                    kind, static_cast<u32>(data_fmt), static_cast<u32>(num_fmt));
+    }
+    return false;
+}
+
 bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     std::memset(&sel.graphics_key, 0, sizeof(GraphicsPipelineKey));
     const auto& regs = (*sel.regs);
@@ -779,6 +799,10 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         auto& color_buffer = key.color_buffers[cb];
         color_buffer.data_format = col_buf.GetDataFmt();
         color_buffer.num_format = col_buf.GetNumberFmt();
+        if (!KnownSurfaceFormat("color target", color_buffer.data_format,
+                                color_buffer.num_format)) {
+            return false;
+        }
         color_buffer.num_conversion = col_buf.GetNumberConversion();
         color_buffer.export_format = regs.color_export_format.GetFormat(cb);
         color_buffer.swizzle = col_buf.Swizzle();
@@ -1095,6 +1119,14 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     }
 
     const auto* vs_info = sel.infos[static_cast<u32>(SwStage::Vertex)];
+    if (vs_info && sel.fetch_shader) {
+        for (const auto& attrib : sel.fetch_shader->attributes) {
+            const auto& buffer = attrib.GetSharp(*vs_info);
+            if (!KnownSurfaceFormat("vertex buffer", buffer.GetDataFmt(), buffer.GetNumberFmt())) {
+                return false;
+            }
+        }
+    }
     if (vs_info && sel.fetch_shader && !instance.IsVertexInputDynamicState()) {
         // Without vertex input dynamic state, the pipeline needs to specialize on format.
         // Stride will still be handled outside the pipeline using dynamic state.
