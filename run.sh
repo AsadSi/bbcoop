@@ -91,7 +91,8 @@ fi
 # BB_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start).
 # Frame rate: BB_FPS=uncap (default; delta-time patch, vblank 480 Hz, frames shown at once),
 # 60/90 (fixed-timestep patches) or 30 (unpatched). BB_PATCHES adds patch names ("a;b").
-fps=${BB_FPS:-uncap}
+# macOS: 30 by default (an M1 Pro's GPU needs ~28 ms a frame at 1080p; faster rates came out uneven).
+if [[ $(uname -s) == Darwin ]]; then fps=${BB_FPS:-30}; else fps=${BB_FPS:-uncap}; fi
 # bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.

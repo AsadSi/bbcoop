@@ -2,8 +2,7 @@
 
 **Status:** the game runs on an M1 Pro (16 GB, macOS 26, MoltenVK 1.4.2): the title screen, the
 save and the Hunter's Dream at the game's 30 FPS with the Mac defaults (see
-[Performance](#performance) and [Known limits](#known-limits)). The 60 FPS mode is not measured
-yet.
+[Performance](#performance) and [Known limits](#known-limits)).
 
 ## Why an x86-64 build under Rosetta 2
 
@@ -46,8 +45,8 @@ BB_GAME_DIR=/path/to/CUSA03173 VCPKG_ROOT=/path/to/vcpkg \
 BB_MOLTENVK_ICD=/path/to/MoltenVK_icd.json bash run.sh
 ```
 
-`BB_FPS=60` selects the 60 FPS patch (`30` is the game's own rate), `BB_FRAME_STATS=1` prints
-frame statistics every 5 s. macOS lets no app take the keyboard focus by itself, so `run.sh`
+The frame rate is the game's own 30 FPS by default on macOS (`BB_FPS=60` or `uncap` select the
+patches, see [Performance](#performance)); `BB_FRAME_STATS=1` prints frame statistics every 5 s. macOS lets no app take the keyboard focus by itself, so `run.sh`
 brings the game's window to the front through System Events once it is up (macOS may ask to allow
 the terminal to control System Events); clicking into the window works as well.
 
@@ -147,14 +146,20 @@ M1 Pro, 1080p output, Hunter's Dream (~700 draws per frame):
 |---|---|---|
 | FSR 3.1 + object motion (Linux defaults) | 17-20 | GPU 98-99% busy |
 | Mac defaults (no upscaler, no object motion) | 30 (the game's rate) | GPU thread idle ~65% |
+| Mac defaults, 60 FPS patch | 30-36, uneven | GPU ~28 ms a frame |
+
+The GPU needs ~28 ms a frame there (`BB_GPU_PROFILE=1`); 60 FPS needs 16.7 ms. The largest item
+the port adds is the game's buffer copy shader (~60 calls a frame interleaved with draws, ~4 ms):
+on a tile-based GPU each one ends the render pass and waits for it. Merging the batches of a call
+into one dispatch did not change it (each call already was one).
 
 `BB_FRAME_STATS=1` prints FPS, draws, GPU waits and write faults every 5 s;
 `MVK_CONFIG_SHADER_DUMP_DIR=<dir>` dumps the MSL MoltenVK generates for each shader.
 
 ## Known limits
 
-- **60 FPS** (`BB_FPS=60`) is not measured yet; at 30 FPS the GPU is already busy in the Hunter's
-  Dream, so heavier areas will not hold 60.
+- **60 FPS** (`BB_FPS=60`) does not hold at 1080p: 30-36 FPS in the Hunter's Dream, unevenly
+  paced, so 30 is the default.
 - **Geometry shaders / multisampled storage images:** skipped (see above); what they draw is
   missing.
 - **FSR 4, DLSS** and other vendor-specific features are unavailable on Apple GPUs; FSR 3.1 and

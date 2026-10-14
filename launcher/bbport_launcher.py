@@ -194,6 +194,9 @@ if sys.platform == "darwin":
     # Performance at 1/3 of the resolution, with object motion, looked blurred at 17-26 FPS on an
     # M1 Pro; native resolution without them holds the game's 30.
     INI_DEFAULTS.update({"upscaler": "off", "preset": "0", "object_motion": "0", "show_fps": "1"})
+    # The game's own 30 FPS: at 1080p the M1 Pro's GPU needs ~28 ms a frame in the Hunter's Dream,
+    # so the unlocked and 60 FPS patches gave an uneven 30-36 FPS.
+    DEFAULTS["fps_mode"] = "30"
 
 
 def load_settings():
