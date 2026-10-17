@@ -28,6 +28,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 
 #include "common/elf_info.h"
 #include "common/types.h"
@@ -64,6 +68,10 @@
 #include "core/libraries/np/np_common.h"
 #include "core/libraries/np/np_manager.h"
 #include "core/libraries/np/np_matching2/np_matching2.h"
+#ifdef __APPLE__
+#include "core/libraries/np/np_handler.h"
+#include "core/libraries/np/np_matching2/np_matching2_signaling.h"
+#endif
 #include "core/libraries/np/np_partner.h"
 #include "core/libraries/np/np_party.h"
 #include "core/libraries/np/np_score/np_score.h"
@@ -516,6 +524,27 @@ extern "C" __attribute__((visibility("default"))) void bbnet_image_ready(std::ui
     // while the game runs (session teardown, the host's lamp): its code pages stay writable
     // (shadPS4 maps them so; the port maps them read and execute).
     unsigned writable = 0;
+#ifdef __APPLE__
+    // macOS: no /proc; the executable regions come from mach_vm_region.
+    mach_vm_address_t region = base;
+    mach_vm_size_t region_size = 0;
+    vm_region_basic_info_data_64_t info{};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    while (region < base + size &&
+           mach_vm_region(mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
+                          reinterpret_cast<vm_region_info_t>(&info), &count, &object) == KERN_SUCCESS) {
+        count = VM_REGION_BASIC_INFO_COUNT_64;
+        const unsigned long long start = std::max<unsigned long long>(region, base);
+        const unsigned long long end = std::min<unsigned long long>(region + region_size, base + size);
+        region += region_size;
+        if ((info.protection & VM_PROT_EXECUTE) != 0 && start < end) {
+            writable += mprotect(reinterpret_cast<void*>(start), end - start,
+                                 PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
+            std::printf("BBSC: code %#llx-%#llx writable\n", start, end);
+        }
+    }
+#else
     if (FILE* maps = std::fopen("/proc/self/maps", "r")) {
         char line[512];
         while (std::fgets(line, sizeof(line), maps)) {
@@ -534,6 +563,7 @@ extern "C" __attribute__((visibility("default"))) void bbnet_image_ready(std::ui
         }
         std::fclose(maps);
     }
+#endif
     std::printf("BBSC: seamless co-op hooks for the image at %#llx (%u code mappings writable)\n",
                 static_cast<unsigned long long>(base), writable);
     if (const char* probe = std::getenv("BB_BBSC_PROBE")) {
@@ -596,5 +626,15 @@ extern "C" __attribute__((visibility("default"))) int bbnet_init(const BbNetHost
     Libraries::Np::NpWebApi::RegisterLib(sym);
     Libraries::Np::NpWebApi2::RegisterLib(sym);
     std::printf("Online: %zu network and PSN functions\n", g_symbols.size());
+#ifdef __APPLE__
+    // At exit the matchmaking handshake thread and the shadNet worker stop before the static
+    // objects they use are destroyed: macOS's libc++ throws when a destroyed mutex is locked
+    // ("mutex lock failed"), glibc lets it through.
+    Libraries::Np::NpHandler::GetInstance();
+    std::atexit([] {
+        Libraries::Np::NpMatching2::StopMatching2HandshakeThread();
+        Libraries::Np::NpHandler::GetInstance().Shutdown();
+    });
+#endif
     return 0;
 }

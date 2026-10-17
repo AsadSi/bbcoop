@@ -34,11 +34,23 @@ target_compile_definitions(bbnet PRIVATE BOOST_ASIO_STANDALONE NDEBUG
     CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT BBNET_PORT_VERSION="${BBPORT_VERSION}")
 target_compile_options(bbnet PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
     -Wno-deprecated-declarations -Wno-missing-field-initializers)
-target_link_options(bbnet PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
+if (APPLE)
+    # Mach-O binds a library's own symbols to itself already: only bbnet.h's calls are exported
+    # (not the static libraries'); runtime symbols resolve against bb-probe, as for libbbgpu.
+    target_link_options(bbnet PRIVATE -Wl,-undefined,dynamic_lookup "-Wl,-exported_symbol,_bbnet_*")
+    set(BBNET_RPATH "@loader_path")
+else()
+    target_link_options(bbnet PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
+    set(BBNET_RPATH "\$ORIGIN")
+endif()
 # libbbgpu (already in the process) provides shadPS4's common code: logging, threads' names.
-set_target_properties(bbnet PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN"
+set_target_properties(bbnet PROPERTIES BUILD_RPATH "${BBNET_RPATH}" INSTALL_RPATH "${BBNET_RPATH}"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}") # beside libbbgpu.so, where the runtime looks
 target_link_libraries(bbnet PRIVATE bbgpu nlohmann_json::nlohmann_json protobuf::libprotobuf
     OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}" Vulkan::Headers fmt::fmt
     Boost::headers magic_enum::magic_enum)
 target_include_directories(bbnet PRIVATE "${MINIUPNPC_INCLUDE}")
+if (APPLE)
+    # epoll on kqueue (net_epoll.h, the P2P transport's eventfd), as shadPS4 does on macOS.
+    target_link_libraries(bbnet PRIVATE epoll-shim::epoll-shim)
+endif()
