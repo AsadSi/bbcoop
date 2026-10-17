@@ -17,7 +17,9 @@ snapshot=${BB_SNAPSHOT:-$PWD/out/test-user-clinic} # bbcoop: BB_SNAPSHOT, anothe
 case $user in "$PWD"/out/*) ;; *) echo "BB_USER_DIR must be under out/ (it is deleted)" >&2; exit 1;; esac
 if [[ $mode == continue && ! -d $snapshot ]]; then echo "No $snapshot: run tools/new_game.sh first." >&2; exit 1; fi
 
-pkill -x bb-probe; sleep 2; pkill -9 -x bb-probe; sleep 1
+# bbcoop: only this profile's game; other worktrees' and the player's games are left alone.
+own="bb-probe.*--user $user( |$)"
+pkill -f "$own"; sleep 2; pkill -9 -f "$own"; sleep 1
 rm -rf -- "$user"
 [[ $mode == continue ]] && cp -a "$snapshot" "$user"
 : > out/pad
@@ -35,7 +37,7 @@ in_level() {
     last=$(grep '^Frame stats' out/session.log | tail -1 | sed -E 's/.* ([0-9]+) draws\/frame.*/\1/')
     [[ -n $last && $last -gt 600 ]]
 }
-alive() { pgrep -x bb-probe > /dev/null || { echo "The game exited; see out/session.log." >&2; exit 1; }; }
+alive() { pgrep -f "$own" > /dev/null || { echo "The game exited; see out/session.log." >&2; exit 1; }; }
 
 # Title screen: the pad is open and the logos have played.
 for i in $(seq 1 180); do sleep 1; grep -q 'pad opened' out/session.log && break; done
