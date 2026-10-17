@@ -30,6 +30,9 @@ port's relay is the UDP one on port 3478 of the shadNet server.)
 Environment: `BB_ONLINE=1 BB_BBSC=1` (what the launcher sets). BBSC's own switches
 (`SHADPS4_BBSC_*`, `SHADPS4_BLOODBORNE_*`, see `gpu/bbnet/shadps4/core/bbsc_persistence.h`) work as
 in BBSC: most features are on by default, `=0` turns one off.
+bbcoop adds `SHADPS4_BBSC_DEATH_TO_HOST_LAMP` (on; `=0` off): a guest who dies outside a boss fight
+loads to the host's last lamp when that lamp is in a map not loaded on the guest's side (BBSC alone
+respawns it beside the host or at the nearest lamp of its own map). See `docs/coop_respawn_re.md`.
 
 ## Where it lives
 
