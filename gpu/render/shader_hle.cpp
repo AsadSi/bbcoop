@@ -141,6 +141,57 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     return true;
 }
 
+/// bbport BB_COPY_SHADER_CPU=1 (macOS, where the GPU uses copies of the game's memory; not measured yet): the
+/// copies made by the CPU in stream order, as the command processor's WRITE_DATA (Tasks::
+/// WriteDataTask), when no GPU work wrote their source: the game's memory gets them now and the
+/// GPU's copies of it in stream order (NoteCommandWrite), uploaded where draws bind them. On a
+/// tile-based GPU each dispatch (~65 a frame) ended the render pass with a barrier around it.
+static bool CopyOnCpu(Rasterizer& rasterizer, VAddr src_base, VAddr dst_base,
+                      std::span<const vk::BufferCopy> copies) {
+    static const bool enabled = [] {
+        const char* env = std::getenv("BB_COPY_SHADER_CPU");
+        const bool on = env && env[0] == '1';
+        return on && !VideoCore::GuestInPlace();
+    }();
+    if (!enabled || copies.empty()) {
+        return false;
+    }
+    u64 src_min = ~0ull, src_max = 0, dst_min = ~0ull, dst_max = 0;
+    for (const auto& copy : copies) {
+        src_min = std::min<u64>(src_min, copy.srcOffset);
+        src_max = std::max<u64>(src_max, copy.srcOffset + copy.size);
+        dst_min = std::min<u64>(dst_min, copy.dstOffset);
+        dst_max = std::max<u64>(dst_max, copy.dstOffset + copy.size);
+    }
+    auto& buffer_cache = rasterizer.GetBufferCache();
+    if (buffer_cache.IsRegionGpuModified(src_base + src_min, src_max - src_min)) {
+        return false;
+    }
+    rasterizer.WaitHostCopiesFor(dst_base + dst_min, dst_max - dst_min);
+    rasterizer.WaitDeferredSignals();
+    for (const auto& copy : copies) {
+        std::memmove(reinterpret_cast<void*>(dst_base + copy.dstOffset),
+                     reinterpret_cast<const void*>(src_base + copy.srcOffset), copy.size);
+    }
+    // One note per run of nearby destinations (each note syncs its range's GPU copies).
+    for (size_t first = 0; first < copies.size();) {
+        u64 lo = copies[first].dstOffset, hi = lo + copies[first].size;
+        size_t next = first + 1;
+        for (; next < copies.size(); ++next) {
+            const u64 start = copies[next].dstOffset, end = start + copies[next].size;
+            if (std::max(hi, end) - std::min(lo, start) > 64_KB) {
+                break;
+            }
+            lo = std::min(lo, start);
+            hi = std::max(hi, end);
+        }
+        rasterizer.NoteCommandWrite(dst_base + lo, reinterpret_cast<const void*>(dst_base + lo),
+                                    hi - lo, true);
+        first = next;
+    }
+    return true;
+}
+
 /// The copy shader's three formatted buffers: control records, source and destination.
 static bool ExecuteCopyShaderHLE(const Shader::Info& info, const Gcn::ComputeProgram& cs_program,
                                  Rasterizer& rasterizer) {
@@ -202,6 +253,10 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const Gcn::ComputePro
         const u32 local_src_offset = src_idx * buf_stride;
         const u32 local_size = (end + 1) * buf_stride;
         copies.emplace_back(local_src_offset, local_dst_offset, local_size);
+    }
+
+    if (CopyOnCpu(rasterizer, src_buf_sharp.base_address, dst_buf_sharp.base_address, copies)) {
+        return true;
     }
 
     // Grouping distance: 64 KiB. The copies are a few KiB spread over up to 57 MiB, and
