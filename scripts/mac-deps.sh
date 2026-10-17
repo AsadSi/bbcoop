@@ -47,6 +47,8 @@ fetch GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator v3.3.0 vma
 cmake_dep vma
 fetch herumi/xbyak v7.43 xbyak
 cmake_dep xbyak
+# Not linked since the 0.6 port (its window overlaps the guest's direct memory from 0x7800000000,
+# DARWIN_USER_MIN; the port has GUEST_MALLOC/runtime_low_malloc): kept only for the old mac branch.
 # mimalloc replaces malloc in the whole process (interpose and zone): macOS's own heap is far
 # above 1 TiB, and the game packs the host pointers it is given into 40 bits (on Linux glibc's
 # brk heap is low). Patched to keep all its memory in [448 GiB, 512 GiB): between macOS's GPU
