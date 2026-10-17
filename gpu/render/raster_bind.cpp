@@ -568,6 +568,12 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
             ASSERT(range != ranges.end());
             v.host_buffers.push_back(range->buffer->Handle());
             v.host_offsets.push_back(range->offset + buffer.base_address - range->begin);
+        } else if (null_resources) {
+            v.host_buffers.push_back(null_resources->Buffer());
+            v.host_offsets.push_back(0);
+            v.host_sizes.push_back(VK_WHOLE_SIZE);
+            v.host_strides.push_back(buffer.GetStride());
+            continue;
         } else {
             v.host_buffers.push_back(VK_NULL_HANDLE);
             v.host_offsets.push_back(0);
@@ -606,6 +612,15 @@ void Rasterizer::ResolveIndexBuffer(u32 index_offset) {
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
+    if (!is_compute && Scheduler::PassHoistEnabled()) {
+        for (const auto& bound : bound_buffers) {
+            if (!bound.buffer) {
+                scheduler.NotePassAccess(0, 0);
+            } else if (bound.buffer->cpu_addr != 0) {
+                scheduler.NotePassAccess(bound.buffer->cpu_addr + bound.offset, bound.size);
+            }
+        }
+    }
     for (auto& image_id : bound_images) {
         texture_cache.GetImage(image_id).binding = {};
     }
@@ -732,7 +747,8 @@ void Rasterizer::BindSpecialBuffer(const Shader::BufferResource& desc, const Sha
         // Permutations compiled without enabled planes never read the buffer: a null
         // descriptor satisfies the binding.
         if (Regs().clipper_control.user_clip_plane_enable == 0) {
-            buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
+            buffer_infos.emplace_back(null_resources ? null_resources->Buffer() : vk::Buffer{}, 0,
+                                      VK_WHOLE_SIZE);
             break;
         }
         std::array<float, Gcn::NUM_CLIP_PLANES * 4> planes{};
@@ -801,7 +817,8 @@ void Rasterizer::BindGuestBuffer(const Shader::BufferResource& desc, const Gcn::
         }
     }
     if (address == 0 || vsharp.GetSize() == 0) {
-        buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
+        buffer_infos.emplace_back(null_resources ? null_resources->Buffer() : vk::Buffer{}, 0,
+                                  VK_WHOLE_SIZE);
         return;
     }
     if (Shader::IsPagedBuffer(VideoCore::BufferCache::LayerPagedActive(), vsharp)) {

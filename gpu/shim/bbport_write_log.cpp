@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <unistd.h>
 #include <x86intrin.h>
 
@@ -106,7 +106,7 @@ void DumpRange(std::uint64_t address, std::uint64_t size) {
 extern "C" void bbgpu_dump_guest_writes(void* ucontext) {
     using namespace BbWriteLog;
     const auto* uc = static_cast<const ucontext_t*>(ucontext);
-    const auto* g = uc->uc_mcontext.gregs;
+    const auto* g = BB_GREGS(uc);
     BbFreeCheck::DumpAtFault(std::uint64_t(g[REG_RAX]), std::uint64_t(g[REG_R14]));
     if (Mode() == 0) {
         return;

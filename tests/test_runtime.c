@@ -211,25 +211,31 @@ unsigned runtime_memory_trap_reasons(uintptr_t address);
 static sigjmp_buf trap_jump;
 static void trap_fault(int sig) { (void)sig; siglongjmp(trap_jump,1); }
 static int write_faults(volatile unsigned char *p) {
-    struct sigaction action={0}, old;
+    /* A protection fault is SIGSEGV on Linux, SIGBUS on macOS. */
+    struct sigaction action={0}, old, old_bus;
     action.sa_handler=trap_fault;
     sigemptyset(&action.sa_mask);
     sigaction(SIGSEGV,&action,&old);
+    sigaction(SIGBUS,&action,&old_bus);
     int faulted=0;
     if (sigsetjmp(trap_jump,1)) faulted=1;
     else *p=0x5a;
     sigaction(SIGSEGV,&old,NULL);
+    sigaction(SIGBUS,&old_bus,NULL);
     return faulted;
 }
 static int read_faults(volatile unsigned char *p) {
-    struct sigaction action={0}, old;
+    /* A protection fault is SIGSEGV on Linux, SIGBUS on macOS. */
+    struct sigaction action={0}, old, old_bus;
     action.sa_handler=trap_fault;
     sigemptyset(&action.sa_mask);
     sigaction(SIGSEGV,&action,&old);
+    sigaction(SIGBUS,&action,&old_bus);
     int faulted=0;
     if (sigsetjmp(trap_jump,1)) faulted=1;
     else (void)*p;
     sigaction(SIGSEGV,&old,NULL);
+    sigaction(SIGBUS,&old_bus,NULL);
     return faulted;
 }
 typedef int32_t (ABI *Protect)(const void *, uint64_t, int);
@@ -392,6 +398,46 @@ static void rw_timeouts(void) {
     assert(rw_unlock(&f.lock)==0);
     fixture_destroy(&f);
 }
+#ifdef __APPLE__
+#include <sys/mman.h>
+/* The eboot's thread pointer load after link_modules.py and the loader's macOS rewrite
+ * (probe.c, patch_tls_loads): `mov rax, gs:[slot*8]` must yield the guest TCB, per thread. */
+static uint64_t run_tls_load(void) {
+    static unsigned char *code;
+    if (!code) {
+        code=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+        assert(code!=MAP_FAILED);
+        unsigned char load[]={0x65,0x48,0x8b,0x04,0x25,0,0,0,0,0xc3}; /* ...; ret */
+        uint32_t disp=runtime_darwin_tls_slot()*8;
+        memcpy(load+5,&disp,4);
+        memcpy(code,load,sizeof(load));
+        assert(!mprotect(code,4096,PROT_READ|PROT_EXEC));
+    }
+    return ((uint64_t (ABI *)(void))code)();
+}
+/* The guest TCB (runtime_thread.c): tcb[0] points at itself, tcb[2] is the thread's record. */
+struct GuestThread *runtime_thread_current(void);
+static int is_tcb_of_current(uint64_t tcb) {
+    const uint64_t *t=(const uint64_t *)(uintptr_t)tcb;
+    return t && t[0]==tcb && t[2]==(uint64_t)(uintptr_t)runtime_thread_current();
+}
+static void *tls_thread(void *out) {
+    runtime_thread_current();
+    ((uint64_t *)out)[0]=run_tls_load();
+    ((uint64_t *)out)[1]=(uint64_t)is_tcb_of_current(((uint64_t *)out)[0]);
+    return NULL;
+}
+static void darwin_thread_pointer(void) {
+    runtime_thread_current();
+    const uint64_t main_tcb=run_tls_load();
+    assert(is_tcb_of_current(main_tcb));
+    uint64_t other[2]={0,0};
+    pthread_t thread;
+    assert(pthread_create(&thread,NULL,tls_thread,other)==0 && pthread_join(thread,NULL)==0);
+    assert(other[1] && other[0]!=main_tcb);
+    assert(run_tls_load()==main_tcb);
+}
+#endif
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
@@ -420,6 +466,10 @@ int main(int argc,char **argv) {
     if (argc>1 && !strcmp(argv[1],"--rwlock-timeouts")) { rw_timeouts(); return 0; }
     libc_support(); posix_mutexes(); wall_time(); exit_handlers(); guards(); mutexes(); direct_memory(); write_traps(); memory_primitives();
     rw_lifecycle(); rw_concurrency(); rw_timeouts();
+#ifdef __APPLE__
+    darwin_thread_pointer();
+    puts("PASS: macOS guest thread pointer (TSD slot) on two threads");
+#endif
     puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope");
     return 0;
 }

@@ -9,7 +9,7 @@
 #include <thread>
 #include <unordered_set>
 
-#ifndef _WIN32
+#ifdef __linux__
 #include <fcntl.h>
 #include <linux/userfaultfd.h>
 #include <poll.h>
@@ -17,7 +17,7 @@
 #include <sys/syscall.h>
 #endif
 #include <sys/mman.h>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <unistd.h>
 
 #include "bblayer_write_traps.h"
@@ -289,7 +289,7 @@ struct SignalWatch final : PageWatch::Impl {
     }
 };
 
-#ifndef _WIN32 // userfaultfd: Linux only
+#ifdef __linux__ // userfaultfd: Linux only
 /// BB_UFFD=1: write-protection with userfaultfd instead of mprotect. mprotect takes the address
 /// space lock for writing and splits mappings; while guest threads fault on per-frame buffers and
 /// the GPU thread re-protects uploaded pages, every page fault in the process waits for it.
@@ -420,7 +420,7 @@ struct UffdWatch final : PageWatch::Impl {
 
 bool PageWatch::Impl::OnFault(void* context, void* fault_address) {
     const auto address = reinterpret_cast<VAddr>(fault_address);
-    const u64 rip = u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]);
+    const u64 rip = u64(BB_GREGS(static_cast<const ucontext_t*>(context))[REG_RIP]);
     FaultSites::Note(context, address);
     // The draw recording thread handles its faults inline too.
     const bool gpu_thread = rasterizer->IsGpuSideThread();
@@ -462,10 +462,10 @@ PageWatch::PageWatch(Vulkan::Rasterizer* rasterizer) {
     // (anonymous and shmem only): its registration would fail and writes go unseen.
     const char* uffd = std::getenv("BB_UFFD");
     const char* gpu_memory = std::getenv("BB_GUEST_GPU_MEMORY");
-#ifdef _WIN32
+#ifndef __linux__
     (void)gpu_memory;
     if (uffd && uffd[0] == '1') {
-        std::printf("GPU: no userfaultfd on Windows (BB_UFFD ignored)\n");
+        std::printf("GPU: userfaultfd is Linux only (BB_UFFD ignored)\n");
     }
 #else
     if (uffd && uffd[0] == '1') {

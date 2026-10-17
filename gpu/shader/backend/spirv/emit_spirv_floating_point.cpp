@@ -9,7 +9,9 @@ namespace Shader::Backend::SPIRV {
 namespace {
 
 Id Exact(EmitContext& ctx, Id op) {
-    ctx.Decorate(op, spv::Decoration::NoContraction);
+    if (!ctx.profile.skip_no_contraction) {
+        ctx.Decorate(op, spv::Decoration::NoContraction);
+    }
     return op;
 }
 

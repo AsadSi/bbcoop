@@ -384,7 +384,11 @@ void CommandProcessor::ReportStall(const char* why) {
     std::fflush(stdout);
 #ifndef _WIN32
     if (thread_tid != 0) {
+#ifdef __APPLE__
+        pthread_kill(thread.native_handle(), SIGUSR2); // bbport: Darwin has no tgkill
+#else
         syscall(SYS_tgkill, getpid(), thread_tid, SIGUSR2);
+#endif
     }
 #endif
 }
@@ -392,9 +396,11 @@ void CommandProcessor::ReportStall(const char* why) {
 void CommandProcessor::Run(std::stop_token stop) {
     Common::SetCurrentThreadName("bb:GpuComm");
     BbSections::command_thread = true;
+#ifndef __APPLE__ // Darwin has no per-thread CPU clock ids
     if (clockid_t clock; pthread_getcpuclockid(pthread_self(), &clock) == 0) {
         BbStats::gpu_thread_clock.store(int(clock));
     }
+#endif
     thread_id = std::this_thread::get_id();
     thread_tid = u32(gettid());
 

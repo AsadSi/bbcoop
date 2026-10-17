@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
+#elif defined(__APPLE__)
+#define VK_USE_PLATFORM_METAL_EXT
 #else
 #define VK_USE_PLATFORM_WAYLAND_KHR
 #define VK_USE_PLATFORM_XLIB_KHR
@@ -19,6 +21,17 @@
 #include "core/emulator_settings.h"
 #include "sdl_window.h"
 #include "upscale/vk_dlss.h"
+
+#ifdef __APPLE__
+#include <climits>
+#include <cstdlib>
+#include <filesystem>
+#include <mach-o/dyld.h>
+
+// VK_NO_PROTOTYPES (vk_common.h): the loader's entry point, bound to libvulkan at link time.
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance,
+                                                                         const char* name);
+#endif
 
 namespace Vulkan {
 
@@ -84,6 +97,10 @@ std::vector<const char*> Extensions(Frontend::WindowSystemType window_type,
     if (window_type == Frontend::WindowSystemType::Windows) {
         extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
     }
+#elif defined(__APPLE__)
+    if (window_type == Frontend::WindowSystemType::Metal) {
+        extensions.push_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
+    }
 #else
     if (window_type == Frontend::WindowSystemType::X11) {
         extensions.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
@@ -93,6 +110,10 @@ std::vector<const char*> Extensions(Frontend::WindowSystemType window_type,
 #endif
     // The headless renderer's device enables swapchains too, which need this.
     extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+#ifdef __APPLE__
+    // bbport: MoltenVK is a portability driver; the loader lists it only when asked to.
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
     if (EmulatorSettings.IsHdrAllowed()) {
         extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
     }
@@ -126,9 +147,26 @@ std::vector<const char*> Extensions(Frontend::WindowSystemType window_type,
 vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
                                   bool enable_crash_diagnostic) {
     LOG_INFO(Render_Vulkan, "Creating vulkan instance");
+#ifdef __APPLE__
+    // Initialize the environment with the path to the included ICD, so that the loader will
+    // find it.
+    static const auto icd_path = [] {
+        char path[PATH_MAX];
+        u32 length = PATH_MAX;
+        _NSGetExecutablePath(path, &length);
+        return std::filesystem::path(path).parent_path();
+    }();
+    // bbport: a driver chosen by the user (run.sh: BB_MOLTENVK_ICD) is kept.
+    setenv("VK_DRIVER_FILES", icd_path.c_str(), false);
+
+    // bbport: the Vulkan loader this library links. A dlopen search may return MoltenVK itself
+    // (also exporting vkGetInstanceProcAddr), whose entry points cannot take loader handles.
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(&::vkGetInstanceProcAddr);
+#else
     static vk::detail::DynamicLoader loader;
     VULKAN_HPP_DEFAULT_DISPATCHER.init(
         loader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
+#endif
 
     u32 version = VK_API_VERSION_1_0;
     if (VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion) {
@@ -188,6 +226,9 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     };
     const vk::StructureChain<vk::InstanceCreateInfo, vk::LayerSettingsCreateInfoEXT> create_info = {
         vk::InstanceCreateInfo{
+#ifdef __APPLE__
+            .flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
+#endif
             .pApplicationInfo = &app,
             .enabledLayerCount = u32(layers.size()),
             .ppEnabledLayerNames = layers.data(),
@@ -215,6 +256,13 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& w
             .hwnd = static_cast<HWND>(info.render_surface),
         };
         result = instance.createWin32SurfaceKHR(&create_info, nullptr, &surface);
+    }
+#elif defined(__APPLE__)
+    if (info.type == Frontend::WindowSystemType::Metal) {
+        const vk::MetalSurfaceCreateInfoEXT create_info{
+            .pLayer = static_cast<const CAMetalLayer*>(info.render_surface),
+        };
+        result = instance.createMetalSurfaceEXT(&create_info, nullptr, &surface);
     }
 #else
     if (info.type == Frontend::WindowSystemType::X11) {

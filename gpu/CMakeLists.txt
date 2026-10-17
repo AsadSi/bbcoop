@@ -61,7 +61,7 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
-if (NOT WIN32)
+if (NOT WIN32 AND NOT APPLE)
     pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
 endif()
 find_package(miniz QUIET)
@@ -155,6 +155,14 @@ if (NOT WIN32)
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "/platform/win32/")
 endif()
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
+if (APPLE)
+    # pkg_check_modules folds repeated "-framework X" flags into one "-framework X Y Z";
+    # the frameworks of a static FFmpeg are linked explicitly instead.
+    set_property(TARGET PkgConfig::FFMPEG PROPERTY INTERFACE_LINK_OPTIONS "")
+    target_link_libraries(PkgConfig::FFMPEG INTERFACE "-framework AudioToolbox" "-framework VideoToolbox"
+        "-framework CoreFoundation" "-framework CoreMedia" "-framework CoreVideo" "-framework CoreServices"
+        "-framework Security")
+endif()
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
 # The layer's own modules (independent of the shadPS4 code): layer/.
 file(GLOB LAYER_SOURCES CONFIGURE_DEPENDS layer/*.cpp)
@@ -200,17 +208,25 @@ if (WIN32)
 endif()
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
+if (APPLE)
+    # Darwin stand-ins for the Linux calls the library makes (gettid, process_vm_readv).
+    target_compile_options(bbgpu PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/shim/bbport_darwin.h)
+endif()
 # Loaded with bb-probe at startup (DT_NEEDED, never dlopen): thread_local access without a
 # TLS descriptor call (_dl_tlsdesc_return was ~2% of the draw recording thread).
 if (NOT WIN32)
     target_compile_options(bbgpu PRIVATE -ftls-model=initial-exec)
     # Runtime symbols (runtime_memory_*, runtime_process_*) resolve against bb-probe.
-    target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
+    if (APPLE)
+        target_link_options(bbgpu PRIVATE -Wl,-undefined,dynamic_lookup)
+    else()
+        target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
+    endif()
 endif()
 target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
     tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit)
-if (NOT WIN32)
+if (NOT WIN32 AND NOT APPLE)
     target_link_libraries(bbgpu PUBLIC PkgConfig::X11)
 endif()
 
@@ -238,6 +254,11 @@ if (WIN32)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
+add_executable(arena-span-test EXCLUDE_FROM_ALL ../tests/test_arena_span.cpp)
+target_compile_options(arena-span-test PRIVATE -UNDEBUG)
+target_include_directories(arena-span-test PRIVATE . third_party)
+target_link_libraries(arena-span-test PRIVATE Boost::headers)
+
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)
@@ -275,6 +296,32 @@ target_include_directories(camera-motion-test PRIVATE . shim ${SHADER_INCLUDE} t
 target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
 target_link_libraries(camera-motion-test PRIVATE bbgpu)
 add_dependencies(camera-motion-test host_shaders)
+set(TEST_SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_shaders)
+add_custom_command(OUTPUT ${TEST_SHADER_DIR}/null_resources_sample_comp.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_SHADER_DIR}
+    COMMAND ${GLSLANG_COMPILER} --target-env vulkan1.3 -o ${TEST_SHADER_DIR}/null_resources_sample_comp.h
+        --vn NULL_RESOURCES_SAMPLE_COMP ${CMAKE_CURRENT_SOURCE_DIR}/../tests/null_resources_sample.comp
+    COMMAND ${CMAKE_COMMAND} "-DHEADER_FILE=${TEST_SHADER_DIR}/null_resources_sample_comp.h"
+        -P ${SHADER_SRC}/AddShaderHeaderInclude.cmake
+    DEPENDS ../tests/null_resources_sample.comp VERBATIM)
+add_executable(null-resources-test EXCLUDE_FROM_ALL ../tests/test_null_resources.cpp ../tests/test_gpu_runtime_stubs.cpp
+    ${TEST_SHADER_DIR}/null_resources_sample_comp.h)
+target_include_directories(null-resources-test PRIVATE . shim ${SHADER_INCLUDE} third_party/gcn/include ${TEST_SHADER_DIR})
+target_compile_options(null-resources-test PRIVATE -UNDEBUG -fPIC)
+set_source_files_properties(../tests/test_null_resources.cpp PROPERTIES
+    COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
+target_link_libraries(null-resources-test PRIVATE bbgpu)
+
+if (APPLE)
+    # These tests resolve vkGetInstanceProcAddr from the loader directly (see the tests).
+    foreach(test IN ITEMS scene-resolution-test taa-shader-test camera-motion-test null-resources-test)
+        target_link_libraries(${test} PRIVATE Vulkan::Vulkan)
+    endforeach()
+    # Window on the main thread (Cocoa), with the device, presenter and swapchain.
+    add_executable(window-test EXCLUDE_FROM_ALL ../tests/test_window.cpp ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(window-test PRIVATE .. . shim ${SHADER_INCLUDE} third_party/gcn/include)
+    target_link_libraries(window-test PRIVATE bbgpu)
+endif()
 
 add_executable(translation-memory-test EXCLUDE_FROM_ALL ../tests/test_translation_memory.cpp
     ../tests/test_gpu_runtime_stubs.cpp)
@@ -283,6 +330,14 @@ target_compile_options(translation-memory-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_translation_memory.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(translation-memory-test PRIVATE bbgpu)
+if (APPLE)
+    # libbbgpu resolves the runtime stubs in these executables at load time (flat namespace):
+    # a Mach-O executable exports them only when asked to.
+    foreach(test IN ITEMS motion-shader-test scene-resolution-test taa-shader-test camera-motion-test
+                          null-resources-test translation-memory-test window-test)
+        target_link_options(${test} PRIVATE -Wl,-export_dynamic)
+    endforeach()
+endif()
 
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp

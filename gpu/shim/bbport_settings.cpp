@@ -316,6 +316,15 @@ void ConfigureDlssSupport(bool available, const char* problem) {
     }
 }
 
+void ConfigureMetalFxSupport(bool available) {
+    auto& v = Get();
+    v.metalfx_supported = available;
+    if (v.upscaler == UpscalerMetalFx && !available) {
+        std::printf("Upscaler: MetalFX needs a MoltenVK with vkCmdUpscaleMetalFXBB; no upscaler\n");
+        v.upscaler = UpscalerOff;
+    }
+}
+
 bool FixedRenderSession() {
     const char* size = std::getenv("BB_RENDER_RES");
     return size && size[0];
@@ -435,7 +444,7 @@ const char* PresetName(int preset) {
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
+    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss", "metalfx"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
 }
 

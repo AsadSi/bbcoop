@@ -32,6 +32,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         Finish();
     });
     scene_targets = std::make_unique<SceneTargets>(instance, scheduler, runtime, texture_cache);
+    if (!instance.IsNullDescriptorSupported()) {
+        null_resources = std::make_unique<NullResources>(instance, scheduler);
+    }
     // Object motion first: it fixes the buffer addresses the motion shader variants embed.
     object_motion = std::make_unique<ObjectMotion>(instance, scheduler);
     camera_motion = std::make_unique<CameraMotion>(instance, scheduler, texture_cache, runtime);
@@ -199,6 +202,11 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         return;
     }
     const auto state = BeginRendering(pipeline);
+#ifdef __APPLE__
+    if (DrawHasNoEffect(pipeline, state)) {
+        return;
+    }
+#endif
 
     if (!inputs_resolved) {
         ResolveVertexBuffers(pipeline, draw_prepared);
@@ -404,7 +412,7 @@ void Rasterizer::NoteCopyIntoMemory(VAddr address, u64 size) {
         return;
     }
     copies_begin = std::min(copies_begin, address);
-    copies_end = std::max(copies_end, address + size);
+    copies_end = std::max<VAddr>(copies_end, address + size);
 }
 
 // Program code the GPU copies into place (DMA in the stream before the draw): this thread decodes
@@ -747,6 +755,39 @@ void Rasterizer::OnSubmit() {
     texture_cache.ProcessDownloadImages();
     texture_cache.RunGarbageCollector();
     runtime.TickFrame();
+}
+
+bool Rasterizer::DrawHasNoEffect(const GraphicsPipeline* pipeline, const RenderState& state) const {
+    // bbport: a draw without color or depth attachments, without a pixel shader and without
+    // stores changes nothing, unless Vulkan occlusion queries count its samples
+    // (BB_OCCLUSION_QUERIES, on by default; with =0 their counters are answered on the CPU). The
+    // game issues some with a 16384x16384 render area; on a tile-based GPU (Apple) each still
+    // walks that area.
+    if (OcclusionTranslated() || pipeline->GetStages()[u32(Shader::SwStage::Fragment)] ||
+        state.depth_stencil_attachment.image_view) {
+        return false;
+    }
+    for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
+        if (state.color_attachments[cb].image_view) {
+            return false;
+        }
+    }
+    for (const auto* stage : pipeline->GetStages()) {
+        if (!stage) {
+            continue;
+        }
+        for (const auto& buffer : stage->buffers) {
+            if (buffer.is_written) {
+                return false;
+            }
+        }
+        for (const auto& image : stage->images) {
+            if (image.is_written) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& state) {

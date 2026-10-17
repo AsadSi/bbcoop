@@ -7,6 +7,10 @@ start-up tweaks passed as environment variables to run.sh, starts and stops the 
 its output. Launcher settings live in ~/.config/bbport-launcher/settings.json.
 Russian, English, Brazilian Portuguese and Simplified Chinese (bbport_i18n: the Russian
 text is the key).
+
+Without GTK (macOS, a bare system) the window is unavailable, the rest is not:
+  --set key=value ...   stores launcher settings (game_dir=..., fps_mode=60, ...)
+  --play                starts the game with the stored settings
 """
 
 import json
@@ -23,11 +27,19 @@ from pathlib import Path
 from bbport_assets import fsr411_problem
 from bbport_i18n import language, set_language, tr
 
-import gi
+try:
+    import gi
 
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+    HAVE_GTK = True
+except (ImportError, ValueError):
+    # --set and --play need no window: the window classes are defined on stand-in bases.
+    import types
+    Adw = types.SimpleNamespace(ApplicationWindow=object, Application=object)
+    Gio = GLib = Gtk = None
+    HAVE_GTK = False
 
 PORT_DIR = Path(__file__).resolve().parent.parent  # native_probe (or the package's copy)
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
@@ -80,9 +92,9 @@ FSR411_BUILD_ERRORS = {
 
 # Choices: (label, value). The first entry is the default. Labels are translated when shown.
 UI_LANGUAGES = [("Как в системе", ""), ("Русский", "ru"), ("English", "en"), ("Português (Brasil)", "pt_BR"),
-                ("简体中文", "zh_CN")]
+                ("简体中文", "zh_CN"), ("Español", "es")]
 UPSCALERS = [("FSR 4", "fsr4"), ("FSR 4.1.1", "fsr411"), ("FSR 3", "fsr3"),
-             ("DLSS (NVIDIA RTX)", "dlss"),
+             ("DLSS (NVIDIA RTX)", "dlss"), ("MetalFX (macOS)", "metalfx"),
              ("TAA (нативное сглаживание)", "taa"), ("Выключен", "off")]
 PRESETS = [("Native AA", 0), ("Quality (x1.5)", 1), ("Balanced (x1.7)", 2),
            ("Performance (x2)", 3), ("Ultra Performance (x3)", 4)]
@@ -205,6 +217,10 @@ DEFAULTS = {
     "online_npid": "",
     "online_password": "",
     "online_upnp": True,
+    # macOS: the x86-64 dependency prefix (build.sh: BB_MACOS_DEPS, e.g. vcpkg's
+    # installed/x64-osx) and MoltenVK's MoltenVK_icd.json (run.sh: BB_MOLTENVK_ICD).
+    "macos_deps": "",
+    "moltenvk_icd": "",
 }
 
 # bbport.ini keys the launcher edits; the rest of the file is kept.
@@ -223,6 +239,15 @@ INI_DEFAULTS = {
     "mouse_invert_y": "0",
     **{key: "1" if default else "0" for key, _, default in EFFECTS},
 }
+if sys.platform == "darwin":
+    # macOS (Apple Silicon): as the GPU library's own defaults (bbport_settings.h). MetalFX (Apple's
+    # temporal scaler, through the Mac port's MoltenVK) from the Quality preset: 1120x700 to
+    # 1680x1050 held ~43 FPS in the Hunter's Dream on an M4, against ~31 native. FSR in Ultra
+    # Performance with object motion looked blurred at 17-26 FPS on an M1 Pro.
+    INI_DEFAULTS.update({"upscaler": "metalfx", "preset": "1", "object_motion": "0", "show_fps": "1"})
+    # The game's own 30 FPS: at 1080p the M1 Pro's GPU needs ~28 ms a frame in the Hunter's Dream,
+    # so the unlocked and 60 FPS patches gave an uneven 30-36 FPS.
+    DEFAULTS["fps_mode"] = "30"
 
 
 def load_settings():
@@ -409,6 +434,11 @@ def game_environment(s):
         env["BB_COMMUNITY_SERVER"] = community
         if s.get("online_bbsc"):
             env["BB_BBSC"] = "1"
+    if sys.platform == "darwin":
+        if s.get("macos_deps"):
+            env["BB_MACOS_DEPS"] = str(Path(s["macos_deps"]).expanduser())
+        if s.get("moltenvk_icd"):
+            env["BB_MOLTENVK_ICD"] = str(Path(s["moltenvk_icd"]).expanduser())
     for item in s["extra_env"].split():
         if "=" in item:
             key, value = item.split("=", 1)
@@ -1489,7 +1519,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         launcher.set_cwd(str(PORT_DIR))
         try:
             # setsid: the game and its helpers form one process group, stopped together.
-            self.process = launcher.spawnv(["setsid", "bash", str(PORT_DIR / "run.sh")])
+            # macOS has no setsid command: Python's os.setsid before the exec does the same.
+            command = ["bash", str(PORT_DIR / "run.sh")]
+            if not shutil.which("setsid"):
+                command = [sys.executable, "-c",
+                           "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])",
+                           *command]
+            self.process = launcher.spawnv(command)
         except GLib.Error as error:
             self.toasts.add_toast(Adw.Toast(title=tr("Не удалось запустить: {}").format(error.message)))
             return
@@ -1815,6 +1851,35 @@ def play():
     os.execvpe("bash", ["bash", str(PORT_DIR / "run.sh")], game_environment(settings))
 
 
+def set_settings(arguments):
+    """--set key=value ...: launcher settings without the window (macOS, scripts)."""
+    settings = load_settings()
+    for argument in arguments:
+        key, sep, value = argument.partition("=")
+        if not sep or key not in DEFAULTS:
+            print(f"bbport: unknown setting {argument!r}; known: {', '.join(sorted(DEFAULTS))}",
+                  file=sys.stderr)
+            return 1
+        default = DEFAULTS[key]
+        if isinstance(default, bool):
+            if value.lower() not in ("1", "0", "true", "false", "on", "off"):
+                print(f"bbport: {key} takes 1 or 0", file=sys.stderr)
+                return 1
+            settings[key] = value.lower() in ("1", "true", "on")
+        elif isinstance(default, int):
+            try:
+                settings[key] = int(value)
+            except ValueError:
+                print(f"bbport: {key} takes a number", file=sys.stderr)
+                return 1
+        else:
+            settings[key] = value
+        print(f"{key} = {settings[key]!r}")
+    save_settings(settings)
+    print(f"Saved in {CONFIG_FILE}")
+    return 0
+
+
 def build_fsr411(arguments):
     """--build-fsr411 <upscaler DLL> [loader DLL]: the launcher's FSR 4.1.1 build, without a window."""
     if not 1 <= len(arguments) <= 2:
@@ -1825,8 +1890,15 @@ def build_fsr411(arguments):
 
 
 if __name__ == "__main__":
+    if "--set" in sys.argv[1:]:
+        sys.exit(set_settings(sys.argv[sys.argv.index("--set") + 1:]))
     if "--play" in sys.argv[1:]:
         sys.exit(play())
     if "--build-fsr411" in sys.argv[1:]:
         sys.exit(build_fsr411(sys.argv[sys.argv.index("--build-fsr411") + 1:]))
+    if not HAVE_GTK:
+        print("bbport: the launcher window needs GTK 4 and libadwaita for Python (PyGObject; "
+              "macOS: brew install gtk4 libadwaita pygobject3). Without them: --set key=value "
+              "and --play.", file=sys.stderr)
+        sys.exit(1)
     sys.exit(LauncherApp().run(sys.argv))

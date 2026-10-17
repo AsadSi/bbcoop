@@ -15,6 +15,7 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "bbport_sections.h"
@@ -233,6 +234,9 @@ Shader::Profile MakeProfile(const Instance& instance, u32 sparse_page_shift) {
         .paged_buffers = VideoCore::BufferCache::LayerPagedActive(),
         // The game's buffer copy shader, from its profile (games/).
         .buffer_copy_shader_hash = Game::BufferCopyShader(),
+#ifdef __APPLE__
+        .skip_no_contraction = true,
+#endif
     };
 }
 
@@ -822,6 +826,26 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     return it->second.get();
 }
 
+/// bbport: a color target or vertex buffer whose format has no Vulkan format (data 2_10_10_10 with
+/// number format float: no GCN format either, a stale descriptor) asserted and ended the game.
+/// Its draw is skipped instead, reported once per format and kind.
+static bool KnownSurfaceFormat(const char* kind, Gcn::DataFormat data_fmt,
+                               Gcn::NumberFormat num_fmt) {
+    if (GcnToVk::TrySurfaceFormat(data_fmt, num_fmt) != vk::Format::eUndefined) {
+        return true;
+    }
+    static std::mutex mutex;
+    static std::unordered_set<u32> reported;
+    const u32 key = (static_cast<u32>(data_fmt) << 8 | static_cast<u32>(num_fmt)) << 1 |
+                    (kind[0] == 'v' ? 1u : 0u);
+    std::scoped_lock lock{mutex};
+    if (reported.insert(key).second) {
+        std::printf("GPU: %s with unknown format (data %u, number %u): its draws are skipped\n",
+                    kind, static_cast<u32>(data_fmt), static_cast<u32>(num_fmt));
+    }
+    return false;
+}
+
 bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     std::memset(&sel.graphics_key, 0, sizeof(GraphicsPipelineKey));
     const auto& regs = *sel.regs;
@@ -862,6 +886,10 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         auto& color_buffer = key.color_buffers[cb];
         color_buffer.data_format = col_buf.GetDataFmt();
         color_buffer.num_format = col_buf.GetNumberFmt();
+        if (!KnownSurfaceFormat("color target", color_buffer.data_format,
+                                color_buffer.num_format)) {
+            return false;
+        }
         color_buffer.num_conversion = col_buf.GetNumberConversion();
         color_buffer.export_format = regs.color_export_format.GetFormat(cb);
         color_buffer.swizzle = col_buf.Swizzle();
@@ -993,6 +1021,81 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     return true;
 }
 
+namespace {
+// bbport: work skipped because the device cannot run it: geometry stages (Metal has no
+// geometry shaders; on-chip GS and stream-out are unsupported everywhere) and shaders writing
+// multisampled images (Metal cannot write texture2d_ms). Each program is reported once and the
+// totals at exit, to tell whether a game needs emulation of either.
+class SkippedPrograms {
+public:
+    explicit SkippedPrograms(const char* what_, const char* unit_) : what{what_}, unit{unit_} {}
+
+    /// Counts one skipped draw or dispatch; describe() names the program the first time.
+    template <typename Describe>
+    void Note(u64 program, Describe&& describe) {
+        std::scoped_lock lock{mutex};
+        if (!total++) {
+            static std::once_flag registered;
+            std::call_once(registered, [] { std::atexit(ReportAll); });
+        }
+        if (counts[program]++ == 0) {
+            LOG_WARNING(Render_Vulkan, "{}", describe());
+        }
+    }
+
+    static SkippedPrograms& Geometry() {
+        static SkippedPrograms skips{"geometry stages", "ES/GS programs"};
+        return skips;
+    }
+
+    static SkippedPrograms& MultisampledStorage() {
+        static SkippedPrograms skips{"multisampled storage images", "programs"};
+        return skips;
+    }
+
+private:
+    static void ReportAll() {
+        Geometry().Report();
+        MultisampledStorage().Report();
+    }
+
+    void Report() {
+        std::scoped_lock lock{mutex};
+        if (total) {
+            std::printf("GPU: %llu draws/dispatches skipped for %s (%zu %s)\n",
+                        static_cast<unsigned long long>(total), what, counts.size(), unit);
+        }
+    }
+
+    const char* what;
+    const char* unit;
+    std::mutex mutex;
+    std::unordered_map<u64, u64> counts;
+    u64 total = 0;
+};
+
+u64 ProgramHash(const Gcn::Regs& regs, HwStage stage) {
+    const auto* pgm = regs.ProgramForStage(static_cast<u32>(stage));
+    return pgm && pgm->Address<u32*>() ? Gcn::GetParams(*pgm).hash : 0;
+}
+
+void NoteGeometrySkip(const Gcn::Regs& regs, const char* why) {
+    const u64 es = ProgramHash(regs, HwStage::Export);
+    const u64 gs = ProgramHash(regs, HwStage::Geometry);
+    SkippedPrograms::Geometry().Note(gs ^ std::rotl(es, 1), [&] {
+        return fmt::format("Geometry stage {}: skipping draws of ES {:#x} GS {:#x}", why, es, gs);
+    });
+}
+
+void NoteMultisampledStorageSkip(const Shader::Info& info) {
+    SkippedPrograms::MultisampledStorage().Note(info.pgm_hash, [&] {
+        return fmt::format("Multisampled storage image unsupported by the device: skipping {} "
+                           "shader {:#x}",
+                           info.hw_stage, info.pgm_hash);
+    });
+}
+} // namespace
+
 bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     bool not_a_program = false;
     const auto& regs = *sel.regs;
@@ -1093,11 +1196,11 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     }
     if (geometry) {
         if (!instance.IsGeometryStageSupported()) {
-            LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
+            if (!sel.worker) NoteGeometrySkip(regs, "unsupported by the device");
             return false;
         }
         if (regs.vgt_gs_mode.onchip || regs.vgt_strmout_config.raw) {
-            LOG_WARNING(Render_Vulkan, "Geometry shader features unsupported, skipping");
+            if (!sel.worker) NoteGeometrySkip(regs, "features unsupported");
             return false;
         }
     }
@@ -1110,9 +1213,26 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         return false;
     }
 
+    if (!instance.IsStorageImageMultisampleSupported()) {
+        for (const auto* info : sel.infos) {
+            if (info && info->WritesMultisampledImage()) {
+                if (!sel.worker) NoteMultisampledStorageSkip(*info);
+                return false;
+            }
+        }
+    }
+
     // Without dynamic vertex input the pipeline is specialized on the attribute formats
     // (strides stay dynamic state).
     const auto* vs_info = sel.infos[static_cast<u32>(SwStage::Vertex)];
+    if (vs_info && sel.fetch_shader) {
+        for (const auto& attrib : sel.fetch_shader->attributes) {
+            const auto& buffer = attrib.GetSharp(*vs_info);
+            if (!KnownSurfaceFormat("vertex buffer", buffer.GetDataFmt(), buffer.GetNumberFmt())) {
+                return false;
+            }
+        }
+    }
     if (vs_info && sel.fetch_shader && !instance.IsVertexInputDynamicState()) {
         u32 vertex_binding = 0;
         for (const auto& attrib : sel.fetch_shader->attributes) {
@@ -1139,6 +1259,10 @@ bool PipelineCache::RefreshComputeKey() {
     }
     std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value) =
         GetProgram(sel, HwStage::Compute, SwStage::Compute, cs_params, binding);
+    if (!instance.IsStorageImageMultisampleSupported() && sel.infos[0]->WritesMultisampledImage()) {
+        NoteMultisampledStorageSkip(*sel.infos[0]);
+        return false;
+    }
     return true;
 }
 

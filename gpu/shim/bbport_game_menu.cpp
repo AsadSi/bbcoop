@@ -306,7 +306,7 @@ void DefineTexts() {
     row(Upscaler, "Upscaler", "Апскейлер", "Temporal upscaler and anti-aliasing",
         "Временной апскейлер и сглаживание",
         {off, AddText("FSR 3.1", "FSR 3.1"), AddText("FSR 4", "FSR 4"), AddText("FSR 4.1.1", "FSR 4.1.1"),
-         AddText("TAA", "TAA"), AddText("DLSS", "DLSS")},
+         AddText("TAA", "TAA"), AddText("DLSS", "DLSS"), AddText("MetalFX", "MetalFX")},
         Kind::Select);
     row(Preset, "Quality preset", "Пресет", "Scene resolution relative to the output",
         "Разрешение сцены относительно вывода",
@@ -425,6 +425,7 @@ bool UpscalerAvailable(int i) {
     return i == BbSettings::UpscalerFsr4     ? s.fsr4_supported.load()
            : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
            : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load()
+           : i == BbSettings::UpscalerMetalFx ? s.metalfx_supported.load()
                                              : true;
 }
 
@@ -688,7 +689,10 @@ bool Detour(unsigned char* image, u64 va, const u8* prologue, std::size_t length
 u8* MapNear(unsigned char* image, u64 image_size, std::size_t size) {
     const u64 base = reinterpret_cast<u64>(image);
     for (u64 k = 1; k <= 64; ++k) {
-        for (const u64 hint : {base - k * (24ull << 20), base + image_size + k * (24ull << 20)}) {
+        // Above the image from its end rounded to 64 KiB: an unaligned hint is refused (EINVAL),
+        // and on macOS the range below the image is the GPU carveout.
+        const u64 end = (base + image_size + 0xffff) & ~u64{0xffff};
+        for (const u64 hint : {base - k * (24ull << 20), end + k * (24ull << 20)}) {
             void* p = mmap(reinterpret_cast<void*>(hint), size, PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
             if (p != MAP_FAILED) {

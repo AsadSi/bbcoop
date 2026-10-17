@@ -2,6 +2,7 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
+#include <thread>
 
 #include <pthread.h>
 #include <sched.h>
@@ -67,12 +68,17 @@ void AccurateTimer::Start() {
         deadline = now;
     }
     if (deadline > now) {
+#ifdef __APPLE__
+        // No clock_nanosleep on Darwin; steady_clock is its monotonic clock.
+        std::this_thread::sleep_until(deadline);
+#else
         const auto since_epoch = deadline.time_since_epoch();
         const timespec at{
             .tv_sec = time_t(std::chrono::duration_cast<std::chrono::seconds>(since_epoch).count()),
             .tv_nsec = long((since_epoch % std::chrono::seconds{1}).count())};
         while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &at, nullptr) == EINTR) {
         }
+#endif
     }
 }
 

@@ -104,7 +104,19 @@ public:
         return properties.limits.maxSamplerAnisotropy;
     }
     u32 MaxPushDescriptors() const {
+#ifdef __APPLE__
+        // bbport: MoltenVK 1.4 gives push constants the Metal buffer index of a push
+        // descriptor set's buffers once the set has 11 or more bindings ("cannot reserve
+        // 'buffer' resource location at index 0"; the shader library fails to compile, with
+        // or without argument buffers). Regular descriptor sets get the right indices.
+        return 0;
+#else
         return max_push_descriptors;
+#endif
+    }
+    /// bbport: the largest buffer the device creates (Vulkan 1.3 maxBufferSize)
+    u64 GetMaxBufferSize() const {
+        return vk13_props.maxBufferSize;
     }
     u32 GetMaxViewportWidth() const {
         return properties.limits.maxViewportDimensions[0];
@@ -163,6 +175,14 @@ public:
     bool IsGeometryStageSupported() const {
         return features.geometryShader;
     }
+    /// Shaders may write multisampled images (not on Metal/MoltenVK).
+    bool IsStorageImageMultisampleSupported() const {
+        return features.shaderStorageImageMultisample;
+    }
+    /// bbport: sparse residency buffers (the buffer cache's arenas); none on MoltenVK
+    bool IsSparseBufferSupported() const {
+        return features.sparseBinding && features.sparseResidencyBuffer;
+    }
     bool IsTessellationSupported() const {
         return features.tessellationShader;
     }
@@ -197,6 +217,10 @@ public:
     }
     bool IsBufferMarkerSupported() const {
         return ext.buffer_marker;
+    }
+    /// bbport: VK_EXT_robustness2 nullDescriptor (absent on MoltenVK: NullResources stand in).
+    bool IsNullDescriptorSupported() const {
+        return null_descriptor;
     }
     bool IsAttachmentFeedbackLoopLayoutSupported() const {
         return ext.feedback_loop;
@@ -382,6 +406,7 @@ private:
     bool subgroup_clock = false;
     bool derivatives_linear = false;
     bool block_texel_view = false;
+    bool null_descriptor = true;
 
     std::vector<std::string> available_extensions;
     std::unordered_map<vk::Format, vk::FormatFeatureFlags2> format_features;

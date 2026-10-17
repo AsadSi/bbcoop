@@ -49,9 +49,13 @@ public:
     /// The upscaler's scene targets: told about native accesses of the images they stand for.
     SceneTargets* scene_targets = nullptr;
 
+    /// `upload`: CPU-written data from a staging buffer into guest memory's buffer (BufferCache::
+    /// SynchronizeMemory), which may run before the open render pass (Scheduler::MayHoistUpload).
     void CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
-                    std::span<const vk::BufferCopy> copies);
+                    std::span<const vk::BufferCopy> copies, bool upload = false);
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
+    bool HoistUpload(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
+                     std::span<const vk::BufferCopy> copies);
     /// Copies from the game's memory itself (a guest memory chunk's buffer, written by the CPU)
     /// into `dst`: uploads without a CPU copy (BB_GUEST_IN_PLACE).
     void CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,

@@ -116,9 +116,18 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
     boost::container::small_vector<bool, 16> binding_proxy_ok;
     const bool sample_proxies = !BbToggle::Disabled(BbToggle::SampleSceneProxies) &&
                                 !on_helper && scene_targets->Reduced();
-    // An invalid T# binds a null descriptor.
-    const auto bind_null = [&] {
-        image_bindings.emplace_back(VideoCore::ImageId{}, &image_desc_storage.emplace_back());
+    // An invalid T# binds a null descriptor. bbport: without nullDescriptor its stand-in needs the
+    // view type the shader declares and the descriptor type of the binding (storage or sampled).
+    const auto bind_null = [&](const Shader::ImageResource& resource, const Gcn::Image& sharp) {
+        auto& desc = image_desc_storage.emplace_back();
+        if (null_resources) {
+            desc.view_info.type = sharp.GetViewType(resource.is_array);
+            desc.view_info.format =
+                resource.is_depth ? vk::Format::eD32Sfloat : vk::Format::eR8G8B8A8Unorm;
+            desc.type = resource.is_written ? VideoCore::TextureCache::BindingType::Storage
+                                            : VideoCore::TextureCache::BindingType::Texture;
+        }
+        image_bindings.emplace_back(VideoCore::ImageId{}, &desc);
         image_binding_entries.push_back(nullptr);
         binding_proxy_ok.push_back(false);
         image_descriptor_array_sizes.push_back(1);
@@ -137,7 +146,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         const auto data_fmt = tsharp.GetDataFmt();
         const auto num_fmt = tsharp.GetNumberFmt();
         if (tsharp.Address() == 0 || data_fmt == Gcn::DataFormat::FormatInvalid) {
-            bind_null();
+            bind_null(image_desc, tsharp);
             continue;
         }
 
@@ -148,7 +157,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                         "data_format={}, num_format={}",
                         tsharp.Address(), tsharp.pitch, tsharp.width, static_cast<u32>(data_fmt),
                         static_cast<u32>(num_fmt));
-            bind_null();
+            bind_null(image_desc, tsharp);
             continue;
         }
 
@@ -242,7 +251,14 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         const auto& desc = *desc_ptr;
         bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
         if (!image_id) {
-            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            const vk::ImageView null_view =
+                null_resources ? null_resources->View(desc.view_info.type,
+                                                      desc.view_info.format == vk::Format::eD32Sfloat)
+                               : vk::ImageView{};
+            image_infos.emplace_back(VK_NULL_HANDLE, null_view, vk::ImageLayout::eGeneral);
+            if (set_ok && binding_index < resolved.size()) {
+                resolved[binding_index].view = null_view; // the texture set memo reuses it
+            }
         } else {
             if (auto& old_image = texture_cache.GetImage(image_id);
                 old_image.binding.needs_rebind) {
@@ -600,7 +616,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
     for (u32 i = 0; i < count; ++i) {
         const auto& entry = set.entries[i];
         if (!entry.id) {
-            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            image_infos.emplace_back(VK_NULL_HANDLE, entry.view, vk::ImageLayout::eGeneral);
             continue;
         }
         texture_cache.MarkFound(entry.id);
