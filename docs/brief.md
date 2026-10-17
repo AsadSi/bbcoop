@@ -106,6 +106,11 @@ Supporting pieces:
   - Every firearm already fortifies to +10.
   - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`. Its shape is Droplet, except Triangle on the Flamesprayer, Rosmarinus and Hunter's Torch and Radial on the Fist of Gratia (2026-10-17).
   - Shields and the Torch stay as they are.
+- **Fire Paper, Bolt Paper, Empty Phantasm Shell (Asad, 2026-10-18), coded, not yet tested in game:**
+  - Instead of a flat +80 per hit, the bonus is 80 × (base at +0 × the attack's multiplier) / 90 + 10% × (base at the current level × multiplier).
+  - It keeps the early-game punch and adds a late-game share, and no longer favours fast weapons.
+  - Viscerals still get nothing, and stats and gems don't change it.
+  - `src/runtime_papers.c`, `docs/papers_re.md`; `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs each bonus.
 - **Verified in game 2026-10-11** (throwaway profile, `BB_TEST_ENDGAME`, 2160p, FSR 4, 120 FPS cap):
   - **Camera:**
     - With a full stick, turning stays at ~120°/s.

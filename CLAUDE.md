@@ -18,6 +18,8 @@ what's still open.
   `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
   `runtime_ik.c` (the foot-IK height correction at uncapped frame rates, `docs/animation_re.md`),
   `runtime_saveslots.c` (Duplicate in the Load Game list, Triangle; `docs/saveslots_re.md`; `BB_SAVESLOTS=0` off),
+  `runtime_papers.c` (Fire/Bolt Paper and Empty Phantasm Shell scale with the weapon and the attack; `docs/papers_re.md`;
+  `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs the bonuses),
   and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
   files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
