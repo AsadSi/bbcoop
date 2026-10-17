@@ -19,10 +19,12 @@ def package(code, relocs=(), names=(), capabilities=None):
             + b''.join(struct.pack('<QQqq', *r) for r in relocs) + image)
 
 
+# Main calls an import then tail-jumps to the terminal diagnostic import.
+CALL_THEN_EXIT = b'\x48\x83\xec\x08\xff\x15\x16\0\0\0\x48\x83\xc4\x08\xff\x25\x14\0\0\0'
+
+
 def native_package(name='fixture-native', binding_address=4112, binding_kind=1,
-                   lib_flags=5, init=b'\x31\xc0\xc3', native=b'\xc3', metadata=None):
-    # Main calls an import then tail-jumps to the terminal diagnostic import.
-    code = b'\x48\x83\xec\x08\xff\x15\x16\0\0\0\x48\x83\xc4\x08\xff\x25\x14\0\0\0'
+                   lib_flags=5, init=b'\x31\xc0\xc3', native=b'\xc3', metadata=None, code=CALL_THEN_EXIT):
     image = code.ljust(4096,b'\0') + init.ljust(16,b'\0') + native
     image = image.ljust(12288,b'\0')
     header=struct.pack('<8s6Q',b'BBPROBE3',len(image),0,3,2,2,1)
@@ -64,6 +66,16 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(r.returncode,20,r.stdout+r.stderr)
         self.assertIn('Module 0 initializer returned 0',r.stdout)
         self.assertIn('first unsupported PS4 import: after-native',r.stdout)
+
+    def test_guest_thread_pointer_load(self):
+        # bbcoop: the linker's `mov rax, gs:[0]` (the game's TLS load) must give the guest TCB, whose
+        # first word points to itself (on macOS through the loader's patch, runtime_tls_patch).
+        # mov rax, gs:[0]; mov rdi, [rax]; sub rdi, rax; jmp to the terminal import with rdi = 0.
+        code = b'\x65\x48\x8b\x04\x25\0\0\0\0\x48\x8b\x38\x48\x29\xc7\xff\x25\x13\0\0\0'
+        r=self.run_image(native_package(code=code))
+        self.assertEqual(r.returncode,20,r.stdout+r.stderr)
+        self.assertIn('first unsupported PS4 import: after-native',r.stdout)
+        self.assertIn('first argument: 0x0\n',r.stdout)
 
     def test_host_contract_takes_priority_over_native_export(self):
         r=self.run_image(native_package(name='bzQExy189ZI#q#q',native=b'\x0f\x0b'))

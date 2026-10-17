@@ -65,5 +65,7 @@ if(MSVC)
     target_compile_options(shadnet-sample PRIVATE /W3 /utf-8)
 else()
     target_compile_options(shadnet-sample PRIVATE -Wall -Wextra)
-    target_link_options(shadnet-sample PRIVATE -static-libgcc -static-libstdc++)
+    if(NOT APPLE) # bbcoop: Apple's clang has no static libgcc/libstdc++
+        target_link_options(shadnet-sample PRIVATE -static-libgcc -static-libstdc++)
+    endif()
 endif()

@@ -323,7 +323,11 @@ static void SetAggressiveKeepalive(QTcpSocket* socket) {
 #else
     int fd = socket->socketDescriptor();
     int idle = 60, interval = 5, count = 3;
+#ifdef Q_OS_MACOS // bbcoop: macOS names the idle time TCP_KEEPALIVE
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
+#else
     setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+#endif
     setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
     setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
 #endif

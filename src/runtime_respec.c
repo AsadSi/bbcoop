@@ -8,7 +8,11 @@
  *   BB_RESPEC_FREE=1   the stat reset costs no Insight (testing)
  *   BB_RESPEC_TRACE=1  logs the player state the hooks see, every 5 s of frames
  *   BB_TEST_ENDGAME=1  test cheat: once in game, a high-level character with Echoes, Insight
- *                      and upgraded weapons. Only for throwaway profiles (tools/respec_test.sh). */
+ *                      and upgraded weapons. Only for throwaway profiles (tools/respec_test.sh).
+ *   BB_TEST_WARP=<lamp> test cheat (bbcoop): once in game, to a lamp's arrival point: an area name
+ *                      (warp_points below) or a respawn point ID, <map><block>29xx, as the map files
+ *                      hold them (2412950: the first of m24_01). With BB_TEST_ENDGAME, instead of the
+ *                      Dream. For testing an area (its frame rate) without playing to it. */
 #define _GNU_SOURCE
 #include "hooks.h"
 #include "runtime.h"
@@ -106,6 +110,10 @@ typedef void (ABI *ChangeItemQty)(uint64_t unused, uint32_t category, int32_t id
 
 static uint64_t image_base;
 static int respec_free, test_endgame, endgame_done, trace;
+static int32_t test_warp; /* BB_TEST_WARP: 0 none */
+static const struct { const char *name; int32_t point; } warp_points[] = {
+    {"dream", 2102950}, {"cathedral-ward", 2402950}, {"central-yharnam", 2412950}, {"old-yharnam", 2422950},
+};
 /* Refund mode, from the Doll's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
@@ -366,6 +374,8 @@ static void make_endgame_character(uint64_t pgd) {
         {CATEGORY_GOODS, 4103, 1},      /* Blood Gem Workshop Tool */
         {CATEGORY_GOODS, 900, 20},      /* Quicksilver Bullets */
         {CATEGORY_GOODS, 1000, 20},     /* Blood Vial */
+        {CATEGORY_GOODS, 200, 1},       /* Beckoning Bell: the host rings it (bbcoop co-op tests) */
+        {CATEGORY_GOODS, 205, 1},       /* Small Resonant Bell: the guest rings it */
     };
     char where[1200];
     printf("Respec: BB_TEST_ENDGAME: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
@@ -445,10 +455,10 @@ static void make_endgame_character(uint64_t pgd) {
     static const int32_t flags[] = {9400, 9401, 9402, 9403, 9404, 12417810,
                                     6700, 6702, 6703, 6704, 6707, 6710, 6711, 6719};
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) set_flag(flags[i], 1);
-    NATIVE(Warp, WARP_TO_RESPAWN)(2102950);
-    printf("Respec: BB_TEST_ENDGAME: level %d, echoes %d, insight %d, %zu item kinds given; warping to the Dream\n",
+    NATIVE(Warp, WARP_TO_RESPAWN)(test_warp ? test_warp : 2102950);
+    printf("Respec: BB_TEST_ENDGAME: level %d, echoes %d, insight %d, %zu item kinds given; warping to %d\n",
            read_s32(pgd, PGD_LEVEL), read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT),
-           sizeof(items) / sizeof(items[0]));
+           sizeof(items) / sizeof(items[0]), test_warp ? test_warp : 2102950);
 }
 
 static void trace_state(void) {
@@ -610,11 +620,14 @@ static void frame_update(HookRegs *regs) {
         if (get_flag(FLAG_REFUND)) set_flag(FLAG_REFUND, 0); /* saved by builds before it was never stored */
         if (get_flag(FLAG_RESPEC)) set_flag(FLAG_RESPEC, 0);
     }
-    if (!test_endgame || endgame_done || !in_game(&pgd)) return;
+    if (!(test_endgame || test_warp) || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
-    if (!get_flag(FLAG_ENDGAME_GIVEN)) {
+    if (test_endgame && !get_flag(FLAG_ENDGAME_GIVEN)) {
         set_flag(FLAG_ENDGAME_GIVEN, 1);
         make_endgame_character(pgd);
+    } else if (test_warp) {
+        printf("Respec: BB_TEST_WARP: warping to %d\n", test_warp);
+        NATIVE(Warp, WARP_TO_RESPAWN)(test_warp);
     }
 }
 
@@ -716,6 +729,15 @@ const char *respec_install(unsigned char *image, uint64_t size) {
     image_base = (uint64_t)(uintptr_t)image;
     respec_free = (env = getenv("BB_RESPEC_FREE")) && !strcmp(env, "1");
     test_endgame = (env = getenv("BB_TEST_ENDGAME")) && !strcmp(env, "1");
+    if ((env = getenv("BB_TEST_WARP")) && *env) {
+        for (size_t i = 0; i < sizeof(warp_points) / sizeof(warp_points[0]); ++i)
+            if (!strcmp(env, warp_points[i].name)) test_warp = warp_points[i].point;
+        if (!test_warp) test_warp = (int32_t)strtol(env, NULL, 10);
+        if (test_warp % 10000 < 2900) {
+            printf("Respec: BB_TEST_WARP=%s is no lamp (a name or <map><block>29xx); no warp\n", env);
+            test_warp = 0;
+        }
+    }
     trace = (env = getenv("BB_RESPEC_TRACE")) && !strcmp(env, "1");
     const char *failure = hooks_init(image, size);
     for (size_t i = 0; !failure && i < count; ++i)
@@ -725,7 +747,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
         }
     if (!failure) failure = hooks_seal();
     if (failure) return failure;
-    printf("Respec: %zu hooks installed%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
-           test_endgame ? ", BB_TEST_ENDGAME" : "");
+    printf("Respec: %zu hooks installed%s%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
+           test_endgame ? ", BB_TEST_ENDGAME" : "", test_warp ? ", BB_TEST_WARP" : "");
     return NULL;
 }

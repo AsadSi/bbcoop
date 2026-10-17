@@ -22,9 +22,12 @@ rm -rf -- "$user"
 [[ $mode == continue ]] && cp -a "$snapshot" "$user"
 : > out/pad
 # The scripted input below expects the online/offline choice (upstream 0.5 skips it by default).
+# bbcoop: macOS has neither setsid nor stdbuf; bb-probe writes its output unbuffered anyway.
+detach=(setsid stdbuf -oL -eL)
+[[ $(uname -s) == Darwin ]] && detach=()
 BB_SKIP_NETWORK_CHOICE=${BB_SKIP_NETWORK_CHOICE:-0} \
 BB_USER_DIR=$user BB_IME_TEXT=${BB_IME_TEXT:-Hunter} BB_PAD_FILE=$PWD/out/pad BB_FRAME_STATS=1 \
-    setsid stdbuf -oL -eL bash run.sh "$@" > out/session.log 2>&1 < /dev/null &
+    ${detach[@]+"${detach[@]}"} bash run.sh "$@" > out/session.log 2>&1 < /dev/null &
 
 press() { tools/press.sh "$1" 0.15; sleep "${2:-1}"; }
 in_level() {

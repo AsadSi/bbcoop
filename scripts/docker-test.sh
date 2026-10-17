@@ -5,6 +5,7 @@
 # keep the GPU library's compile within Docker Desktop's default memory.
 # BB_DOCKER_ARCH=arm64 runs a native arm64 container instead: fast compile checks on an arm64
 # Mac, but the x86-64 code (hooks, the game image) only runs under amd64.
+# Its out/ is the bbcoop-out-<arch> volume: the Mac's own out/ holds the macOS build.
 # Usage: scripts/docker-test.sh [command]   (default: bash build.sh --test)
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
@@ -12,7 +13,7 @@ command=${1:-bash build.sh --test}
 arch=${BB_DOCKER_ARCH:-amd64}
 volume=bbcoop-nix; [[ $arch == amd64 ]] || volume=bbcoop-nix-$arch
 exec docker run --rm --platform linux/$arch --cpuset-cpus 0-3 \
-    -v $volume:/nix -v "$PWD":/src -w /src \
+    -v $volume:/nix -v "$PWD":/src -v bbcoop-out-$arch:/src/out -w /src \
     -e BB_LTO=OFF -e BB_IN_NIX_SHELL=1 -e NIX_CONFIG=$'sandbox = false\nfilter-syscalls = false' \
     nixos/nix sh -c "
         git config --global --add safe.directory '*'

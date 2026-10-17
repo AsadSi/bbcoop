@@ -91,11 +91,12 @@ original_game=$game
 respec_mod=${BB_MODS_DIR:-$data/mods}/bbcoop-respec
 re_python=${BB_RE_PYTHON:-$HOME/.local/share/bbcoop-re/bin/python}
 respec_talk=$game/dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx
+stat_size_time=(-c '%s %Y'); [[ $(uname -s) == Darwin ]] && stat_size_time=(-f '%z %m') # bbcoop: BSD stat
 if [[ -f $respec_talk ]] && command -v realpath cksum stat > /dev/null 2>&1; then
-    respec_stamp="$(realpath -- "$game" 2>/dev/null || true) $(cksum < tools/respec_mod.py) $(stat -c '%s %Y' -- \
+    respec_stamp="$(realpath -- "$game" 2>/dev/null || true) $(cksum < tools/respec_mod.py) $(stat "${stat_size_time[@]}" -- \
         "$respec_talk" "$game/dvdroot_ps4/msg/engus/menu.msgbnd.dcx" 2>/dev/null || true)"
     # bbcoop: gun gems (a gem slot on every firearm, in its gameparam; BB_GUN_GEMS=0: none) rebuild it too.
-    respec_stamp+=" gun_gems=$([[ ${BB_GUN_GEMS:-1} == 0 ]] && echo 0 || echo 1) $(stat -c '%s %Y' -- \
+    respec_stamp+=" gun_gems=$([[ ${BB_GUN_GEMS:-1} == 0 ]] && echo 0 || echo 1) $(stat "${stat_size_time[@]}" -- \
         "$game/dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx" "$game/dvdroot_ps4/msg/engus/item.msgbnd.dcx" 2>/dev/null || true)"
     if [[ ! -d $respec_mod/dvdroot_ps4 || $(cat -- "$respec_mod/.stamp" 2>/dev/null) != "$respec_stamp" ]]; then
         if [[ -x $re_python ]] && "$re_python" -I tools/respec_mod.py "$game" "$respec_mod.new" > "$out/respec_mod.log" 2>&1; then

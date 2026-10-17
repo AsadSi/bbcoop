@@ -3,8 +3,9 @@
  * bbcoop_hook_entry, calls the C handler with them, restores them, runs the site's original
  * instructions and jumps back. Same scheme as shadp2p's InstallGuestCodeHook
  * (src/core/cpu_patches.cpp), without a code generator: the stub is a fixed byte template. */
-#if defined(__x86_64__) && defined(__linux__)
+#if defined(__x86_64__) && (defined(__linux__) || defined(__APPLE__))
 #define _GNU_SOURCE
+#include "darwin_compat.h" /* bbcoop: MAP_FIXED_NOREPLACE on macOS */
 #include "hooks.h"
 #include <stdio.h>
 #include <string.h>
@@ -22,10 +23,16 @@ extern void bbcoop_hook_entry(void);
  * below lay the registers out as HookRegs, which is passed to the handler and popped back. */
 __asm__(
     ".text\n"
+#ifdef __APPLE__
+    ".globl _bbcoop_hook_entry\n"
+    ".private_extern _bbcoop_hook_entry\n"
+    "_bbcoop_hook_entry:\n"
+#else
     ".globl bbcoop_hook_entry\n"
     ".hidden bbcoop_hook_entry\n"
     ".type bbcoop_hook_entry, @function\n"
     "bbcoop_hook_entry:\n"
+#endif
     "    pushfq\n"
     "    push %rbx\n push %rcx\n push %rdx\n push %rsi\n push %rdi\n push %rbp\n push %r8\n"
     "    push %r9\n push %r10\n push %r11\n push %r12\n push %r13\n push %r14\n push %r15\n"
@@ -54,7 +61,10 @@ __asm__(
     "    pop %rbp\n pop %rdi\n pop %rsi\n pop %rdx\n pop %rcx\n pop %rbx\n"
     "    popfq\n"
     "    ret\n"
-    ".size bbcoop_hook_entry, .-bbcoop_hook_entry\n");
+#ifndef __APPLE__
+    ".size bbcoop_hook_entry, .-bbcoop_hook_entry\n"
+#endif
+    );
 
 static const char *failure(const char *message, uint64_t offset) {
     snprintf(error, sizeof(error), "hook at %#llx: %s", (unsigned long long)offset, message);
