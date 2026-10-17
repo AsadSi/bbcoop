@@ -89,14 +89,26 @@ if [[ ! -f $src/openssl/.installed ]]; then
         --libdir=lib > /dev/null && make -j"$(sysctl -n hw.ncpu)" > /dev/null && make install_sw > /dev/null &&
         touch .installed)
 fi
-# MoltenVK: Khronos's universal release build (x86_64 slice used), registered as an ICD. Not marked
-# a portability driver: the renderer (shadPS4's) does not ask the loader for those.
-if [[ ! -f $prefix/lib/libMoltenVK.dylib ]]; then
-    curl -fsSL https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar | tar -x -C "$src"
-    cp "$src/MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" "$prefix/lib/"
+# MoltenVK 1.4.2 from source with the Mac port's changes (scripts/mac/moltenvk-bbport.patch: pass
+# statistics, the tessellation hoist and render pass merge, vkCmdUpscaleMetalFXBB for MetalFX, opt-in
+# untracked resources), x86-64, registered as an ICD. Rebuilt when the patch changes.
+fetch KhronosGroup/MoltenVK v1.4.2 moltenvk-source # not "moltenvk": the release download used MoltenVK/ (case-insensitive)
+mvk_patch=$PWD/scripts/mac/moltenvk-bbport.patch
+if ! cmp -s "$mvk_patch" "$src/moltenvk-source/.patched"; then
+    git -C "$src/moltenvk-source" checkout -q -- . && git -C "$src/moltenvk-source" clean -qfd -e build-x86
+    git -C "$src/moltenvk-source" apply "$mvk_patch"
+    cp "$mvk_patch" "$src/moltenvk-source/.patched"
+    rm -f "$src/moltenvk-source/.installed"
+fi
+if [[ ! -f $src/moltenvk-source/.installed ]]; then
+    cmake -S "$src/moltenvk-source" -B "$src/moltenvk-source/build-x86" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_OSX_ARCHITECTURES=x86_64 -DMVK_EXCLUDE_SPIRV_TOOLS=ON -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew > /dev/null
+    ninja -C "$src/moltenvk-source/build-x86" MoltenVK > /dev/null
+    cp -L "$src/moltenvk-source/build-x86/MoltenVK/libMoltenVK.dylib" "$prefix/lib/libMoltenVK.dylib"
     mkdir -p "$prefix/share/vulkan/icd.d"
     printf '{"file_format_version":"1.0.0","ICD":{"library_path":"../../../lib/libMoltenVK.dylib","api_version":"1.4.0"}}\n' \
         > "$prefix/share/vulkan/icd.d/MoltenVK_icd.json"
+    touch "$src/moltenvk-source/.installed"
 fi
 # The Vulkan loader installs no vulkan.pc on macOS; build.sh finds Vulkan through pkg-config.
 printf 'prefix=%s\nName: vulkan\nDescription: Vulkan loader\nVersion: 1.4.363\nLibs: -L${prefix}/lib -lvulkan\nCflags: -I${prefix}/include\n' \
