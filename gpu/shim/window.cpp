@@ -147,6 +147,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
 #ifdef __APPLE__
     // A Metal view; MoltenVK's surface is made from its CAMetalLayer (SDL needs no Vulkan here).
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_METAL_BOOLEAN, true);
+    // bbcoop: the Retina display's own pixels. Without it the swapchain had the window's size in
+    // points (1470x816 for a 2940x1632 window): the frame was shrunk into it and macOS doubled it
+    // again, soft and out of shape.
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
 #else
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
 #endif
