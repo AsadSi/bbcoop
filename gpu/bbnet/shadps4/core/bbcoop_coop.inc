@@ -344,3 +344,39 @@ bool TickBbcoopTestGuestDeath() {
              GetCurrentPackedMap(), ReadValue<s32>(global, 0x1528), ReadValue<s32>(global, 0x152C));
     return false;
 }
+
+// ---- ss.info format: the US release reads format 1 --------------------------------------------
+// The game's ss.info parser 0x01EB65E0(?, std::string* text, u32* format, u32* lang, out), called
+// from 0x01E89A21, looks for <msg%u>, then <lang%u> inside it, and so on, with %u the format the
+// caller passes (its copy of [[0x0553B120]+0x9E8]). The US release (CUSA00900) passes 1, the EU
+// one (CUSA03173) 2. Every community server (Seamless Hunt, BBSC's local one, NoDreamForHunter)
+// serves format 2, the EU retail file, so the US game found no <msg1>, the parser failed and the
+// title showed "Failed to resolve Bloodborne server status" (traced 2026-10-18: format 1, lang 2;
+// with 2 it logs in and gets the server's notice). A byte-checked hook at the parser's entry turns
+// 1 into 2. Switch: SHADPS4_BBSC_SS_FORMAT (on by default with BBSC, =0 off).
+constexpr u64 SsInfoParserOffset = 0x01EB65E0;
+constexpr std::array<u8, 6> SsInfoParserBytes{0x55, 0x48, 0x89, 0xE5, 0x41, 0x57}; // push rbp; mov rbp,rsp; push r15
+
+void PS4_SYSV_ABI BbcoopSsInfoFormatHook(u64 /*tag*/, const GuestRegisterSnapshot* registers) {
+    // rdx: the caller's local (its stack is outside the memory map ReadValue checks).
+    auto* format = registers ? reinterpret_cast<u32*>(registers->rdx) : nullptr;
+    if (format != nullptr && *format == 1) {
+        *format = 2;
+        static bool told = false;
+        if (!told) {
+            told = true;
+            LOG_INFO(Debug, "bbcoop: ss.info read as format 2 (the servers' EU file), not the US 1");
+        }
+    }
+}
+
+void InstallBbcoopSsInfoFormat() {
+    if (image_base == 0 || !EnvFlagEnabled("SHADPS4_BBSC_SS_FORMAT")) {
+        return;
+    }
+    if (!InstallGuestCodeHook(reinterpret_cast<void*>(image_base + SsInfoParserOffset),
+                              std::span<const u8>{SsInfoParserBytes}, 0, BbcoopSsInfoFormatHook)) {
+        LOG_ERROR(Debug, "bbcoop: ss.info parser at {:#x} differs - the US release stays offline",
+                  SsInfoParserOffset);
+    }
+}

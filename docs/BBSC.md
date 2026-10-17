@@ -52,6 +52,10 @@ Differences from BBSC's own builds:
   so too.
 - Any retail Bloodborne 1.09 (every region runs the same executable) counts as CUSA03173; every
   BBSC site is still byte-checked.
+- The US release (CUSA00900) is CUSA03173 to the shadNet server too (its login's title id), and reads
+  the servers' ss.info: its parser (0x01EB65E0) asks for format 1 (`<msg1>`, ...) where every
+  community server serves format 2, the EU retail file; it showed "Failed to resolve Bloodborne server
+  status" until a byte-checked hook turned 1 into 2 (`SHADPS4_BBSC_SS_FORMAT=0` off; `bbcoop_coop.inc`).
 - Saves: `BBSC_SAVE_DIR` points at `<user>/savedata/<id>/CUSA00207/SPRJ0005` (the port's layout).
 - Its loading screen is a line in the port's overlay (`bbgpu_overlay_banner`); the cinematic
   camera (F1, keyboard and mouse) gets the window's events through `bbgpu_add_event_filter`.
