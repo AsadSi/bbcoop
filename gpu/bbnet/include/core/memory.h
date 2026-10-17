@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 
+#include "common/memory_patcher.h" // bbcoop: the image's range
 #include "common/singleton.h"
 #include "common/types.h"
 
@@ -55,7 +56,15 @@ public:
         }
         int p = 0, type = -1;
         uintptr_t mapping_end = 0;
-        if (!runtime_memory_vma_info(address, &p, &type, &mapping_end)) {
+        // bbcoop: the game's image (code, data, bss: every BBSC global such as WorldChrMan or
+        // the game state) is host-owned low memory, not in the runtime's map; without this every
+        // BBSC read of a game global came back 0. The loader maps it whole and writable
+        // (bbnet_image_ready; the code stays writable while BBSC is on).
+        if (const u64 image = MemoryPatcher::g_eboot_address;
+            image != 0 && address >= image && address < image + MemoryPatcher::g_eboot_image_size) {
+            p = 3; // CpuReadWrite
+            mapping_end = image + MemoryPatcher::g_eboot_image_size;
+        } else if (!runtime_memory_vma_info(address, &p, &type, &mapping_end)) {
             return -1;
         }
         // The runtime's map gives the end of the mapping, not its start: the address itself
