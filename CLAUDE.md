@@ -46,7 +46,8 @@ what's still open.
 - Kept: `server/` (the shadnet-p2p server, standalone), `launcher/bbcoop_online.py` (not loaded by
   the launcher), and `gpu/shim/bbcoop_placement.*` with `gpu/shim/core/bloodborne_re.h`, which the
   seamless hooks use.
-- `BB_SEAMLESS=1` still applies the 13 byte patches and 5 hooks.
+- Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17), with bbcoop's scaling numbers (run.sh). `BB_SEAMLESS=1`
+  (bbcoop's 13 byte patches and 5 hooks) is the fallback and is skipped while BBSC is on (same sites).
 - Online servers: public ones are allowed (Asad, 2026-10-12, replacing "private only"): upstream's defaults
   (since 0.6 Seamless Hunt's, BBSC's; srv.shadps4.net refuses non-shadPS4 builds) or a group's own shadNet
   server (`server/`), in any mix.

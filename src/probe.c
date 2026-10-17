@@ -711,7 +711,12 @@ int main(int argc, char **argv) {
 #endif
     /* bbcoop: after the XML patches, so an XML patch touching a co-op site fails the check. On macOS after
      * the thread pointer loads too: a hook's moved instructions are then the patched ones. */
-    if (getenv("BB_SEAMLESS") && !strcmp(getenv("BB_SEAMLESS"), "1")) {
+    /* bbcoop (Asad, 2026-10-17: the best of both): BBSC (BB_BBSC=1, the online module) is the seamless
+     * co-op; it patches the same sites, so bbcoop's own patches stay off while it is on. */
+    const int bbsc_on = getenv("BB_BBSC") && !strcmp(getenv("BB_BBSC"), "1");
+    if (bbsc_on && getenv("BB_SEAMLESS") && !strcmp(getenv("BB_SEAMLESS"), "1"))
+        puts("Seamless: BB_SEAMLESS ignored, BBSC (BB_BBSC=1) is the seamless co-op");
+    if (!bbsc_on && getenv("BB_SEAMLESS") && !strcmp(getenv("BB_SEAMLESS"), "1")) {
         const char *error = seamless_apply(image, size);
         if (!error) error = seamless_hooks_install(image, size); /* bbcoop */
         if (error) fail(error);
