@@ -47,8 +47,9 @@ what's still open.
   the launcher), and `gpu/shim/bbcoop_placement.*` with `gpu/shim/core/bloodborne_re.h`, which the
   seamless hooks use.
 - `BB_SEAMLESS=1` still applies the 13 byte patches and 5 hooks.
-- Private only: `run.sh` keeps `BB_ONLINE` off unless `BB_SHADNET_SERVER` and `BB_COMMUNITY_SERVER` are set
-  and neither is a public default (shadps4.net, thehuntersdream). Never weaken this.
+- Online servers: public ones are allowed (Asad, 2026-10-12, replacing "private only"): upstream's defaults
+  (since 0.6 Seamless Hunt's, BBSC's; srv.shadps4.net refuses non-shadPS4 builds) or a group's own shadNet
+  server (`server/`), in any mix.
 - Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
   `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
   level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
