@@ -81,8 +81,11 @@ Supporting pieces:
 ## Open
 
 - **Co-op on BBSC (2026-10-17), not in BBSC yet (being built):** every pickup
-  mirrored to all players (BBSC: each guest keeps what they pick up, boss rewards for all); a guest's death
-  respawning at the host's last lamp (BBSC: respawn in place or spectate). Untested: a real session.
+  mirrored to all players (BBSC: each guest keeps what they pick up, boss rewards for all). Untested: a real session.
+- **Guest death at the host's lamp (2026-10-17):** BBSC respawns a guest at the host's lamp only when that
+  lamp is loaded on the guest's side; bbcoop now loads the guest there otherwise (outside boss fights,
+  `SHADPS4_BBSC_DEATH_TO_HOST_LAMP`, `docs/coop_respawn_re.md`). Verified alone with the test seam; the
+  session-keeping part needs a real two-player session.
 
 - **Online and co-op are on hold (Asad, 2026-10-11).** Plan: `~/.claude/plans/make-a-plan-on-scalable-kurzweil.md`.
   - **Done:** the launcher's Host/Join, the server, the ported NP libraries, and the seamless patches and hooks.
