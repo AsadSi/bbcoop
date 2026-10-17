@@ -20,6 +20,7 @@
 #include "core/libraries/np/np_signaling/np_signaling_state.h"
 #include "core/libraries/np/np_signaling/np_signaling_stubs.h"
 #include "core/bloodborne_re.h"
+#include "core/bbcoop_loot.h" // bbcoop: mirrored loot
 
 namespace Libraries::Np::NpSignaling::Helpers {
 
@@ -385,6 +386,10 @@ static void ReceiveThreadMain() {
         if (nbytes == sizeof(SignalingBbscWorldFlags) &&
             type == static_cast<u8>(SignalingPacketType::BbscWorldFlags)) {
             Core::Bloodborne::OnBbscWorldFlagsPacket(buf, static_cast<u32>(nbytes));
+            continue;
+        }
+        if (type == Core::Bloodborne::kBbcoopLootPacketType) { // bbcoop: mirrored loot
+            Core::Bloodborne::OnBbcoopLootPacket(buf, static_cast<u32>(nbytes));
             continue;
         }
         if (nbytes == sizeof(SignalingEchoPong) &&
