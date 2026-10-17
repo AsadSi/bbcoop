@@ -80,8 +80,26 @@ Supporting pieces:
 
 ## Open
 
-- **Co-op on BBSC (2026-10-17), not in BBSC yet (being built):** every pickup
-  mirrored to all players (BBSC: each guest keeps what they pick up, boss rewards for all). Untested: a real session.
+- **Mac speed and image (2026-10-17, MacBook Air M4):**
+  - Turn Low Power Mode off: with it on the game ran at ~20 FPS uncapped instead of ~43–45.
+  - The window now uses the Retina display's pixels (it was 1470x816 at scale 1, shrunk then doubled:
+    soft and out of shape). Fullscreen (launcher setting, F11) is 2940x1846, 16:10 below the notch.
+  - Passes with no output use a 16x16 area (`BB_NO_OUTPUT_AREA=0` off); command buffers are unnamed on macOS.
+  - Measured and not taken: MoltenVK prefill (no gain, more late frames), `BB_COPY_SHADER_CPU=1` (more late
+    frames), `MVK_BB_UNTRACKED=1` (0 late frames once, 240 the next run: noise).
+  - 60 FPS is CPU-bound on the Air: uncapped ~43 FPS at Quality and at Performance alike, the GPU thread idle
+    57–69%. Wooloomooloo2/bloodborne_mac_port reaches 60+ with a native arm64 GPU process; not done here.
+  - At 30 FPS some frames show 50 ms then 17 ms (judder). `BB_SWAPCHAIN_IMAGES=3` may help; inconclusive.
+  - The intermittent "PM4 type 0" crash on loads (2 of ~14 loads today) is a game race between the main
+    thread's GPU setup (0xebb960) and GXRenderThread's frame job (0x2199af0) on one immediate context;
+    Wooloomooloo2/bloodborne_mac_port 12a0ac5 serialises them with one lock. Not ported yet.
+- **Mirrored loot on BBSC (2026-10-17, merged):** every pickup, enemy drop and boss drop goes to every hunter
+  (`gpu/bbnet/shadps4/core/bbcoop_loot.inc`, relay "SHAD" 0x28, `SHADPS4_BBSC_MIRROR_LOOT=0` off,
+  `docs/coop_loot_re.md`). Verified alone with its test seam (receive side); a real pickup's send side and a
+  real session are not.
+- **BBSC packets 0x23..0x27 (2026-10-17, fixed):** life, scaling, PvP, shared progress and the boss bar were sent
+  but dropped by the receive thread (upstream 0.6-pre1 too), so a guest never got the host's scaling or
+  progress. Now handed on. Needs a real session to see end to end.
 - **Guest death at the host's lamp (2026-10-17):** BBSC respawns a guest at the host's lamp only when that
   lamp is loaded on the guest's side; bbcoop now loads the guest there otherwise (outside boss fights,
   `SHADPS4_BBSC_DEATH_TO_HOST_LAMP`, `docs/coop_respawn_re.md`). Verified alone with the test seam; the

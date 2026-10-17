@@ -153,6 +153,7 @@ read. The send side logs every packet with the number of peers it went to (0 whe
 
 ## Found on the way
 
-The signaling receive thread hands on only BBSC's 0x20 and 0x22 packets; 0x23 (life), 0x24 (scaling),
-0x25 (PvP), 0x26 (shared progress) and 0x27 (boss bar) are sent but end in "unexpected SHAD packet",
-also in upstream 0.6-pre1, so their `OnBbsc*Packet` handlers never run. Not changed here.
+The signaling receive thread handed on only BBSC's 0x20 and 0x22 packets; 0x23 (life), 0x24 (scaling),
+0x25 (PvP), 0x26 (shared progress) and 0x27 (boss bar) were sent but ended in "unexpected SHAD packet",
+also in upstream 0.6-pre1, so their `OnBbsc*Packet` handlers never ran. Fixed in bbcoop 120bf10
+(`np_signaling_helpers.cpp`, each checked against the sender's packet size).
