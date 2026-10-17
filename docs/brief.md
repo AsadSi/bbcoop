@@ -35,8 +35,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Non-co-op online traffic | Public servers allowed: the game's own server traffic (messages, bloodstains, ghosts) may go to The Hunter's Dream, accounts and summons to srv.shadps4.net or the group's own shadNet server. Replaces "private only" | "It doesn't have to be private, just make online work" | Asad, 2026-10-12 |
 | Online code | shadp2p's C++ NP, Net and Http libraries (about 25k lines), adapted into a C++ library linked like the GPU library, with no rewrite into C. Tested by a fake-game client that makes Bloodborne's online calls against the real server | A C rewrite would take 7-9k lines plus a protobuf C port, for no gain | Claude |
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
-| Difficulty | +50% HP and +10% damage per extra player, plus extra enemies in chosen spots during co-op only | | Asad |
-| Extra enemies | Only along the main routes of the large areas (Central Yharnam first, then Old Yharnam, Cathedral Ward, Forbidden Woods, Yahar'gul and Cainhurst). One extra group per guest, at points where enemies already gather. Never in boss arenas | Bosses already scale through HP. Adding enemies to an arena changes the fight's design and makes friendly fire chaotic, while open areas are where co-op gets trivial | Claude |
+| Difficulty | +50% HP and +10% damage per extra player (BBSC's scaling with these numbers). No extra enemies | "No need for more enemies" (2026-10-17) | Asad |
 | Respec | At the Doll, in the Hunter's Dream, outside a session. "Reset Attributes" returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
 | Respec entry | A new option in the Doll's dialogue (her talk script), not a settings-menu button | Feels native; chosen over the faster menu button | Asad, 2026-10-09 |
 | Seamless engine | Upstream 0.6's BBSC (`BB_BBSC=1`, the online module) is the seamless co-op, run with bbcoop's numbers (BBSC_SCALE_ENEMY_HP/BOSS_HP 50, DAMAGE 10 per extra player, BBSC's stagger) and bbcoop's mods (respec, gun gems, camera, IK). bbcoop's own seamless patches and hooks (`BB_SEAMLESS=1`) stay as the fallback and are skipped while BBSC is on: both patch the same sites. BBSC already has scaling, guest items and boss rewards, shared progress, lamp warps together, up to five hunters, the host-death rule and respawn in place | "Take the best of both" | Asad, 2026-10-17 |
@@ -81,13 +80,13 @@ Supporting pieces:
 
 ## Open
 
-- **Co-op on BBSC (2026-10-17), not in BBSC yet:** extra enemies in co-op (the Difficulty row); every pickup
+- **Co-op on BBSC (2026-10-17), not in BBSC yet (being built):** every pickup
   mirrored to all players (BBSC: each guest keeps what they pick up, boss rewards for all); a guest's death
   respawning at the host's last lamp (BBSC: respawn in place or spectate). Untested: a real session.
 
 - **Online and co-op are on hold (Asad, 2026-10-11).** Plan: `~/.claude/plans/make-a-plan-on-scalable-kurzweil.md`.
   - **Done:** the launcher's Host/Join, the server, the ported NP libraries, and the seamless patches and hooks.
-  - **Missing:** `src/runtime_coop.c` (lamp sync, mirrored loot, flag sync, death rules), HP/damage scaling, extra enemies, and a real two-player session.
+  - **Missing:** `src/runtime_coop.c` (lamp sync, mirrored loot, flag sync, death rules), HP/damage scaling, and a real two-player session.
   - **Blocker:** the reply to `/blood_messenger/exist_messages`, below.
   - **Commits:** kept local, not pushed (Asad, 2026-10-11).
   - **Upstream 0.51** was merged on 2026-10-11, bringing atomic saves, stutter and crash fixes, the System-menu settings and DLC. Its online module `gpu/bbnet` replaced our vendored copy of the same shadp2p libraries, which is kept at the tag `bbcoop-online-0.4`.
