@@ -12,7 +12,7 @@
 namespace BbSettings {
 
 enum Upscaler : int { UpscalerOff = 0, UpscalerFsr3 = 1, UpscalerFsr4 = 2, UpscalerFsr411 = 3,
-                      UpscalerTaa = 4, UpscalerDlss = 5, UpscalerCount };
+                      UpscalerTaa = 4, UpscalerDlss = 5, UpscalerMetalFx = 6, UpscalerCount };
 /// FSR 4 v07 or FSR 4.1.1: the same inputs, settings and placement in the frame.
 inline bool IsFsr4(int upscaler) {
     return upscaler == UpscalerFsr4 || upscaler == UpscalerFsr411;
@@ -82,23 +82,36 @@ OutputSize CurrentOutput();
 /// "2560x1080".
 std::string SizeText(OutputSize size);
 
+/// macOS (Apple Silicon): MetalFX (Apple's temporal scaler, with MoltenVK's vkCmdUpscaleMetalFXBB)
+/// from the Quality preset, object motion vectors off and the FPS counter on by default. Without
+/// an upscaler the M4 held ~31 FPS in the Hunter's Dream at 1680x1050, ~43 at 1280x720.
+#ifdef __APPLE__
+inline constexpr int DefaultUpscaler = UpscalerMetalFx;
+inline constexpr int DefaultPreset = Quality;
+inline constexpr bool DefaultObjectMotion = false, DefaultShowFps = true;
+#else
+inline constexpr int DefaultUpscaler = UpscalerFsr3;
+inline constexpr int DefaultPreset = NativeAA;
+inline constexpr bool DefaultObjectMotion = true, DefaultShowFps = false;
+#endif
+
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::Russian};
     /// Chosen in the menu (or already in bbport.ini): only then is it saved, so the language
     /// the menu merely started with keeps following the launcher's (#134).
     std::atomic<bool> menu_language_chosen{false};
-    std::atomic<int> upscaler{UpscalerFsr3};
-    std::atomic<int> preset{NativeAA};
+    std::atomic<int> upscaler{DefaultUpscaler};
+    std::atomic<int> preset{DefaultPreset};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.3f};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
-    std::atomic<bool> object_motion{true};
+    std::atomic<bool> object_motion{DefaultObjectMotion};
     std::atomic<float> reactive_scale{1.0f};
     std::atomic<float> reactive_threshold{0.2f};
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
-    std::atomic<bool> show_fps{false};
+    std::atomic<bool> show_fps{DefaultShowFps};
     /// The settings menu's position (fraction of the screen), -1 until it is moved.
     std::atomic<float> menu_x{-1.0f}, menu_y{-1.0f};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
@@ -125,12 +138,13 @@ struct Values {
     std::atomic<bool> fsr4_supported{false}, fsr411_supported{false};
     /// DLSS (gpu/dlss_bridge, NVIDIA RTX) is ready, or why not (null before the device exists).
     std::atomic<bool> dlss_supported{false};
+    std::atomic<bool> metalfx_supported{false}; ///< MoltenVK has vkCmdUpscaleMetalFXBB
     std::atomic<const char*> dlss_problem{nullptr};
 
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
     int startup_preset = NativeAA;
-    int startup_upscaler = UpscalerFsr3;
-    bool startup_object_motion = true;
+    int startup_upscaler = DefaultUpscaler;
+    bool startup_object_motion = DefaultObjectMotion;
     bool startup_effects[EffectCount]{};
     int startup_model_lod = 0;
     /// The output the startup patch was made for (BB_OUTPUT_RES), else 0x0.
@@ -148,6 +162,8 @@ void Load();
 void ConfigureUpscalerSupport(bool fsr4, bool fsr411);
 /// After device creation: DLSS availability; a DLSS setting falls back to FSR 3.1 without it.
 void ConfigureDlssSupport(bool available, const char* problem);
+/// Whether MoltenVK offers vkCmdUpscaleMetalFXBB; without it MetalFX falls back to no upscaler.
+void ConfigureMetalFxSupport(bool available);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
 int RenderPreset();

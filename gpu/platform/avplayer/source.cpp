@@ -310,6 +310,14 @@ bool Source::OpenDecoder(Track& track) {
         return false;
     }
     track.codec = avcodec_alloc_context3(decoder);
+#ifdef __APPLE__
+    if (&track == &video) {
+        // bbport: decode on several threads; one thread decodes a 1080p movie at ~28 FPS
+        // under Rosetta, slower than the movie.
+        track.codec->thread_count = 0;
+        track.codec->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    }
+#endif
     if (avcodec_parameters_to_context(track.codec, stream.codecpar) < 0 ||
         avcodec_open2(track.codec, decoder, nullptr) < 0) {
         LOG_ERROR(Lib_AvPlayer, "no decoder for stream {}", track.ffmpeg_index);
@@ -460,6 +468,9 @@ void Source::DemuxThread(std::stop_token stop) {
 void Source::DecodeThread(std::stop_token stop, Track& track, bool is_video) {
     Common::SetCurrentThreadName(is_video ? "bb:AvVideoDec" : "bb:AvAudioDec");
     FramePtr decoded{av_frame_alloc()};
+#ifdef __APPLE__
+    u64 late_frames = 0;
+#endif
     // Takes what the decoder has ready: false on an error or once it is drained.
     const auto receive = [&]() -> bool {
         while (!stop.stop_requested()) {
@@ -478,6 +489,21 @@ void Source::DecodeThread(std::stop_token stop, Track& track, bool is_video) {
                 }
                 return false;
             }
+#ifdef __APPLE__
+            // bbport: the game holds most of its few output buffers (often two), so frames
+            // can only be dropped here: one the audio clock has already passed by more than
+            // two frames is decoded (later frames reference it) but never converted or
+            // queued. Otherwise the picture advances one frame per game request, drifts
+            // seconds behind the audio, and outlives the game's movie teardown. (Before the
+            // game takes its first audio frame the audio clock reads 0: nothing is late.)
+            if (is_video && audio.Enabled() &&
+                listener.SyncMode() == AvPlayerAvSyncMode::Default &&
+                TimestampMillis(*decoded, track.ffmpeg_index) + 66 < CurrentTime()) {
+                av_frame_unref(decoded.get());
+                ++late_frames;
+                continue;
+            }
+#endif
             const bool converted = ToFrame(track, is_video, *decoded);
             av_frame_unref(decoded.get());
             if (!converted) {
@@ -508,6 +534,11 @@ void Source::DecodeThread(std::stop_token stop, Track& track, bool is_video) {
     // The frames the decoder still holds (reordered ones), then the end.
     avcodec_send_packet(track.codec, nullptr);
     receive();
+#ifdef __APPLE__
+    if (late_frames) {
+        LOG_WARNING(Lib_AvPlayer, "{} late video frames dropped", late_frames);
+    }
+#endif
     if (--decoders_running == 0) {
         listener.OnEndOfFile();
     }
@@ -657,6 +688,22 @@ bool Source::GetVideoData(AvPlayerFrameInfoEx& info) {
         video.current.reset();
     }
     video.current = video.frames.Pop();
+#ifdef __APPLE__
+    // bbport: when the game asks for frames less often than the movie's frame rate (the movie
+    // loop runs at the render rate, ~28 FPS under Rosetta for a 30 FPS movie), hand it the
+    // newest frame that is due and drop the older ones, as AV sync does. Returning every frame
+    // in turn left the picture seconds behind the audio, and the game tore the movie down at
+    // the audio clock's end while the player still had video (and its audio thread) running.
+    if (listener.SyncMode() == AvPlayerAvSyncMode::Default) {
+        const u64 now = CurrentTime();
+        const auto timestamp = [](const Frame& frame) { return frame.info.timestamp; };
+        for (auto later = video.frames.PeekWith(timestamp); later && *later <= now;
+             later = video.frames.PeekWith(timestamp)) {
+            video.free_buffers.Push(std::move(video.current->buffer));
+            video.current = video.frames.Pop();
+        }
+    }
+#endif
     info = video.current->info;
     return true;
 }

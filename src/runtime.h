@@ -4,6 +4,9 @@
 #include <time.h>
 #include <stdint.h>
 #include <stddef.h>
+#ifdef __APPLE__
+#include "darwin_compat.h"
+#endif
 #include <setjmp.h>
 /* Recovery point for speculative guest memory reads on this thread (probe.c fault handler). */
 extern __thread sigjmp_buf *runtime_fault_recover;
@@ -11,8 +14,8 @@ extern __thread sigjmp_buf *runtime_fault_recover;
 void runtime_restart(void);
 #define ABI __attribute__((sysv_abi))
 /* The clock of the runtime's condition variable deadlines: monotonic on Linux; winpthreads'
- * conditions take only CLOCK_REALTIME deadlines. */
-#ifdef _WIN32
+ * and Darwin's conditions take only CLOCK_REALTIME deadlines. */
+#if defined(_WIN32) || defined(__APPLE__)
 #define RUNTIME_COND_CLOCK CLOCK_REALTIME
 #else
 #define RUNTIME_COND_CLOCK CLOCK_MONOTONIC
@@ -22,6 +25,12 @@ void runtime_restart(void);
 #define RUNTIME_TM_GMTOFF(t) bb_gmtoff(&(t))
 #else
 #define RUNTIME_TM_GMTOFF(t) ((t).tm_gmtoff)
+#endif
+/* Functions that top-level asm defines or calls by plain name (Mach-O prefixes C symbols with '_'). */
+#ifdef __APPLE__
+#define ASM_NAME(name) __asm__(#name)
+#else
+#define ASM_NAME(name)
 #endif
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
@@ -106,6 +115,23 @@ void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);
 void *runtime_low_map(size_t size, int prot);
+/* Host objects the guest holds pointers to (it packs them into 40 bits): below 1 TiB. Linux's
+ * malloc is (the non-PIE brk heap); macOS's is not, so low mappings are used there. */
+#ifdef __APPLE__
+void *runtime_low_malloc(size_t size);
+void *runtime_low_calloc(size_t count, size_t size);
+void runtime_low_free(void *pointer);
+void *runtime_low_aligned_alloc(size_t alignment, size_t size);
+#define GUEST_MALLOC(n) runtime_low_malloc(n)
+#define GUEST_CALLOC(n, s) runtime_low_calloc(n, s)
+#define GUEST_FREE(p) runtime_low_free(p)
+#define GUEST_ALIGNED_ALLOC(a, n) runtime_low_aligned_alloc(a, n)
+#else
+#define GUEST_MALLOC(n) malloc(n)
+#define GUEST_CALLOC(n, s) calloc(n, s)
+#define GUEST_FREE(p) free(p)
+#define GUEST_ALIGNED_ALLOC(a, n) aligned_alloc(a, n)
+#endif
 uintptr_t runtime_ajm_resolve(const char *name);
 void runtime_ajm_report(void);
 uintptr_t runtime_audio_resolve(const char *name);

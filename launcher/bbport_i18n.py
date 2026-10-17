@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Launcher translations. The Russian text is the key; other languages are looked up by it.
 
-ui_language in the launcher settings: "ru", "en", "pt_BR", "zh_CN" or "" (the system locale:
-Russian for ru_*, Brazilian Portuguese for pt_BR*, Simplified Chinese for zh_*, English
-otherwise).
+ui_language in the launcher settings: "ru", "en", "pt_BR", "zh_CN", "es" or "" (the system
+locale: Russian for ru_*, Brazilian Portuguese for pt_BR*, Simplified Chinese for zh_*,
+Spanish for es_*, English otherwise).
 """
 import os
+import subprocess
+import sys
 
 EN = {
     # Window, pages, buttons
@@ -829,10 +831,294 @@ ZH_CN = {
 }
 
 
+ES = {
+    "Запустить": "Jugar",
+    "Остановить": "Detener",
+    "Настройки": "Ajustes",
+    "Журнал": "Registro",
+    "Не удалось запустить: {}": "No se pudo iniciar: {}",
+    "Копировать": "Copiar",
+    "Экспорт журнала…": "Exportar registro…",
+    "Экспорт журнала": "Exportar registro",
+    "Журнал скопирован": "Registro copiado",
+    "Журнал сохранён: {}": "Registro guardado: {}",
+    "Не удалось сохранить журнал: {}": "No se pudo guardar el registro: {}",
+    "\n— игра завершилась (код {}) —\n": "\n— el juego terminó (código {}) —\n",
+    "Язык лаунчера": "Idioma del launcher",
+    "Как в системе": "Sistema",
+    "Применится после перезапуска лаунчера, пока игра запущена": "Se aplica al reiniciar el launcher mientras el juego está abierto",
+    "Игра": "Juego",
+    "Папка игры (CUSA03173)": "Carpeta del juego (CUSA03173)",
+    "Выбрать папку с eboot.bin": "Elegir la carpeta con eboot.bin",
+    "Открыть в файловом менеджере": "Abrir en el gestor de archivos",
+    "Папка сохранений": "Carpeta de partidas guardadas",
+    "Выбрать папку сохранений": "Elegir la carpeta de partidas guardadas",
+    "Вернуть папку по умолчанию": "Volver a la carpeta por defecto",
+    "Язык системы": "Idioma del sistema",
+    "По умолчанию: {}": "Por defecto: {}",
+    "Найдены сохранения": "Partidas guardadas encontradas",
+    "Сохранений пока нет: игра создаст их здесь": "Aún no hay partidas guardadas: el juego las creará aquí",
+    "не выбрана": "sin elegir",
+    "Найден eboot.bin": "eboot.bin encontrado",
+    "Нет eboot.bin в папке": "No hay eboot.bin en la carpeta",
+    "Управление": "Controles",
+    "Клавиатура": "Teclado",
+    "Геймпад": "Mando",
+    "Назначение кнопок; применяется при запуске игры": "Asignación de botones; se aplica al iniciar el juego",
+    "Назначить": "Asignar",
+    "Сбросить": "Restablecer",
+    "{} (по умолчанию)": "{} (por defecto)",
+    "не назначено": "sin asignar",
+    "Нажмите клавишу или кнопку… (Esc — отмена)": "Pulsa una tecla o un botón… (Esc cancela)",
+    "Крест": "Equis",
+    "Круг": "Círculo",
+    "Квадрат": "Cuadrado",
+    "Треугольник": "Triángulo",
+    "Тачпад, левая половина (жесты)": "Panel táctil, mitad izquierda (gestos)",
+    "Тачпад, правая половина (личные вещи)": "Panel táctil, mitad derecha (objetos clave)",
+    "Крестовина вверх": "Cruceta arriba",
+    "Крестовина вниз": "Cruceta abajo",
+    "Крестовина влево": "Cruceta izquierda",
+    "Крестовина вправо": "Cruceta derecha",
+    "Движение вперёд": "Avanzar",
+    "Движение назад": "Retroceder",
+    "Движение влево": "Moverse a la izquierda",
+    "Движение вправо": "Moverse a la derecha",
+    "Камера вверх": "Cámara arriba",
+    "Камера вниз": "Cámara abajo",
+    "Камера влево": "Cámara a la izquierda",
+    "Камера вправо": "Cámara a la derecha",
+    "Контроллер": "Mando",
+    "Выбранный берётся, как только подключится": "El elegido se usa en cuanto se conecta",
+    "Первый подключённый": "El primero conectado",
+    "{} (не подключён)": "{} (no conectado)",
+    "Монитор": "Monitor",
+    "Пропускать выбор «по сети / вне сети»": "Saltar la elección “jugar en línea / sin conexión”",
+    "Игра сразу открывает главное меню в режиме вне сети (патч игры)": "El juego abre el menú principal sin conexión directamente (un parche del juego)",
+    "Основной": "Principal",
+    ", основной": ", principal",
+    "Нужно обновление 1.09: скопируйте файлы дампа обновления 1.09 в папку игры с заменой (найдена версия {})": "Hace falta la actualización 1.09: copia la actualización 1.09 extraída en la carpeta del juego, reemplazando archivos (versión encontrada: {})",
+    "eboot.bin не от версии 1.09: скопируйте eboot.bin из дампа обновления 1.09 в папку игры с заменой": "eboot.bin no es de la 1.09: copia el eboot.bin de la actualización 1.09 extraída en la carpeta del juego, reemplazándolo",
+    "Это не магазинное издание Bloodborne (найдено {}): нужен Bloodborne любого региона с обновлением 1.09": "No es una edición comercial de Bloodborne (encontrado: {}): hace falta Bloodborne de cualquier región con la actualización 1.09",
+    "eboot.bin с вшитым патчем 60 FPS от Lance McDonald: из-за него игра падает в меню жестов. Скопируйте чистый eboot.bin из дампа обновления 1.09 в папку игры с заменой": "Este eboot.bin trae integrado el parche de 60 fps de Lance McDonald, que cuelga el juego en el menú de gestos: copia un eboot.bin limpio de la actualización 1.09 extraída en la carpeta del juego, reemplazándolo",
+    "eboot.bin не читается как расшифрованный исполняемый файл PS4: сделайте дамп заново": "eboot.bin no se puede leer como un ejecutable de PS4 descifrado: vuelve a extraer el juego",
+    "Файлы игры повреждены при распаковке: шейдеры не распаковываются, игра зависнет на загрузке. Распакуйте игру и обновление 1.09 заново исправленным инструментом (issue #81)": "Los archivos del juego se dañaron al extraerlos: los shaders no se desempaquetan y el juego se colgaría al cargar. Extrae de nuevo el juego y la actualización 1.09 con una herramienta corregida (issue #81)",
+    "Bloodborne CUSA03173, версия 1.09": "Bloodborne CUSA03173, versión 1.09",
+    "Папка игры (с eboot.bin)": "Carpeta del juego (con eboot.bin)",
+    "Английский": "Inglés",
+    "Русский": "Ruso",
+    "Японский": "Japonés",
+    "Французский": "Francés",
+    "Испанский": "Español",
+    "Немецкий": "Alemán",
+    "Итальянский": "Italiano",
+    "Моды": "Mods",
+    "Распакуйте каждый мод в отдельную папку (с dvdroot_ps4 или сразу с chr/, parts/ и т. п.). При совпадении файлов побеждает мод ниже в списке. Применяется при запуске.": "Extrae cada mod en su propia carpeta (con dvdroot_ps4, o chr/, parts/, ... directamente). Si dos archivos coinciden, gana el mod más abajo en la lista. Se aplica al iniciar.",
+    "Загружать моды": "Cargar mods",
+    "Папка модов": "Carpeta de mods",
+    "Выбрать папку модов": "Elegir la carpeta de mods",
+    "Открыть папку модов": "Abrir la carpeta de mods",
+    "Обновить список": "Actualizar la lista",
+    "Загрузить раньше": "Cargar antes",
+    "Загрузить позже": "Cargar después",
+    "Модов нет": "No hay mods",
+    "Сторонние патчи": "Parches de terceros",
+    "XML-патчи в формате shadPS4 для версии 01.09 из папки патчей. Применяются при запуске.": "Parches XML en formato shadPS4 para la versión 01.09, desde la carpeta de parches. Se aplican al iniciar.",
+    "Папка патчей": "Carpeta de parches",
+    "Выбрать папку патчей": "Elegir la carpeta de parches",
+    "Открыть папку патчей": "Abrir la carpeta de parches",
+    "Патчей нет": "No hay parches",
+    "Автор: {}": "Autor: {}",
+    "Экран": "Pantalla",
+    "Разрешение вывода": "Resolución de salida",
+    "Апскейлер дорисовывает кадр; Steam Deck — 720p": "El escalador llena la imagen; Steam Deck: 720p",
+    "Полноэкранный режим": "Pantalla completa",
+    "Смена разрешения на лету": "Cambios de resolución en vivo",
+    "Без перезапуска, но медленнее на Steam Deck и старых GPU": "Sin reiniciar, pero más lento en la Steam Deck y en GPUs antiguas",
+    "Авто (по видеокарте)": "Auto (según la GPU)",
+    "Выключена (быстрее)": "Desactivado (más rápido)",
+    "Включена": "Activado",
+    "Режим показа кадров": "Modo de presentación",
+    "Разрешить HDR": "Permitir HDR",
+    "Апскейлер": "Escalador",
+    "Хранится в bbport.ini; в игре меняется через меню (Insert или L3+R3)": "Se guarda en bbport.ini; en el juego se cambia en el menú (Insert o L3+R3)",
+    "TAA (нативное сглаживание)": "TAA (antialiasing nativo)",
+    "Выключен": "Desactivado",
+    "Пресет": "Preset",
+    "Резкость (RCAS)": "Nitidez (RCAS)",
+    "Сила резкости": "Intensidad de la nitidez",
+    "Векторы движения объектов": "Vectores de movimiento de objetos",
+    "Меньше гостинга на персонажах; стоит около 10% FPS": "Menos estelas en los personajes; cuesta alrededor de un 10 % de FPS",
+    "Показывать FPS": "Mostrar FPS",
+    "Ассеты найдены": "Recursos encontrados",
+    "Нет ассетов: tools/fetch_fsr4_assets.sh": "Sin recursos: tools/fetch_fsr4_assets.sh",
+    "Ассеты для выбранного режима найдены": "Recursos encontrados para el modo elegido",
+    "{}. Соберите FSR 4.1.1 из своей DLL кнопкой «Выбрать DLL…» ниже": "{}. Compila FSR 4.1.1 desde tu propia DLL con el botón “Elegir DLL…” de abajo",
+    "FSR 4.1.1 из своей DLL AMD": "FSR 4.1.1 desde tu propia DLL de AMD",
+    "Отменить": "Cancelar",
+    "Выбрать DLL…": "Elegir DLL…",
+    "DLL апскейлера AMD (amd_fidelityfx_upscaler_dx12.dll)": "DLL del escalador de AMD (amd_fidelityfx_upscaler_dx12.dll)",
+    "нет": "ninguna",
+    "Эта DLL не подходит": "Esta DLL no sirve",
+    "{}: версия {}, модели FSR 4: {}.\n\nbbport повторяет только официальную FSR 4.1.x от AMD (модель v07_fp8_no_scale): например, FSR4_LATEST из OptiScaler или amd_fidelityfx_upscaler_dx12.dll из игры с FSR 4.1. Сборки сообщества (4.0.2b и подобные) устроены иначе и пока не поддерживаются.": "{}: versión {}, modelos FSR 4: {}.\n\nbbport solo reproduce el FSR 4.1.x oficial de AMD (modelo v07_fp8_no_scale): por ejemplo FSR4_LATEST de OptiScaler, o amd_fidelityfx_upscaler_dx12.dll de un juego con FSR 4.1. Las compilaciones de la comunidad (4.0.2b y similares) tienen otra estructura y todavía no se admiten.",
+    "Загрузчик не подходит": "El cargador no sirve",
+    "Загрузчик FidelityFX (amd_fidelityfx_loader_dx12.dll или amd_fidelityfx_dx12.dll)": "Cargador de FidelityFX (amd_fidelityfx_loader_dx12.dll o amd_fidelityfx_dx12.dll)",
+    "\n— сборка FSR 4.1.1 из {} —\n": "\n— compilando FSR 4.1.1 desde {} —\n",
+    "Подготовка…": "Preparando…",
+    "Запись проходов DLL под Proton: {} из {}": "Grabando los pases de la DLL con Proton: {} de {}",
+    "Перевод проходов в SPIR-V…": "Traduciendo los pases a SPIR-V…",
+    "— сборка FSR 4.1.1 завершилась (код {}) —\n": "— compilación de FSR 4.1.1 terminada (código {}) —\n",
+    "FSR 4.1.1 собран и выбран": "FSR 4.1.1 compilado y seleccionado",
+    "Сборка FSR 4.1.1 отменена": "Compilación de FSR 4.1.1 cancelada",
+    "FSR 4.1.1 не собран": "FSR 4.1.1 no se compiló",
+    "DLL не подходит: подробности в журнале": "La DLL no sirve: detalles en el registro",
+    "Не хватает программ для сборки: список в журнале": "Faltan herramientas para la compilación: la lista está en el registro",
+    "Записанные проходы не совпали с тем, что повторяет bbport (другая версия DLL или новая видеокарта?): подробности в журнале": "Los pases grabados no coinciden con lo que reproduce bbport (¿otra versión de la DLL, o una GPU nueva?): detalles en el registro",
+    "Не найден загрузчик FidelityFX 2.x": "No se encontró un cargador de FidelityFX 2.x",
+    "Не найден подходящий Proton: установите GE-Proton 10 или новее (ProtonUp-Qt) или Proton Experimental / Proton-CachyOS в Steam. Если они есть — запустите в Steam любую игру с этим Proton, чтобы Steam поставил его рантайм": "No se encontró un Proton adecuado: instala GE-Proton 10 o posterior (ProtonUp-Qt), o Proton Experimental / Proton-CachyOS en Steam. Si ya los tienes, inicia cualquier juego con ese Proton en Steam para que Steam instale su entorno",
+    "Ни один Proton не запустил FSR 4.1 из этой DLL. Либо они слишком старые (подходят GE-Proton 10+, Proton Experimental, Proton-CachyOS 11), либо DLL не включает FSR 4.1 на этой видеокарте (Steam Deck?): тогда соберите на ПК с Radeon RX 7000/9000 и скопируйте папку fsr4_411. Подробности в журнале": "Ningún Proton inició el FSR 4.1 de esta DLL. O son demasiado antiguos (funcionan GE-Proton 10+, Proton Experimental y Proton-CachyOS 11), o la DLL no activa FSR 4.1 en esta GPU (¿Steam Deck?): entonces compila en un PC con una Radeon RX 7000/9000 y copia la carpeta fsr4_411. Detalles en el registro",
+    "На NixOS запись идёт на самой системе (systemd --user) через umu-launcher из nix-shell, а здесь их не нашлось: установите umu-launcher или Nix. Подробности в журнале": "En NixOS la grabación se hace en el propio sistema (systemd --user) con umu-launcher desde nix-shell, y no se encontró ninguno de los dos: instala umu-launcher o Nix. Detalles en el registro",
+    "{}: FSR {}. Это официальная FSR 4.0.x от AMD: она включается только на видеокартах RDNA4 (RX 9000), а под Proton на других видеокартах не запускается, поэтому записать её нельзя.\n\nНужна FSR 4.1.x: например, FSR4_LATEST из OptiScaler или DLL из игры с FSR 4.1.": "{}: FSR {}. Este es el FSR 4.0.x oficial de AMD: solo se activa en GPUs RDNA4 (RX 9000) y no arranca con Proton en otras GPUs, así que no se puede grabar.\n\nHace falta FSR 4.1.x: por ejemplo FSR4_LATEST de OptiScaler, o la DLL de un juego con FSR 4.1.",
+    "{}: в этой DLL нет FSR 4. Нужна amd_fidelityfx_upscaler_dx12.dll версии 4.1.x.": "{}: esta DLL no contiene FSR 4. Hace falta amd_fidelityfx_upscaler_dx12.dll versión 4.1.x.",
+    "Это не загрузчик": "Esto no es el cargador",
+    "{} — это DLL апскейлера. Загрузчик называется amd_fidelityfx_loader_dx12.dll (у OptiScaler — amd_fidelityfx_dx12.dll) и лежит в той же папке игры, что и DLL апскейлера.": "{} es la DLL del escalador. El cargador se llama amd_fidelityfx_loader_dx12.dll (amd_fidelityfx_dx12.dll en OptiScaler) y está en la misma carpeta del juego que la DLL del escalador.",
+    "{}: версия {}. Нужен загрузчик FidelityFX 2.x — из той же игры, что и DLL апскейлера.": "{}: versión {}. Hace falta un cargador de FidelityFX 2.x, del mismo juego que la DLL del escalador.",
+    "Рядом с DLL нет загрузчика: выберите amd_fidelityfx_loader_dx12.dll из папки игры": "No hay un cargador junto a la DLL: elige amd_fidelityfx_loader_dx12.dll en la carpeta del juego",
+    "Собрать FSR 4.1.1 из amd_fidelityfx_upscaler_dx12.dll 4.1.x (OptiScaler: папка FSR4_LATEST, или из игры с FSR 4.1). Нужен GE-Proton 10+, Proton Experimental или Proton-CachyOS; 2–5 минут (RDNA4: вдвое дольше, ещё и вариант FP8)": "Compila FSR 4.1.1 desde amd_fidelityfx_upscaler_dx12.dll 4.1.x (OptiScaler: la carpeta FSR4_LATEST, o desde un juego con FSR 4.1). Necesita GE-Proton 10+, Proton Experimental o Proton-CachyOS; 2–5 minutos (RDNA4: el doble, con la variante FP8)",
+    "Сборка не удалась (код {}): подробности в журнале": "La compilación falló (código {}): detalles en el registro",
+    "Сглаживание в разрешении вывода без модели FSR": "Antialiasing a la resolución de salida, sin modelo FSR",
+    "DLSS найден (нужна видеокарта NVIDIA RTX)": "DLSS encontrado (necesita una GPU NVIDIA RTX)",
+    "Эта сборка без модуля онлайна (libbbnet.so): игра только офлайн": "Esta compilación no tiene el módulo en línea (libbbnet.so): solo juego sin conexión",
+    "Online ID — это имя учётной записи (NPID), зарегистрированное на сервере, а не адрес email": "El Online ID es el nombre de la cuenta (NPID) que registraste en el servidor, no tu dirección de correo",
+    "UPnP (открыть порт на роутере автоматически)": "UPnP (abrir un puerto en el router automáticamente)",
+    "srv.shadps4.net:31313 — публичный сервер shadPS4. Для частного сервера укажите host:port от его владельца. WebAPI: оставьте пустым, тогда берётся адрес сервера с портом 31315": "srv.shadps4.net:31313 es el servidor público de shadPS4. Para un servidor privado, escribe el host:puerto que te dé quien lo administra. WebAPI: déjalo vacío para usar la dirección del servidor con el puerto 31315",
+    "Адрес WebAPI": "Dirección de la WebAPI",
+    "Адрес сервера": "Dirección del servidor",
+    "Выключено: игра остаётся офлайн, как раньше": "Desactivado: el juego sigue sin conexión, como antes",
+    "Выключите при Tailscale или другом VPN": "Desactívalo con Tailscale u otra VPN",
+    "Играть онлайн": "Jugar en línea",
+    "Играть офлайн": "Jugar sin conexión",
+    "Игровой сервер": "Servidor del juego",
+    "Игровой сервер (сообщения, пятна крови, призраки)": "Servidor del juego (mensajes, manchas de sangre, fantasmas)",
+    "Имя учётной записи shadNet, не email. Зарегистрируйтесь на shadnet.shadps4.net или спросите владельца частного сервера. Пароль хранится на этом компьютере вместе с настройками лаунчера": "El nombre de tu cuenta de shadNet, no tu correo. Regístrate en shadnet.shadps4.net o pídesela al dueño de un servidor privado. La contraseña se guarda en este equipo con los ajustes del launcher",
+    "Онлайн": "En línea",
+    "Отмена": "Cancelar",
+    "Пароль": "Contraseña",
+    "Проверить": "Probar",
+    "Проверить соединение": "Probar la conexión",
+    "Проверка…": "Comprobando…",
+    "Сервер shadNet": "Servidor shadNet",
+    "Сервер кооператива (колокола и призывы)": "Servidor cooperativo (campanas e invocaciones)",
+    "Соединение": "Conexión",
+    "Сообщения, пятна крови и призраки приходят с The Hunter's Dream; колокола и призывы идут через сервер shadNet. Игра по сети совместима с версией для Windows: нужны версия игры 1.09 и тот же сервер": "Los mensajes, las manchas de sangre y los fantasmas vienen de The Hunter's Dream; las campanas y las invocaciones pasan por un servidor shadNet. El juego en línea funciona junto con la versión de Windows: todos necesitan la versión 1.09 del juego y el mismo servidor",
+    "У всех в сессии должны быть одна версия игры (1.09) и один сервер. Читы меняют игру и для других игроков: выключайте их при совместной игре": "Todos en una sesión necesitan la misma versión del juego (1.09) y el mismo servidor. Los trucos también cambian el juego para los demás jugadores: desactívalos cuando juguéis juntos",
+    "Учётная запись": "Cuenta",
+    "Учётная запись для игры онлайн указана, но «Играть онлайн» выключено": "Hay una cuenta en línea configurada, pero “Jugar en línea” está desactivado",
+    "доступен": "accesible",
+    "недоступен": "no accesible",
+    "DLSS: библиотека NVIDIA": "DLSS: la librería de NVIDIA",
+    "Выбрать файл…": "Elegir un archivo…",
+    "Убрать выбранную": "Quitar el elegido",
+    "Своя: {}": "Tuya: {}",
+    "Из сборки: {}": "De esta compilación: {}",
+    "Нет: выберите libnvidia-ngx-dlss.so.* из DLSS SDK NVIDIA ({})": "Ninguna: elige libnvidia-ngx-dlss.so.* del SDK de DLSS de NVIDIA ({})",
+    "Эта сборка без моста DLSS (libbbport_dlss.so): DLSS работать не будет": "Esta compilación no tiene el puente de DLSS (libbbport_dlss.so): DLSS no funcionará",
+    "Библиотека DLSS NVIDIA (libnvidia-ngx-dlss.so.*)": "Librería DLSS de NVIDIA (libnvidia-ngx-dlss.so.*)",
+    "Нужна библиотека для Linux": "Hace falta una librería de Linux",
+    "{} — библиотека DLSS для Windows; на Linux NVIDIA её не загружает. Нужна libnvidia-ngx-dlss.so.<версия> из DLSS SDK NVIDIA: {}": "{} es la librería DLSS de Windows; el driver de NVIDIA para Linux no la carga. Hace falta libnvidia-ngx-dlss.so.<versión> del SDK de DLSS de NVIDIA: {}",
+    "Не удалось прочитать файл": "No se pudo leer el archivo",
+    "Это не библиотека DLSS": "Esto no es la librería DLSS",
+    "Нужен файл libnvidia-ngx-dlss.so.<версия> из DLSS SDK NVIDIA: {}": "Hace falta libnvidia-ngx-dlss.so.<versión> del SDK de DLSS de NVIDIA: {}",
+    "Не удалось скопировать библиотеку": "No se pudo copiar la librería",
+    "DLSS {}: готово": "DLSS {}: listo",
+    "Клавиатура и мышь": "Teclado y ratón",
+    "Камера мышью": "Cámara con el ratón",
+    "Щелчок в окне игры захватывает мышь, F1 — отпускает": "Un clic en la ventana del juego captura el ratón, F1 lo suelta",
+    "Чувствительность мыши": "Sensibilidad del ratón",
+    "Инвертировать мышь по вертикали": "Invertir el eje Y del ratón",
+    "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1": "No se encontró DLSS: elige abajo la librería de NVIDIA (también hace falta una compilación con el puente de DLSS). El juego usará FSR 3.1",
+    "Нет или повреждён файл {}": "Falta o está dañado el archivo {}",
+    "Эффекты игры": "Efectos del juego",
+    "Патчи игры, применяются при запуске": "Parches del juego, aplicados al iniciar",
+    "Детализация моделей": "Detalle de los modelos",
+    "Как в игре": "Como en el juego",
+    "Максимальная (-2)": "Máximo (-2)",
+    "Ниже (1)": "Más bajo (1)",
+    "Минимальная (2)": "Mínimo (2)",
+    "Хроматическая аберрация": "Aberración cromática",
+    "Глубина резкости (DoF)": "Profundidad de campo (DoF)",
+    "Размытие в движении": "Desenfoque de movimiento",
+    "Затенение SSAO": "SSAO",
+    "Собственное сглаживание игры": "El antialiasing propio del juego",
+    "Тени от динамических источников": "Sombras de luces dinámicas",
+    "Отражения SSR (не было в игре)": "Reflejos SSR (no están en el juego original)",
+    "Пропуск заставок при запуске": "Saltar los vídeos de introducción",
+    "Свободная камера (Cross + L3 / Space + Z)": "Cámara libre (Equis + L3 / Espacio + Z)",
+    "Debug menu (левый touchpad / Tab; нужны шрифты)": "Menú de depuración (panel táctil izquierdo / Tab; necesita fuentes)",
+    "Нужна папка adhoc из мода Nexus #253 (шрифты adhoc/font) — в dvdroot_ps4 игры или модом; без неё патч не применяется": "Necesita la carpeta adhoc del mod #253 de Nexus (fuentes en adhoc/font), en el dvdroot_ps4 del juego o como mod; sin ella el parche no se aplica",
+    "Частота кадров": "Velocidad de fotogramas",
+    "Режим": "Modo",
+    "Какой патч частоты кадров применить к игре": "Qué parche de velocidad de fotogramas aplicar al juego",
+    "Без ограничения (патч)": "Desbloqueado (parche)",
+    "30 (как на PS4)": "30 (como en PS4)",
+    "Ограничение FPS": "Límite de FPS",
+    "0 — без ограничения; укажите число, чтобы ограничить FPS": "0: sin límite; pon un número para limitar los fotogramas por segundo",
+    "Производительность": "Rendimiento",
+    "Двухстадийный конвейер GPU": "Canal de GPU en dos etapas",
+    "Быстрее на 20–30%; при нестабильности выключите": "Entre un 20 y un 30 % más rápido; desactívalo si es inestable",
+    "Авто": "Auto",
+    "Включён при 8 и более потоках процессора": "Activado con 8 o más hilos de CPU",
+    "Включён": "Activado",
+    "Стабильнее, но медленнее": "Más estable, pero más lento",
+    "Чтение данных GPU процессором": "Lecturas de datos de la GPU por la CPU",
+    "По умолчанию": "Por defecto",
+    "Фоновая загрузка в видеопамять": "Precarga en segundo plano en la VRAM",
+    "Меньше рывков при подгрузке зон": "Menos tirones al cargar zonas",
+    "Обычная": "Normal",
+    "Без лишней видеопамяти": "Sin VRAM extra",
+    "Полная": "Completa",
+    "Около 3 ГБ видеопамяти сверху": "Unos 3 GB más de VRAM",
+    "Режим работы": "Modo",
+    "Новая модель памяти и трансляции": "Nuevo modelo de memoria y traducción",
+    "Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми исправлениями. Если драйвер не проходит проверку при запуске — старая": "El nuevo: la GPU trabaja directamente con la memoria del juego, como en un juego de PC, y los comandos gráficos se traducen en vez de emularse. El antiguo: el modelo de memoria de la 0.3 con todas las correcciones. Si el driver no supera la comprobación al iniciar, se usa el antiguo",
+    "Модель памяти и трансляции": "Modelo de memoria y traducción",
+    "Авто: новая на AMD, старая на других": "Auto: nuevo en AMD, antiguo en las demás",
+    "Новая": "Nuevo",
+    "Старая (как в 0.3)": "Antiguo (como en la 0.3)",
+    "Синхронизация как в 0.3": "Sincronización como en la 0.3",
+    "Для поиска регрессий: старая модель памяти и ожидания копий как в релизе 0.3": "Para encontrar regresiones: el modelo de memoria antiguo y las esperas de copia como se publicaron en la 0.3",
+    "Выключена": "Desactivado",
+    "Выключены": "Desactivado",
+    "Для разработчика": "Desarrollador",
+    "Статистика кадров в журнале": "Estadísticas de fotogramas en el registro",
+    "Сохранять журнал и статистику в файл": "Guardar el registro y las estadísticas en un archivo",
+    "Диагностика вылетов": "Diagnóstico de fallos",
+    "Проверяет кучу игры и записывает записи в её память; немного медленнее": "Comprueba el heap del juego y registra las escrituras en su memoria; algo más lento",
+    "В папку logs в каталоге данных: для разбора рывков и вылетов": "En la carpeta logs del directorio de datos: para investigar tirones y fallos",
+    "Профиль GPU в журнале": "Perfil de GPU en el registro",
+    "Слои валидации Vulkan": "Capas de validación de Vulkan",
+    "Сильно замедляет": "Mucho más lento",
+    "Доп. переменные (ИМЯ=значение через пробел)": "Variables extra (NOMBRE=valor, separadas por espacios)",
+}
+
+
+def macos_locale():
+    """macOS: the system language (AppleLocale), which apps started from the Dock or a terminal
+    without LANG do not get through the environment."""
+    if sys.platform != "darwin":
+        return ""
+    try:
+        return subprocess.run(["defaults", "read", "-g", "AppleLocale"], capture_output=True,
+                              text=True, timeout=2).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def system_language():
     for key in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
         value = os.environ.get(key, "")
-        if value:
+        # C and POSIX (terminals often export C.UTF-8) name no language: the next source decides.
+        if value and value.split(".")[0].upper() not in ("C", "POSIX"):
             locale = value.lower().replace("-", "_")
             if locale.startswith("ru"):
                 return "ru"
@@ -840,7 +1126,18 @@ def system_language():
                 return "pt_BR"
             if locale.startswith("zh"):
                 return "zh_CN"
+            if locale.startswith("es"):
+                return "es"
             return "en"
+    if (locale := macos_locale().lower().replace("-", "_")):
+        if locale.startswith("ru"):
+            return "ru"
+        if locale.startswith("pt_br"):
+            return "pt_BR"
+        if locale.startswith("zh"):
+            return "zh_CN"
+        if locale.startswith("es"):
+            return "es"
     return "en"
 
 
@@ -848,9 +1145,9 @@ _language = "ru"
 
 
 def set_language(choice):
-    """choice: "ru", "en", "pt_BR", "zh_CN" or "" (the system's)."""
+    """choice: "ru", "en", "pt_BR", "zh_CN", "es" or "" (the system's)."""
     global _language
-    _language = choice if choice in ("ru", "en", "pt_BR", "zh_CN") else system_language()
+    _language = choice if choice in ("ru", "en", "pt_BR", "zh_CN", "es") else system_language()
 
 
 def language():
@@ -865,5 +1162,7 @@ def tr(text):
         return PT_BR.get(text, EN.get(text, text))
     if _language == "zh_CN":
         return ZH_CN.get(text, EN.get(text, text))
+    if _language == "es":
+        return ES.get(text, EN.get(text, text))
     return text
 

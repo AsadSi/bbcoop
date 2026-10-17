@@ -180,6 +180,11 @@ void Scheduler::BeginRendering(const RenderState& state) {
     CarrySuspend(false);
     is_rendering = true;
     render_state = state;
+    if (!(pass_access_state == state)) {
+        pass_accesses.clear();
+        pass_access_any = false;
+        pass_access_state = state;
+    }
 
     // Owned by the recorded closure (it may run later, on a recording thread).
     struct Pass {
@@ -248,6 +253,45 @@ void Scheduler::EndRendering() {
     is_rendering = false;
     Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
     CarryResume(false);
+}
+
+bool Scheduler::PassHoistEnabled() {
+    static const bool enabled = [] {
+        const char* env = std::getenv("BB_PASS_HOIST");
+#ifdef __APPLE__
+        return !env || env[0] != '0';
+#else
+        return env && env[0] == '1';
+#endif
+    }();
+    return enabled;
+}
+
+void Scheduler::NotePassAccess(VAddr address, u64 size) {
+    if (!is_rendering) {
+        return;
+    }
+    if (size == 0) {
+        pass_access_any = true;
+        return;
+    }
+    pass_accesses.add(boost::icl::interval<VAddr>::right_open(address, address + size));
+}
+
+bool Scheduler::MayHoistUpload(VAddr address, u64 size) const {
+    return is_rendering && !pass_access_any &&
+           !boost::icl::intersects(pass_accesses,
+                                   boost::icl::interval<VAddr>::right_open(address, address + size));
+}
+
+void Scheduler::BeginHoist() {
+    Record([](vk::CommandBuffer cmdbuf) {
+        cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{.pLabelName = "bb-hoist"});
+    });
+}
+
+void Scheduler::EndHoist() {
+    Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endDebugUtilsLabelEXT(); });
 }
 
 void Scheduler::TracePassBreak(void* caller) {

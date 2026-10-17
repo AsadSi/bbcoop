@@ -17,6 +17,10 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 /* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB. BB_DMEM_MB raises it (the resolution
  * patches above 1080p need about 4 GiB more; run.sh sets it). */
 static uint64_t pool_size_bytes(void) {
@@ -32,7 +36,11 @@ static uint64_t pool_size_bytes(void) {
 #define POOL_SIZE pool_size_bytes()
 #define FLEXIBLE_SIZE (UINT64_C(448) * 1024 * 1024)
 #define PAGE UINT64_C(16384)
+#ifdef __APPLE__
+#define USER_MIN DARWIN_USER_MIN
+#else
 #define USER_MIN UINT64_C(0x1000000000)
+#endif
 #define USER_MAX UINT64_C(0xfc00000000)
 #define LIMIT 4096
 #define INVALID ((int32_t)UINT32_C(0x80020016))
@@ -132,9 +140,55 @@ static int host_prot(int prot) {
     /* GPU read/write bits (0x10/0x20) need host access for the future GPU backend. */
     return ((prot & 0x11) ? PROT_READ : 0) | ((prot & 0x22) ? PROT_WRITE|PROT_READ : 0) | ((prot & 4) ? PROT_EXEC|PROT_READ : 0);
 }
+#ifdef __APPLE__
+/* Darwin has no memfd: a named Mach memory entry is the pool, mapped at any offset. */
+static mach_port_t pool_entry=MACH_PORT_NULL;
+#endif
+/* Maps [phys, phys+size) of the pool at address (shared with the backing view). */
+static void *pool_map(uintptr_t address, uint64_t size, int prot, uint64_t phys) {
+#ifdef __APPLE__
+    mach_vm_address_t at=address;
+    vm_prot_t cur=(vm_prot_t)((prot & PROT_READ ? VM_PROT_READ : 0) | (prot & PROT_WRITE ? VM_PROT_WRITE : 0) |
+                              (prot & PROT_EXEC ? VM_PROT_EXECUTE : 0));
+    if (mach_vm_map(mach_task_self(),&at,size,0,VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,pool_entry,phys,FALSE,
+                    cur,VM_PROT_ALL,VM_INHERIT_NONE)!=KERN_SUCCESS || at!=address) return MAP_FAILED;
+    return (void *)address;
+#else
+    return mmap((void *)address,size,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)phys);
+#endif
+}
+/* Returns [phys, phys+size) of the pool to zero and gives its pages back. */
+static void pool_punch(uint64_t phys, uint64_t size) {
+#ifdef __APPLE__
+    /* As a punched memfd hole: only pages holding data (resident or compressed) are cleared,
+     * untouched ones are zero-fill already. Then they are released. */
+    unsigned char *base=backing_base+phys, vec[256];
+    const uint64_t page=vm_page_size, span=sizeof(vec)*page;
+    for (uint64_t off=0; off<size; off+=span) {
+        uint64_t chunk=size-off<span ? size-off : span;
+        if (mincore(base+off,chunk,(char *)vec)) { memset(base+off,0,chunk); continue; }
+        for (uint64_t i=0; i*page<chunk; ++i)
+            if (vec[i] & (MINCORE_INCORE|MINCORE_PAGED_OUT)) memset(base+off+i*page,0,page);
+    }
+    madvise(base,size,MADV_FREE_REUSABLE);
+#else
+    fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)size);
+#endif
+}
 /* Direct memory occupies [0,POOL_SIZE) of the memfd, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 static int pool(void) {
     if (pool_fd>=0) return 0;
+#ifdef __APPLE__
+    /* GPU-visible chunks (dma-buf, host import) are Linux-only: chunk_fds stays NULL. */
+    memory_object_size_t size=POOL_SIZE+FLEX_SPAN;
+    if (mach_make_memory_entry_64(mach_task_self(),&size,0,MAP_MEM_NAMED_CREATE|VM_PROT_ALL, /* ALL: mappings may be executable */
+                                  &pool_entry,MACH_PORT_NULL)!=KERN_SUCCESS || size<POOL_SIZE+FLEX_SPAN) return -1;
+    mach_vm_address_t view=0;
+    if (mach_vm_map(mach_task_self(),&view,POOL_SIZE+FLEX_SPAN,0,VM_FLAGS_ANYWHERE,pool_entry,0,FALSE,
+                    VM_PROT_READ|VM_PROT_WRITE,VM_PROT_READ|VM_PROT_WRITE,VM_INHERIT_NONE)!=KERN_SUCCESS) return -1;
+    backing_base=(unsigned char *)(uintptr_t)view; pool_fd=0;
+    return 0;
+#else
 #ifdef _WIN32
     /* A pagefile-backed section (gpu/platform/win32/posix_memory.cpp). */
     pool_fd=bb_section_create(POOL_SIZE+FLEX_SPAN);
@@ -150,6 +204,7 @@ static int pool(void) {
     if (!chunk_fds) return -1;
     for (uint64_t c=0;c<=POOL_SIZE/CHUNK;++c) chunk_fds[c]=-1;
     return 0;
+#endif
 }
 /* Size of direct memory chunk c (the last one may be shorter). */
 static uint64_t chunk_size(uint64_t c) {
@@ -186,7 +241,7 @@ static void ensure_chunks(uint64_t phys, uint64_t size) {
 /* mmap of direct or flexible memory at phys, split where it crosses chunks. */
 static void *map_phys(uintptr_t address, uint64_t size, int prot, uint64_t phys) {
     if (!chunk_fds || phys>=POOL_SIZE)
-        return mmap((void *)address,size,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)phys);
+        return pool_map(address,size,prot,phys);
     ensure_chunks(phys,size);
     for (uint64_t done=0;whole_chunks && done<size;) {
         const uint64_t at=phys+done;
@@ -195,7 +250,7 @@ static void *map_phys(uintptr_t address, uint64_t size, int prot, uint64_t phys)
         const uint64_t room=r ? r->phys+r->size-at : next-at, n=size-done<room ? size-done : room;
         void *p = r && r->fd>=0
             ? mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,r->fd,(off_t)(at-r->phys))
-            : mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)at);
+            : pool_map(address+done,n,prot,at);
         if (p==MAP_FAILED) {
             static int reported;
             if (reported++ < 4)
@@ -211,7 +266,7 @@ static void *map_phys(uintptr_t address, uint64_t size, int prot, uint64_t phys)
         const uint64_t room=c*CHUNK+chunk_size(c)-at, n=size-done<room ? size-done : room;
         void *p = chunk_fds[c]>=0
             ? mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,chunk_fds[c],(off_t)(at-c*CHUNK))
-            : mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)at);
+            : pool_map(address+done,n,prot,at);
         if (p==MAP_FAILED) {
             static int reported;
             if (reported++ < 4)
@@ -228,7 +283,7 @@ static void zero_phys(uint64_t phys, uint64_t size) {
     for (uint64_t done=0;done<size;) {
         const uint64_t at=phys+done;
         if (!chunk_fds || at>=POOL_SIZE) {
-            fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)(size-done));
+            pool_punch(at,size-done);
             return;
         }
         if (whole_chunks) {
@@ -236,13 +291,13 @@ static void zero_phys(uint64_t phys, uint64_t size) {
             const Region *r=region_at(at,&next);
             const uint64_t room=r ? r->phys+r->size-at : next-at, n=size-done<room ? size-done : room;
             if (r && GPU_CHUNK(r->fd)) memset(backing_base+at,0,n);
-            else fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)n);
+            else pool_punch(at,n);
             done+=n;
             continue;
         }
         const uint64_t c=at/CHUNK, room=c*CHUNK+chunk_size(c)-at, n=size-done<room ? size-done : room;
         if (GPU_CHUNK(chunk_fds[c])) memset(backing_base+at,0,n);
-        else fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)n);
+        else pool_punch(at,n);
         done+=n;
     }
 }
@@ -280,7 +335,7 @@ static uint64_t flex_alloc(uint64_t size) {
 }
 static void flex_free(uint64_t phys, uint64_t size) {
     flex_set((phys-POOL_SIZE)/PAGE,size/PAGE,0);
-    fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)size);
+    pool_punch(phys,size);
 }
 static size_t vma_index(uintptr_t a) { /* first VMA with end > a */
     size_t lo=0, hi=vma_count;
@@ -688,6 +743,11 @@ uintptr_t runtime_memory_resolve(const char *name) {
 /* Host-owned memory the guest can see (image, stacks, trampolines) lives in
  * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */
 #define LOW_MIN UINT64_C(0x0800000000)
+#ifdef __APPLE__
+#define LOW_END DARWIN_LOW_END /* the GPU carveout starts there; USER_MIN is above it */
+#else
+#define LOW_END USER_MIN
+#endif
 static uintptr_t low_next=LOW_MIN;
 /* The guest's address range, reserved before anything else can land there (Windows: one
  * placeholder the game's mappings replace in; Linux needs nothing). */
@@ -706,7 +766,7 @@ void *runtime_low_map(size_t size, int prot) {
     write_lock();
     void *p=MAP_FAILED;
     low_next=align_up(low_next,granule);
-    while (low_next+size<=USER_MIN) {
+    while (low_next+size<=LOW_END) {
         p=mmap((void *)low_next,size,prot,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
         low_next=align_up(low_next+size+PAGE,granule); /* unmapped gap catches overruns */
         if (p!=MAP_FAILED) break;
@@ -714,6 +774,62 @@ void *runtime_low_map(size_t size, int prot) {
     write_unlock();
     return p==MAP_FAILED ? NULL : p;
 }
+#ifdef __APPLE__
+/* macOS: host objects the guest sees (thread records, TLS blocks, mutexes, rwlocks) must be
+ * below 1 TiB as the guest packs pointers into 40 bits. Linux gets that from the non-PIE brk
+ * heap (mallopt in probe.c); macOS's malloc is above it, so they come from low mappings here:
+ * size classes carved out of runtime_low_map slabs, a free list per class. */
+typedef struct LowFree { struct LowFree *next; } LowFree;
+typedef struct { uint32_t magic, size_class; uint64_t pad; } LowHeader; /* 16 bytes: alignment */
+#define LOW_MAGIC UINT32_C(0x4c4f5741)
+static const size_t low_classes[]={32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536};
+#define LOW_CLASSES (sizeof(low_classes)/sizeof(*low_classes))
+static LowFree *low_free[LOW_CLASSES];
+static pthread_mutex_t low_lock=PTHREAD_MUTEX_INITIALIZER;
+void *runtime_low_malloc(size_t size) {
+    const size_t needed=size+sizeof(LowHeader);
+    size_t c=0;
+    while (c<LOW_CLASSES && low_classes[c]<needed) ++c;
+    LowHeader *h;
+    if (c==LOW_CLASSES) { /* large: a mapping of its own, never reused */
+        h=runtime_low_map(needed,PROT_READ|PROT_WRITE);
+        if (!h) return NULL;
+    } else {
+        pthread_mutex_lock(&low_lock);
+        if (!low_free[c]) {
+            const size_t block=low_classes[c], slab=block*16>65536 ? block*16 : 65536;
+            unsigned char *p=runtime_low_map(slab,PROT_READ|PROT_WRITE);
+            if (!p) { pthread_mutex_unlock(&low_lock); return NULL; }
+            for (size_t at=0;at+block<=slab;at+=block) {
+                LowFree *f=(LowFree *)(p+at); f->next=low_free[c]; low_free[c]=f;
+            }
+        }
+        h=(LowHeader *)low_free[c]; low_free[c]=low_free[c]->next;
+        pthread_mutex_unlock(&low_lock);
+    }
+    h->magic=LOW_MAGIC; h->size_class=(uint32_t)c;
+    return h+1;
+}
+void *runtime_low_calloc(size_t count, size_t size) {
+    void *p=runtime_low_malloc(count*size);
+    if (p) memset(p,0,count*size);
+    return p;
+}
+void runtime_low_free(void *pointer) {
+    if (!pointer) return;
+    LowHeader *h=(LowHeader *)pointer-1;
+    if (h->magic!=LOW_MAGIC || h->size_class>=LOW_CLASSES) return; /* large ones stay mapped */
+    h->magic=0;
+    pthread_mutex_lock(&low_lock);
+    LowFree *f=(LowFree *)h; f->next=low_free[h->size_class]; low_free[h->size_class]=f;
+    pthread_mutex_unlock(&low_lock);
+}
+/* aligned_alloc for alignments up to 4096 (TLS blocks): over-allocated, never freed. */
+void *runtime_low_aligned_alloc(size_t alignment, size_t size) {
+    unsigned char *p=runtime_low_malloc(size+alignment);
+    return p ? (void *)(((uintptr_t)p+alignment-1)&~(uintptr_t)(alignment-1)) : NULL;
+}
+#endif
 /* ---- GPU library interface (gpu/shim/bbgpu.cpp) ---- */
 /* Optimizations switched off at run time (diagnostics): the number in the file named by
  * BB_TOGGLE_FILE, re-read every 250 ms. Bits: 1 region cache, 2 fetch shader cache,

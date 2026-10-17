@@ -22,6 +22,7 @@
 #include "vulkan/vk_common.h"
 #include "upscale/vk_dlss.h"
 #include "upscale/vk_fsr4.h"
+#include "upscale/vk_metalfx.h"
 #include "textures/image.h"
 
 struct FfxVkPortableUpscaleContext;
@@ -197,6 +198,13 @@ private:
     [[nodiscard]] bool UseFsr4() const;
     /// bbport: DLSS selected and the bridge is ready (NVIDIA RTX, gpu/dlss_bridge).
     [[nodiscard]] bool UseDlss() const;
+    /// bbport (macOS): MetalFX selected and MoltenVK offers it (vk_metalfx.h).
+    [[nodiscard]] bool UseMetalFx() const;
+    /// MetalFX's temporal scaler for this frame (motion_image as its motion vectors, the jitter and
+    /// reset as they are now). `hdr`: linear scene color input.
+    [[nodiscard]] VkBBMetalFXUpscaleInfo MetalFxInfo(vk::Image color, vk::Image depth,
+                                                     vk::Image output, u32 w, u32 h, u32 ow, u32 oh,
+                                                     bool hdr) const;
     /// Records DLSS into `cmdbuf` (output in General). `hdr`: linear scene color input.
     bool RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
                     const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh, float frame_ms,
@@ -283,6 +291,8 @@ private:
     std::unordered_map<VAddr, DisplayImage> displays;
     FfxVkPortableUpscaleContext* context = nullptr;
     bool resources_ready = false; ///< images below match width/height/out size
+    PFN_vkCmdUpscaleMetalFXBB metalfx = nullptr; ///< MoltenVK's vkCmdUpscaleMetalFXBB, if any
+    bool resources_metalfx = false;
     bool resources_fsr4 = false;  ///< made for FSR 4 (no FSR 3 context)
     bool resources_taa = false;
     std::unique_ptr<Fsr4Upscaler> fsr4;

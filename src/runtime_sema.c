@@ -67,11 +67,15 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *timeout,int block) 
            PS4 priority scheduler, host threads run at equal priority. */
         if (getenv("BB_TRACE_SEMA")) fprintf(stderr,"Runtime: blocking wait on semaphore %u (need %d, count %d)\n",id,need,s->count); /* deadlock diagnosis */
         Waiter w={.need=need};
+#ifdef __APPLE__
+        host_check(pthread_cond_init(&w.event,NULL)); /* Darwin conds have no clock attribute */
+#else
         pthread_condattr_t attr;
         host_check(pthread_condattr_init(&attr));
         host_check(pthread_condattr_setclock(&attr,RUNTIME_COND_CLOCK));
         host_check(pthread_cond_init(&w.event,&attr));
         host_check(pthread_condattr_destroy(&attr));
+#endif
         Waiter **tail=&s->first;
         while (*tail) tail=&(*tail)->next;
         *tail=&w; ++s->active;
@@ -79,7 +83,18 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *timeout,int block) 
         uint64_t deadline=timeout ? now_ns()+(uint64_t)*timeout*1000 : 0;
         struct timespec end={.tv_sec=(time_t)(deadline/1000000000),.tv_nsec=(long)(deadline%1000000000)};
         while (!w.done) {
+#ifdef __APPLE__
+            /* The monotonic deadline as a wait relative to now. */
+            (void)end;
+            int e;
+            if (timeout) {
+                const uint64_t now=now_ns(), left=deadline>now ? deadline-now : 0;
+                const struct timespec rel={.tv_sec=(time_t)(left/1000000000),.tv_nsec=(long)(left%1000000000)};
+                e=left ? pthread_cond_timedwait_relative_np(&w.event,&lock,&rel) : ETIMEDOUT;
+            } else e=pthread_cond_wait(&w.event,&lock);
+#else
             int e=timeout ? pthread_cond_timedwait(&w.event,&lock,&end) : pthread_cond_wait(&w.event,&lock);
+#endif
             if (e==ETIMEDOUT && !w.done) {
                 Waiter **p=&s->first;
                 while (*p!=&w) p=&(*p)->next;

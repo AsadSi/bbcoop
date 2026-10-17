@@ -181,16 +181,19 @@ int AllocChunk(u64 phys, u64 size) {
 vk::DeviceSize import_alignment = 4096;
 
 std::uint32_t FindHostType(std::uint32_t bits) {
-    // Cached host memory first, then any host-visible type the import allows.
-    for (const bool cached : {true, false}) {
-        for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
-            const auto flags = memory_properties.memoryTypes[i].propertyFlags;
-            if (!(bits & (1u << i)) || !(flags & vk::MemoryPropertyFlagBits::eHostVisible) ||
-                (flags & vk::MemoryPropertyFlagBits::eDeviceLocal) ||
-                (cached && !(flags & vk::MemoryPropertyFlagBits::eHostCached))) {
-                continue;
+    // Cached host memory first, then any host-visible type the import allows, then a
+    // device-local one: on unified memory every type is (Apple GPUs through MoltenVK).
+    for (const bool device_local : {false, true}) {
+        for (const bool cached : {true, false}) {
+            for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
+                const auto flags = memory_properties.memoryTypes[i].propertyFlags;
+                if (!(bits & (1u << i)) || !(flags & vk::MemoryPropertyFlagBits::eHostVisible) ||
+                    (!device_local && (flags & vk::MemoryPropertyFlagBits::eDeviceLocal)) ||
+                    (cached && !(flags & vk::MemoryPropertyFlagBits::eHostCached))) {
+                    continue;
+                }
+                return i;
             }
-            return i;
         }
     }
     return ~0u;
@@ -344,6 +347,14 @@ bool RunOnce(const Vulkan::Instance& instance, Record&& record) {
 /// backing view): imported through one view, bound into a sparse buffer like the arena, written by
 /// the GPU and read by the CPU through the other view, and the other way round.
 bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
+#ifdef __APPLE__
+    // The import works on macOS (the probe below), but through MoltenVK the game ran far slower
+    // with its memory in place than with copies (M4, Hunter's Dream: 2.3 s against 36 ms a frame).
+    if (!std::getenv("BB_MACOS_HOST_IMPORT")) {
+        why = "macOS (BB_MACOS_HOST_IMPORT=1 tries it)";
+        return false;
+    }
+#endif
     why = "VK_EXT_external_memory_host unavailable";
     if (!instance.IsHostMemoryImportSupported()) {
         return false;
@@ -367,6 +378,27 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
     }
     auto* view = static_cast<std::uint32_t*>(views[0]);
     auto* guest = static_cast<std::uint32_t*>(views[1]);
+#elif defined(__APPLE__)
+    // A Mach memory entry mapped twice (as the runtime's direct memory is on macOS).
+    auto* view = static_cast<std::uint32_t*>(MAP_FAILED);
+    auto* guest = view;
+    memory_object_size_t entry_size = Size;
+    mach_port_t entry = MACH_PORT_NULL;
+    if (mach_make_memory_entry_64(mach_task_self(), &entry_size, 0,
+                                  MAP_MEM_NAMED_CREATE | VM_PROT_READ | VM_PROT_WRITE, &entry,
+                                  MACH_PORT_NULL) == KERN_SUCCESS) {
+        const auto map = [&] {
+            mach_vm_address_t address = 0;
+            return mach_vm_map(mach_task_self(), &address, Size, 0, VM_FLAGS_ANYWHERE, entry, 0,
+                               FALSE, VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE,
+                               VM_INHERIT_NONE) == KERN_SUCCESS
+                       ? reinterpret_cast<std::uint32_t*>(address)
+                       : static_cast<std::uint32_t*>(MAP_FAILED);
+        };
+        view = map();
+        guest = map();
+        mach_port_deallocate(mach_task_self(), entry);
+    }
 #else
     const int fd = memfd_create("bb-guest-memory-probe", MFD_CLOEXEC);
     if (fd < 0 || ftruncate(fd, Size) != 0) {

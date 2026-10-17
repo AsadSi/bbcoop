@@ -6,7 +6,7 @@
 #include <setjmp.h>
 // Renderer tests have no guest process. Clock/host-thread services work; guest accesses abort.
 extern "C" {
-thread_local sigjmp_buf* runtime_fault_recover = nullptr;
+__thread sigjmp_buf* runtime_fault_recover = nullptr; // __thread as declared in bbport_toggles.h (exported on Mach-O)
 uint32_t runtime_disabled_optimizations = 0;
 uint64_t runtime_experiment_bits = 0;
 uint64_t runtime_tsc_frequency() { return 1000000000; }
@@ -15,7 +15,7 @@ uint64_t runtime_memory_clamp(uintptr_t, uint64_t) { std::abort(); }
 uint64_t runtime_process_time_us() { return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 int runtime_memory_region(uintptr_t, uintptr_t*, uintptr_t*, int*) { std::abort(); }
 void runtime_memory_set_gpu_hooks(void (*)(uintptr_t, uint64_t),
-    void (*)(uintptr_t, uint64_t), void (*)(uintptr_t, uint64_t)) { std::abort(); }
+    void (*)(uintptr_t, uint64_t), void (*)(uintptr_t, uint64_t)) {} // the presenter registers them
 void runtime_thread_attach_host(const char*) {}
 void runtime_memory_gpu_protect(uintptr_t, uint64_t, int, int) { std::abort(); }
 void runtime_restart() { std::abort(); }
