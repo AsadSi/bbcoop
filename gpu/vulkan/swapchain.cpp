@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio> // bbcoop
+#include <cstdlib> // bbcoop: BB_SWAPCHAIN_IMAGES
 #include <limits>
 
 #include "core/emulator_settings.h"
@@ -95,6 +96,11 @@ void Swapchain::QuerySurface() {
     // fewest the surface allows. Mailbox keeps the extra image (it replaces queued frames).
     if (present_mode == vk::PresentModeKHR::eFifo) {
         image_count = std::max(caps.minImageCount, 2u);
+    }
+    // bbcoop: BB_SWAPCHAIN_IMAGES=<n> by hand: 3 may absorb a frame just past its vblank (otherwise
+    // shown for three refreshes and the next for one: 50/17 ms judder at 30 FPS on a 60 Hz Mac).
+    if (const char* env = std::getenv("BB_SWAPCHAIN_IMAGES"); env && std::atoi(env) >= 2) {
+        image_count = std::max(caps.minImageCount, u32(std::atoi(env)));
     }
     if (caps.maxImageCount > 0) {
         image_count = std::min(image_count, caps.maxImageCount);
