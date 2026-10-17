@@ -177,6 +177,8 @@ elif [[ -n ${scaled_output:-} ]]; then
     export BB_DMEM_MB=${BB_DMEM_MB:-9152}
     echo "Output ${scaled_output}: scene ${scaled_render}, direct memory ${BB_DMEM_MB} MiB (live_resolution=1: live changes)"
 fi
+# bbcoop: online play needs the title's Play Online, which the default patch skips (offline).
+[[ ${BB_ONLINE:-0} == 1 ]] && export BB_SKIP_NETWORK_CHOICE=${BB_SKIP_NETWORK_CHOICE:-0}
 "$PYTHON" scripts/patches.py --out "$out" --fps "$fps" --extra "${BB_PATCHES:-}" --settings "$BB_CONFIG" --game-dir "$game" --render-res "${BB_RENDER_RES:-}" --output-res "${BB_OUTPUT_RES:-}" \
     --patches-dir "${BB_PATCHES_DIR:-$data/patches}" --patches-config "${BB_PATCHES_CONFIG:-$data/patches.json}"
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
@@ -274,15 +276,6 @@ else
 fi
 # Online play (BB_ONLINE=1, launcher: Online; the online module gpu/bbnet): the game's own server
 # goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py).
-# bbcoop: private only, and online is on hold (2026-10-11): it stays off unless both servers are set
-# and neither is a public default (shadPS4's shadNet server, The Hunter's Dream).
-online_hosts="${BB_SHADNET_SERVER:-} ${BB_COMMUNITY_SERVER:-} ${BB_SHADNET_WEBAPI:-}"; online_hosts=${online_hosts,,}
-online_flag=${BB_ONLINE:-0}  # runtime_net.c: on when it starts with 1
-if [[ ${online_flag:0:1} == 1 && ( -z ${BB_SHADNET_SERVER:-} || -z ${BB_COMMUNITY_SERVER:-} ||
-      $online_hosts == *shadps4.net* || $online_hosts == *thehuntersdream* || $online_hosts == *scej-network* ) ]]; then
-    echo 'Online: off (bbcoop: private only; set BB_SHADNET_SERVER and BB_COMMUNITY_SERVER to your own servers)' >&2
-    export BB_ONLINE=0
-fi
 if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     export BB_SHADNET_SERVER=${BB_SHADNET_SERVER:-play.seamlesshunt.com:31313}
     # HTTPS needs CA certificates: OpenSSL from Nix looks only in its own store path (the
@@ -319,8 +312,6 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     fi
     SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${BB_USER_DIR:-$data/user}") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
-    # bbcoop: without overrides the game would reach its own (public) server: online stays off.
-    if [[ -z $SHADPS4_HTTP_HOST_OVERRIDES_JSON ]]; then echo 'Online: off (no host overrides)' >&2; export BB_ONLINE=0; fi
 fi
 probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then

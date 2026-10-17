@@ -32,7 +32,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Guest death | Respawns at the host's last lamp and is re-inserted | Seamless Co-op model | Asad |
 | Host death | The host respawns at their lamp and guests stay where they are, with no reset for them | Asad: the host dying must not send everyone back | Asad |
 | Progress | Boss kills, lamps and shortcuts are copied into each guest's own save | Seamless Co-op model | Claude |
-| Non-co-op online traffic | Private only. The host's server answers the game's FromSoft-server requests (login, messages, bloodstains, ghosts) with the minimum the game needs. Nothing goes to thehuntersdream.com or any other third party, unlike shadp2p's documented `host_overrides.json` | Nothing leaves the group | Asad |
+| Non-co-op online traffic | Public servers allowed: the game's own server traffic (messages, bloodstains, ghosts) may go to The Hunter's Dream, accounts and summons to srv.shadps4.net or the group's own shadNet server. Replaces "private only" | "It doesn't have to be private, just make online work" | Asad, 2026-10-12 |
 | Online code | shadp2p's C++ NP, Net and Http libraries (about 25k lines), adapted into a C++ library linked like the GPU library, with no rewrite into C. Tested by a fake-game client that makes Bloodborne's online calls against the real server | A C rewrite would take 7-9k lines plus a protobuf C port, for no gain | Claude |
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player, plus extra enemies in chosen spots during co-op only | | Asad |
@@ -86,7 +86,7 @@ Supporting pieces:
   - **Commits:** kept local, not pushed (Asad, 2026-10-11).
   - **Upstream 0.51** was merged on 2026-10-11, bringing atomic saves, stutter and crash fixes, the System-menu settings and DLC. Its online module `gpu/bbnet` replaced our vendored copy of the same shadp2p libraries, which is kept at the tag `bbcoop-online-0.4`.
   - **To port into `gpu/bbnet` when online resumes:**
-    - the private-only HTTP guard (ss4 to our own WebAPI; refuse any other host), `BB_SEAMLESS` acceptance and `BB_CAPTURE_ONLINE` in `http.cpp`
+    - `BB_SEAMLESS` acceptance and `BB_CAPTURE_ONLINE` in `http.cpp`
     - the co-op relay: `np_handler` `onCoopRelay`, the shadNet client and proto relay, `bbcoop_sync.cpp`
     - the NpLookup success stub
     - `bbcoop_set_game_info`

@@ -40,14 +40,6 @@ OLD_DEFAULTS = {
 GAME_SERVER = 'https://ss4.scej-network.jp:20443'
 # The server's ss.info sends the game to this port for its API (summons among them).
 COMMUNITY_API_PORT = 18671
-# bbcoop: private only. These public hosts are never contacted, whatever the settings say.
-PUBLIC_HOSTS = ('shadps4.net', 'thehuntersdream.com', 'scej-network.jp')
-
-
-def public(address):
-    """True when an address names one of PUBLIC_HOSTS (bbcoop)."""
-    address = str(address or '').lower()
-    return any(host in address for host in PUBLIC_HOSTS)
 
 
 def community_address(value):
@@ -97,12 +89,8 @@ def write_overrides(user_dir, community, webapi):
     user_dir.mkdir(parents=True, exist_ok=True)
     custom = user_dir / 'host_overrides.custom.json'
     if custom.exists():
-        if public(custom.read_text(encoding='utf-8')):  # bbcoop
-            raise SystemExit(f'Online: {custom} names a public server (private only)')
         print(f'Co-op: addresses from {custom}', file=sys.stderr)
         return custom
-    if public(community) or public(webapi):  # bbcoop
-        raise SystemExit('Online: a public server is set (private only)')
     community = community_address(community)
     host = community.split('://', 1)[1]
     overrides = {GAME_SERVER: community}
@@ -120,9 +108,6 @@ def write_overrides(user_dir, community, webapi):
 
 def check(server, webapi, community):
     """(name, address, ok, detail) for the game server, the shadNet server and its WebAPI."""
-    if any(public(a) for a in (server, webapi, community)):  # bbcoop: private only
-        return [(name, address, False, 'public server: not contacted (private only)')
-                for name, address in (('game', community), ('shadnet', server), ('webapi', webapi))]
     results = []
     try:
         with urllib.request.urlopen(community + ':20443/bb-eu/ss.info', timeout=6) as reply:
