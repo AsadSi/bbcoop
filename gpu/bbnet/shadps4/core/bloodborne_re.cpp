@@ -15336,6 +15336,7 @@ void InstallReverseEngineeringTrace() {
     InstallBbscDeathTraceHooks();
     InstallBbscBannerHook();
     InstallBbcoopLoot(); // bbcoop: mirrored loot
+    InstallBbcoopSsInfoFormat(); // bbcoop: the US release reads the servers' ss.info (bbcoop_coop.inc)
 }
 
 BbscPresence GetBbscPresence() {

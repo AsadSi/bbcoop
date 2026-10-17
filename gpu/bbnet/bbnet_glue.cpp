@@ -445,6 +445,13 @@ private:
 
 namespace {
 void Configure(const char* app0, const char* serial, const char* title, const char* app_ver) {
+    // bbcoop: with BBSC every retail 1.09 is CUSA03173 to the server too, not only to BBSC's own
+    // checks (bbnet_image_ready): Seamless Hunt serves only that title id, and the shadNet login
+    // reports it (worlds, rooms and summons are keyed by it). The US CUSA00900 got through
+    // sign-in and ss.info, then stayed offline ("Failed to resolve Bloodborne server status").
+    if (const char* bbsc = std::getenv("BB_BBSC"); bbsc && bbsc[0] == '1') {
+        serial = "CUSA03173";
+    }
     Core::Emulator::SetGame(app0, serial, title, app_ver);
     // What BBSC reads of the game (param.sfo, the serial: shadPS4's PSF and memory patcher).
     auto* psf = Common::Singleton<PSF>::Instance();
