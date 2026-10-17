@@ -48,6 +48,8 @@ what's still open.
   seamless hooks use.
 - Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17), with bbcoop's scaling numbers (run.sh). `BB_SEAMLESS=1`
   (bbcoop's 13 byte patches and 5 hooks) is the fallback and is skipped while BBSC is on (same sites).
+  bbcoop's co-op rules on BBSC: `gpu/bbnet/shadps4/core/bbcoop_coop.inc` (a guest's death at the host's lamp,
+  `SHADPS4_BBSC_DEATH_TO_HOST_LAMP=0` off; test cheat `BB_TEST_GUEST_DEATH=<respawn point>`, `docs/coop_respawn_re.md`).
 - Online servers: public ones are allowed (Asad, 2026-10-12, replacing "private only"): upstream's defaults
   (since 0.6 Seamless Hunt's, BBSC's; srv.shadps4.net refuses non-shadPS4 builds) or a group's own shadNet
   server (`server/`), in any mix.
