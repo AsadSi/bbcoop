@@ -37,6 +37,9 @@ def fps_patches(fps, env=os.environ):
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
 PRESET_SCALES=[1.0,1.5,1.7,2.0,3.0]
+# The upscaler preset without one in bbport.ini, as the GPU library's (bbport_settings.h): Native AA,
+# and Quality on macOS (MetalFX).
+DEFAULT_PRESET='1' if sys.platform=='darwin' else '0'
 # The community patch changes two independent consumers: the game render/window setup
 # and the UI movie viewport. Keep the latter at native size so glyph rasterisation and
 # vector tessellation do not inherit the scene's FSR resolution.
@@ -176,7 +179,7 @@ def render_size(settings,override=''):
         w,h=(int(v) for v in override.lower().split('x'))
         return (w,h)
     if settings.get('upscaler','fsr3')=='off': return None
-    preset=int(settings.get('preset','0') or 0)
+    preset=int(settings.get('preset',DEFAULT_PRESET) or 0)
     scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
     if scale==1.0: return None
     # Even sizes (the game has half-resolution buffers).
@@ -201,7 +204,7 @@ def scaled_sizes(settings):
     if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
     scale=1.0
     if settings.get('upscaler','fsr3')!='off':
-        preset=int(settings.get('preset','0') or 0)
+        preset=int(settings.get('preset',DEFAULT_PRESET) or 0)
         scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
     render=tuple(max(2,round(v/scale/2)*2) for v in out)
     # A scene of exactly 1920x1080 (4K Performance) is indistinguishable from the game's UI
@@ -352,7 +355,7 @@ def main():
     if a.print_preset_size:
         settings=read_settings(a.settings)
         if 'BB_UPSCALER' in os.environ:
-            settings['upscaler']='fsr3' if os.environ['BB_UPSCALER']=='fsr3' else 'off'
+            settings['upscaler']='off' if os.environ['BB_UPSCALER'] in ('none','off') else os.environ['BB_UPSCALER']
         if 'BB_UPSCALE_PRESET' in os.environ:
             settings['preset']=os.environ['BB_UPSCALE_PRESET']
         size=render_size(settings)

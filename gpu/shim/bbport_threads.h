@@ -9,6 +9,10 @@
 #include <thread>
 #ifndef _WIN32
 #include <sched.h>
+#ifdef __APPLE__
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
 #include <sys/resource.h>
 #include <unistd.h>
 #endif
@@ -19,6 +23,8 @@ namespace BbThreads {
 inline unsigned Available() {
 #ifdef _WIN32
     return bb_win32_available_cpus();
+#elif defined(__APPLE__)
+    return std::max(1u, std::thread::hardware_concurrency()); // Darwin has no affinity masks
 #else
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -33,6 +39,9 @@ inline unsigned Available() {
 inline void MakeBackground() {
 #ifdef _WIN32
     bb_win32_background_thread();
+#elif defined(__APPLE__)
+    // Darwin has no SCHED_IDLE: the background QoS class keeps the thread on spare cores.
+    pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0);
 #else
     sched_param param{};
     if (sched_setscheduler(0, SCHED_IDLE, &param) != 0) {

@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
+if [[ $(uname -s) == Darwin ]]; then
+    # Rosetta 2 runs the x86-64 build; it executes AVX2 either way, this also reports it in CPUID.
+    export ROSETTA_ADVERTISE_AVX=1
+    # MoltenVK (Vulkan on Metal): BB_MOLTENVK_ICD names its MoltenVK_icd.json when the
+    # Vulkan loader does not find it in a standard location.
+    if [[ -z ${VK_DRIVER_FILES:-} && -n ${BB_MOLTENVK_ICD:-} ]]; then export VK_DRIVER_FILES=$BB_MOLTENVK_ICD; fi
+    # Metal argument buffers make every resource resident on each use; with the game's memory as
+    # imported buffers of gigabytes that halved the frame rate (8 against 16.5 FPS, M4, clinic).
+    export MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=${MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS:-0}
+    # Fences written when the GPU has finished the work before them (the new memory model sets this
+    # by itself; on macOS the GPU uses copies of the game's memory). Written at decode, they let the
+    # game rewrite command buffers still queued: "PM4 type 0" in most sessions.
+    export BB_HONEST_LABELS=${BB_HONEST_LABELS:-1}
+    # Labels the GPU writes itself need VK_AMD_buffer_marker; without it each one ends the render
+    # pass for a copy, and on a tile-based GPU every restart stores and reloads its targets.
+    export BB_GPU_LABELS=${BB_GPU_LABELS:-0}
+fi
 if [[ ${1:-} == --software ]]; then
     shift
     if [[ -z ${VK_DRIVER_FILES:-} ]]; then
@@ -43,7 +60,8 @@ fi
 if [[ ${BB_SAVE_LOG:-} == 1 ]]; then
     logs=$data/logs
     mkdir -p "$logs"
-    printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
+    # printf's %(...)T needs bash 4.2 (macOS has 3.2): date there.
+    printf -v stamp '%(%Y%m%d_%H%M%S)T' -1 2>/dev/null || stamp=$(date +%Y%m%d_%H%M%S)
     export BB_FRAME_STATS=1 BB_FRAME_LOG=${BB_FRAME_LOG:-$logs/$stamp.frames.csv}
     export BB_READBACK_LOG=${BB_READBACK_LOG:-$logs/$stamp.readbacks.csv}
     echo "Log: $logs/$stamp.log"
@@ -111,7 +129,10 @@ fi
 # each frame's real time; vblank 480 Hz, frames shown at once; BB_FRAME_HOOKS=0: the patches),
 # 60/90 (the same hooks, at most 60/90 frames a second) or 30 (the game's own). BB_PATCHES adds
 # patch names ("a;b").
-fps=${BB_FPS:-uncap}
+# macOS: 30 by default (an M1 Pro's GPU needs ~28 ms a frame at 1080p; faster rates came out uneven).
+if [[ $(uname -s) == Darwin ]]; then fps=${BB_FPS:-30}; else fps=${BB_FPS:-uncap}; fi
+# The GPU library's frame rate hooks read the mode from the environment (unset: uncap).
+export BB_FPS=$fps
 # bbcoop: BB_FPS=120 is the hooks at most 120 frames a second (vblank 120). With BB_FRAME_HOOKS=0 the
 # patches: 120 FPS++ for 120, ps4_cheats' Uncap FPS++ (2026-10-10) for uncap, and BB_FPS_PATCH=old the
 # previous Uncap FPS++ (2026-08-28) with the separate sprint fix (scripts/patches.py reads it).
@@ -307,5 +328,18 @@ if [[ -n ${mod_game:-} ]]; then
     # An interrupted wait must finish the child before removing its mounted view.
     if kill -0 "$mod_pid" 2>/dev/null; then wait "$mod_pid" || mod_status=$?; fi
     exit "$mod_status"
+fi
+if [[ $(uname -s) == Darwin ]]; then
+    # macOS lets no app take the focus by itself: started from a terminal, the game's window
+    # opened behind it and the keys went to the terminal. System Events brings this process
+    # (bb-probe after the exec below keeps the PID) to the front once its window is up.
+    (
+        for _ in $(seq 30); do
+            sleep 1
+            front=$(osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $$) to true" \
+                -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null) || continue
+            [[ $front == "$$" ]] && break
+        done
+    ) </dev/null >/dev/null 2>&1 &
 fi
 exec "$probe" "${probe_args[@]}"

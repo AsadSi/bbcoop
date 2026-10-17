@@ -64,6 +64,10 @@ struct Profile {
     /// The game's buffer copy compute shader (its GCN program hash, from the game's profile;
     /// 0 = none): its paged stores go through to the game's memory as well.
     u64 buffer_copy_shader_hash{};
+    /// bbport: leave float math without NoContraction. SPIRV-Cross (MoltenVK) implements it by
+    /// calling an [[clang::optnone]] helper for every add, subtract and multiply, so Metal
+    /// compiles the shader unoptimized; Metal may then fuse a*b+c into fma.
+    bool skip_no_contraction{};
 
     bool operator==(const Profile&) const = default;
 };

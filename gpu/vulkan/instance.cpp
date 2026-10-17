@@ -191,15 +191,29 @@ void Instance::CreateDevice() {
         return true;
     };
 
+#ifdef __APPLE__
+    // bbport: required whenever a portability driver (MoltenVK) exposes it.
+    enable(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
     for (const char* required :
          {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
           VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME}) {
         ASSERT_MSG(enable(required), "the GPU lacks the Vulkan extension {}", required);
     }
     const auto& robustness = query.get<vk::PhysicalDeviceRobustness2FeaturesEXT>();
+#ifdef __APPLE__
+    // bbport: MoltenVK (Metal) has no robustBufferAccess2 and no nullDescriptor. Metal itself
+    // bounds buffer and texture accesses, so robust*Access2 are enabled only where the driver
+    // has them; NullResources (vk_null_resources.h) replace null descriptors.
+    if (!robustness.robustBufferAccess2 || !robustness.robustImageAccess2) {
+        LOG_WARNING(Render_Vulkan, "robustBufferAccess2/robustImageAccess2 unavailable (MoltenVK)");
+    }
+    null_descriptor = robustness.nullDescriptor;
+#else
     ASSERT_MSG(robustness.robustBufferAccess2 && robustness.robustImageAccess2 &&
                    robustness.nullDescriptor,
                "the GPU lacks robustBufferAccess2, robustImageAccess2 or nullDescriptor");
+#endif
 
     ext.maintenance_5 = enable(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
     ext.maintenance_8 = enable(VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
@@ -366,7 +380,9 @@ void Instance::CreateDevice() {
         .maintenance4 = vk13_features.maintenance4,
     };
     vk::PhysicalDeviceRobustness2FeaturesEXT robust{
-        .robustBufferAccess2 = true, .robustImageAccess2 = true, .nullDescriptor = true};
+        .robustBufferAccess2 = robustness.robustBufferAccess2,
+        .robustImageAccess2 = robustness.robustImageAccess2,
+        .nullDescriptor = null_descriptor};
     vk::PhysicalDeviceVertexAttributeDivisorFeatures divisor{
         .vertexAttributeInstanceRateDivisor = true};
     vk::PhysicalDeviceCustomBorderColorFeaturesEXT border{

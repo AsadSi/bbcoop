@@ -207,7 +207,11 @@ Runtime::TransferMark::~TransferMark() {
 }
 
 void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
-                         std::span<const vk::BufferCopy> copies) {
+                         std::span<const vk::BufferCopy> copies, bool upload) {
+    if (upload && dst->cpu_addr != 0 && Scheduler::PassHoistEnabled() && scheduler.IsRendering() &&
+        HoistUpload(src, dst, copies)) {
+        return;
+    }
     scheduler.EndRendering();
     // Many regions (HLE copy shaders) are tracked as one bounding range per buffer:
     // conservative for barriers, and two lookups instead of two per region.
@@ -245,6 +249,39 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
         AccessBuffer(src, copy.srcOffset, copy.size, Stage::eCopy, AccessBit::eTransferRead);
         AccessBuffer(dst, copy.dstOffset, copy.size, Stage::eCopy, AccessBit::eTransferWrite);
     }
+}
+
+// bbport BB_PASS_HOIST: an upload the open render pass's draws have not bound memory of, and with
+// nothing pending on its buffers (no barrier to flush), as a group that may run before the pass:
+// the copy and the barrier making it visible to graphics, so no draw needs a barrier (which would
+// end the pass) for it later.
+bool Runtime::HoistUpload(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
+                          std::span<const vk::BufferCopy> copies) {
+    for (const auto& copy : copies) {
+        if (!scheduler.MayHoistUpload(dst->cpu_addr + copy.dstOffset, copy.size) ||
+            IsBufferAccessed(src, copy.srcOffset, copy.size) ||
+            IsBufferAccessed(dst, copy.dstOffset, copy.size, true)) {
+            return false;
+        }
+    }
+    scheduler.EndRendering();
+    scheduler.BeginHoist();
+    scheduler.Record([src = src->Handle(), dst = dst->Handle(),
+                      regions = scheduler.RecordData(copies)](vk::CommandBuffer cmdbuf) {
+        cmdbuf.copyBuffer(src, dst, u32(regions.size()), regions.data());
+        const vk::MemoryBarrier2 visible{
+            .srcStageMask = Stage::eCopy,
+            .srcAccessMask = AccessBit::eTransferWrite,
+            .dstStageMask = Stage::eAllGraphics,
+            .dstAccessMask = AccessBit::eMemoryRead,
+        };
+        cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &visible});
+    });
+    scheduler.EndHoist();
+    for (const auto& copy : copies) {
+        AccessBuffer(src, copy.srcOffset, copy.size, Stage::eCopy, AccessBit::eTransferRead);
+    }
+    return true;
 }
 
 void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value) {

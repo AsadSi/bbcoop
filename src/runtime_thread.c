@@ -1,7 +1,9 @@
 /* Guest threads on host pthreads. Each guest thread owns a FreeBSD-style TCB
  * (variant II: static TLS below the TCB). The loader rewrites the eboot's
  * `mov rax, fs:[0]` into `mov rax, gs:[0]`, so GS base = guest TCB while glibc
- * keeps FS. Priorities/affinity are recorded, not enforced by a PS4 scheduler. */
+ * keeps FS. On macOS GS is the pthread TSD array: the instruction reads a TSD slot that
+ * holds the guest TCB instead (darwin_compat.c).
+ * Priorities/affinity are recorded, not enforced by a PS4 scheduler. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdio.h>
@@ -12,12 +14,15 @@
 #include <setjmp.h>
 #include <errno.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 #include <sys/mman.h>
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
+#include <sys/syscall.h>
 #include <asm/prctl.h>
 #endif
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
+#ifdef __APPLE__
+#define thread_create guest_thread_create /* Mach has its own thread_create */
+#endif
 #define ATTR_MAGIC UINT32_C(0x41545452)
 #define STACK_MARGIN (256*1024)
 #define MIN_STACK (64*1024)
@@ -63,6 +68,8 @@ static uint64_t tls_offset(void) { return (tls_memsz+tls_align-1)&~(tls_align-1)
 static void set_gs(void *base) {
 #ifdef _WIN32
     bb_guest_tls_set(base); /* GS is the TEB: the game reads its TLS slot (bbport_posix_c.h) */
+#elif defined(__APPLE__)
+    runtime_darwin_set_tcb(base);
 #else
     if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); exit(21); }
 #endif
@@ -71,7 +78,7 @@ static void set_gs(void *base) {
 static void attach(GuestThread *t) {
     uint64_t offset=tls_offset();
     size_t total=offset+256;
-    unsigned char *block=aligned_alloc(64,(total+63)&~(size_t)63);
+    unsigned char *block=GUEST_ALIGNED_ALLOC(64,(total+63)&~(size_t)63);
     if (!block) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
     memset(block,0,total);
     if (tls_filesz) memcpy(block,tls_template,tls_filesz);
@@ -165,7 +172,7 @@ int32_t *runtime_errno(void) { return &guest_errno; }
 
 static ABI int32_t attr_init(ThreadAttr **out) {
     if (!out) return ERR(22);
-    ThreadAttr *a=calloc(1,sizeof(*a));
+    ThreadAttr *a=GUEST_CALLOC(1,sizeof(*a));
     if (!a) return ERR(12);
     *a=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=4096,.affinity=0x7f};
     pthread_mutex_lock(&lock); a->next=attributes; attributes=a; pthread_mutex_unlock(&lock);
@@ -179,7 +186,7 @@ static ABI int32_t attr_destroy(ThreadAttr **slot) {
     while (*link!=a) link=&(*link)->next;
     *link=a->next; a->magic=0;
     pthread_mutex_unlock(&lock);
-    free(a); *slot=NULL; return 0;
+    GUEST_FREE(a); *slot=NULL; return 0;
 }
 static ABI int32_t attr_get(void *thread,ThreadAttr **out) {
     ThreadAttr *a=find_attr(out);
@@ -251,7 +258,11 @@ static ABI int32_t attr_set_guard(ThreadAttr **slot,uint64_t size) {
 static void set_host_name(const char *name) {
     char host[16]={0};
     memcpy(host,name,strnlen(name,sizeof(host)-1));
+#ifdef __APPLE__
+    pthread_setname_np(host); /* Darwin names the calling thread only */
+#else
     pthread_setname_np(pthread_self(),host);
+#endif
 }
 static void run_guest(void *p) {
     GuestThread *t=p;
@@ -287,6 +298,9 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     uint64_t stack=t->attr.stack<MIN_STACK ? MIN_STACK : t->attr.stack;
     /* Stacks below 1 TiB as on PS4; guest code may pack stack addresses. */
     size_t stack_bytes=(size_t)stack+STACK_MARGIN;
+#ifdef __APPLE__
+    stack_bytes=(stack_bytes+16383)&~(size_t)16383; /* Darwin wants a page-multiple stack size */
+#endif
     void *stack_memory=runtime_low_map(stack_bytes,PROT_READ|PROT_WRITE);
     t->stack_memory=stack_memory; t->stack_bytes=stack_bytes;
 #ifdef _WIN32

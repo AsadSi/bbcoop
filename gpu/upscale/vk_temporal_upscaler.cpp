@@ -204,6 +204,9 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
                         : dlss->Problem();
         BbSettings::ConfigureDlssSupport(dlss && dlss->Available(), problem.c_str());
     }
+    metalfx = reinterpret_cast<PFN_vkCmdUpscaleMetalFXBB>(
+        instance.GetDevice().getProcAddr("vkCmdUpscaleMetalFXBB"));
+    BbSettings::ConfigureMetalFxSupport(metalfx != nullptr);
     // Available unless BB_UPSCALER=none; on/off and the parameters are the menu's settings.
     const char* env = std::getenv("BB_UPSCALER");
     enabled = !(env && std::strcmp(env, "none") == 0);
@@ -264,7 +267,8 @@ bool TemporalUpscaler::Active() const {
            (BbSettings::Get().upscaler == BbSettings::UpscalerFsr3 ||
             BbSettings::IsFsr4(BbSettings::Get().upscaler) ||
             BbSettings::Get().upscaler == BbSettings::UpscalerTaa ||
-            BbSettings::Get().upscaler == BbSettings::UpscalerDlss) &&
+            BbSettings::Get().upscaler == BbSettings::UpscalerDlss ||
+            BbSettings::Get().upscaler == BbSettings::UpscalerMetalFx) &&
            !BbToggle::Disabled(1u << 24);
 }
 
@@ -482,13 +486,15 @@ void TemporalUpscaler::OnDispatch(u64 cs_hash) {
 bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     // DLSS, like FSR 4, has its own context: no portable FSR 3 context is made.
     const bool use_fsr4 = UseFsr4() || UseDlss();
+    const bool use_metalfx = UseMetalFx();
     const bool use_taa = BbSettings::Get().upscaler == BbSettings::UpscalerTaa;
     if (use_taa && (w != ow || h != oh)) {
         std::printf("TAA: remove BB_RENDER_RES to use native-resolution TAA\n");
         return false;
     }
     if (resources_ready && w == width && h == height && ow == out_width && oh == out_height &&
-        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa) {
+        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa &&
+        use_metalfx == resources_metalfx) {
         return true;
     }
     const auto device = instance.GetDevice();
@@ -536,7 +542,7 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     create_info.maxRenderSize = {w, h};
     create_info.maxOutputSize = {ow, oh};
     // FSR 4 has its own model context (vk_fsr4); the images below are shared.
-    if (!use_fsr4 && !use_taa) {
+    if (!use_fsr4 && !use_taa && !use_metalfx) {
         if (const u64 issues = ffxVkPortableValidateUpscaleCreateInfo(&create_info)) {
             PrintIssues("create info", issues);
             return false;
@@ -643,6 +649,12 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     resources_ready = true;
     resources_fsr4 = use_fsr4;
     resources_taa = use_taa;
+    resources_metalfx = use_metalfx;
+    if (use_metalfx) {
+        std::printf("Upscaler: MetalFX inputs %ux%u -> %ux%u (%s)\n", w, h, ow, oh,
+                    hdr ? "HDR scene color" : "tonemapped frame");
+        return true;
+    }
     if (use_taa) {
         std::printf("TAA: context %ux%u -> %ux%u (%s), no FSR model\n", w, h, ow, oh,
                     hdr ? "HDR scene color" : "tonemapped frame");
@@ -1274,6 +1286,11 @@ void TemporalUpscaler::Run() {
             {input_color, input_color_view, color.info.pixel_format, vk::ImageAspectFlagBits::eColor, w, h},
             {input_depth, input_depth_view, depth_format, vk::ImageAspectFlagBits::eDepth, w, h}, w, h,
             ow, oh, frame_ms, true);
+    } else if (UseMetalFx()) {
+        const auto fx = MetalFxInfo(input_color, input_depth, vk::Image(output_image), w, h, ow, oh,
+                                    true);
+        metalfx(cmdbuf, &fx);
+        dispatched = true;
     } else {
         FfxVkPortableUpscaleDispatchInfo info{};
         info.structSize = sizeof(info);
@@ -2054,6 +2071,24 @@ void TemporalUpscaler::RunScaled() {
         return;
     }
 
+    if (UseMetalFx()) {
+        const auto fx = MetalFxInfo(color_image, depth_image, vk::Image(ui_image), w, h, ow, oh,
+                                    false);
+        scheduler.Record([fn = metalfx, fx](vk::CommandBuffer cmdbuf) { fn(cmdbuf, &fx); });
+        reset = false;
+        dispatched_last_frame = true;
+        ExtraSharpen(vk::Image(ui_image), true, ow, oh);
+        barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eGeneral,
+                all, rw, vk::ImageLayout::eGeneral,
+                vk::PipelineStageFlagBits2::eColorAttachmentOutput, color_access);
+        CaptureFrameGenScene(depth_image, depth_format, w, h, ow, oh, frame_ms, frame_reset);
+        done_this_frame = true; // the UI is not jittered
+        ui_phase = true;
+        hudless_taken = false;
+        ui_color = ldr_target;
+        ui_depth = camera_motion.Depth();
+        return;
+    }
     const auto& settings = BbSettings::Get();
     FfxVkPortableUpscaleDispatchInfo info{};
     info.structSize = sizeof(info);
@@ -2406,6 +2441,37 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image 
         reset = true;
     }
     return ok;
+}
+
+bool TemporalUpscaler::UseMetalFx() const {
+    return metalfx && BbSettings::Get().upscaler == BbSettings::UpscalerMetalFx;
+}
+
+VkBBMetalFXUpscaleInfo TemporalUpscaler::MetalFxInfo(vk::Image color, vk::Image depth,
+                                                     vk::Image output, u32 w, u32 h, u32 ow, u32 oh,
+                                                     bool hdr) const {
+    // BB_METALFX_JITTER_SIGN=-1: the opposite jitter sign (A/B; the wrong one shimmers).
+    static const float sign = [] {
+        const char* env = std::getenv("BB_METALFX_JITTER_SIGN");
+        return env && std::atof(env) < 0 ? -1.0f : 1.0f;
+    }();
+    return VkBBMetalFXUpscaleInfo{
+        .color = color,
+        .depth = depth,
+        .motion = vk::Image(motion_image),
+        .output = output,
+        .inputWidth = w,
+        .inputHeight = h,
+        .outputWidth = ow,
+        .outputHeight = oh,
+        .jitterX = sign * jitter[0],
+        .jitterY = sign * jitter[1],
+        .motionScaleX = 1.0f,
+        .motionScaleY = 1.0f,
+        .reset = reset ? VK_TRUE : VK_FALSE,
+        .depthReversed = VK_FALSE,
+        .hdr = hdr ? VK_TRUE : VK_FALSE,
+    };
 }
 
 bool TemporalUpscaler::UseDlss() const {

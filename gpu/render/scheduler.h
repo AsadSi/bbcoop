@@ -20,6 +20,7 @@
 #include <span>
 #include <thread>
 #include <vector>
+#include <boost/icl/interval_set.hpp>
 
 #include "bbport_toggles.h"
 #include "common/assert.h"
@@ -137,6 +138,20 @@ public:
     /// BB_PASS_BREAK_TRACE=1 (diagnostics): who ended a render pass that began again with the same
     /// state (a break: its attachments stored and loaded again), every 5 s.
     static void TracePassBreak(void* caller);
+
+    /// bbport BB_PASS_HOIST (on by default on macOS): the guest memory the draws of the open render
+    /// pass bound, kept while the pass is begun again with the same state. An upload into memory none
+    /// of them bound may run before the pass: it is recorded between BeginHoist and EndHoist (a
+    /// "bb-hoist" debug label), which MoltenVK (moltenvk-bb) encodes ahead of the render pass, keeping
+    /// the pass whole on a tile-based GPU. Other drivers run it where it is, as before.
+    static bool PassHoistEnabled();
+    /// A draw's binding (after it is recorded): `size` bytes of guest memory at `address`; 0 bytes
+    /// at 0: any guest memory (a binding through the page table).
+    void NotePassAccess(VAddr address, u64 size);
+    /// Whether an upload into [address, address + size) may run before the open render pass.
+    [[nodiscard]] bool MayHoistUpload(VAddr address, u64 size) const;
+    void BeginHoist();
+    void EndHoist();
 
     /// Called at every submission, before it is prepared (it may add waits and signals).
     void SetSubmitCallback(SubmitFunc&& callback) {
@@ -564,6 +579,9 @@ private:
     std::jthread priority_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
+    boost::icl::interval_set<VAddr> pass_accesses; ///< BB_PASS_HOIST: of the passes with pass_access_state
+    RenderState pass_access_state{};
+    bool pass_access_any = false; ///< a draw bound guest memory through the page table
     // Threaded recording. Commands go into chunks of the current segment; segments are
     // recorded in parallel, each into its own command buffer, and a submission runs their
     // command buffers in order. Guest memory copies and fence signals go into ordered chunks,
