@@ -19,7 +19,7 @@
 #include <ctime>
 #include <sys/mman.h>
 #include <sys/uio.h>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <unistd.h>
 #include <utility>
 
@@ -1085,7 +1085,7 @@ bool InstallEntryProbe(u64 offset) {
 struct sigaction previous_action {};
 
 void OnTrap(int sig, siginfo_t* info, void* context) {
-    auto* g = static_cast<ucontext_t*>(context)->uc_mcontext.gregs;
+    auto* g = BB_GREGS(static_cast<ucontext_t*>(context));
     const u64 rip = u64(g[REG_RIP]) - 1; // past the int3
     // The GX node guard (#162): its site while the detour goes in, and its null case.
     const bool gx_site = rip == ImageBase + GxNodeSite;

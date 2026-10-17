@@ -10,7 +10,7 @@
 #include <dlfcn.h>
 #include <fmt/format.h>
 #include <sys/uio.h>
-#include <ucontext.h>
+#include "bbport_ucontext.h"
 #include <unistd.h>
 
 #include "common/signal_context.h"
@@ -115,7 +115,7 @@ void ReportImages() {
 } // namespace
 
 void Note(void* context, VAddr address) {
-    const auto* regs = static_cast<const ucontext_t*>(context)->uc_mcontext.gregs;
+    const auto* regs = BB_GREGS(static_cast<const ucontext_t*>(context));
     current_key = 0;
     const u64 rip = u64(regs[REG_RIP]);
     const bool guest = InGuestImage(rip);

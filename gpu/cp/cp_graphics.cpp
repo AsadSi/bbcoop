@@ -6,6 +6,9 @@
 #include <cstring>
 
 #include <sys/resource.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 
 #include <fmt/format.h>
 
@@ -153,6 +156,21 @@ void CommandProcessor::EndGraphics(Work& work) {
     }
     if (BbStats::enabled) {
         BbStats::submissions.fetch_add(1, std::memory_order_relaxed);
+#ifdef __APPLE__
+        // Darwin has no RUSAGE_THREAD: the thread's CPU times from Mach.
+        thread_basic_info_data_t info;
+        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+        const mach_port_t self = mach_thread_self();
+        if (thread_info(self, THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) ==
+            KERN_SUCCESS) {
+            BbStats::gpu_user_us.store(u64(info.user_time.seconds) * 1000000 + info.user_time.microseconds,
+                                       std::memory_order_relaxed);
+            BbStats::gpu_sys_us.store(u64(info.system_time.seconds) * 1000000 +
+                                          info.system_time.microseconds,
+                                      std::memory_order_relaxed);
+        }
+        mach_port_deallocate(mach_task_self(), self);
+#else
         if (rusage usage{}; getrusage(RUSAGE_THREAD, &usage) == 0) {
             BbStats::gpu_user_us.store(u64(usage.ru_utime.tv_sec) * 1000000 + usage.ru_utime.tv_usec,
                                        std::memory_order_relaxed);
@@ -162,6 +180,7 @@ void CommandProcessor::EndGraphics(Work& work) {
             BbStats::gpu_vol_switches.store(usage.ru_nvcsw, std::memory_order_relaxed);
             BbStats::gpu_minor_faults.store(usage.ru_minflt, std::memory_order_relaxed);
         }
+#endif
     }
     if (work.copy && BbFreeCheck::Enabled()) {
         Diagnostics::CheckSubmittedCopy(*work.copy, work.seq);
