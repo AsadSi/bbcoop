@@ -14,6 +14,9 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include "bbport_darwin.h" // process_vm_readv
+#endif
 
 namespace Core::Bbsc {
 
@@ -79,6 +82,25 @@ std::vector<std::uint64_t> FindInMemory(std::span<const std::uint8_t> needle, st
     if (needle.empty()) {
         return hits;
     }
+#ifdef __APPLE__
+    // bbport (macOS): no /proc; the readable regions come from mach_vm_region.
+    mach_vm_address_t region = lo;
+    mach_vm_size_t region_size = 0;
+    vm_region_basic_info_data_64_t info{};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    constexpr std::size_t Piece = 1u << 20;
+    std::vector<std::uint8_t> buffer(Piece + needle.size());
+    while (hits.size() < max_hits && region < hi &&
+           mach_vm_region(mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
+                          reinterpret_cast<vm_region_info_t>(&info), &count, &object) == KERN_SUCCESS) {
+        count = VM_REGION_BASIC_INFO_COUNT_64;
+        unsigned long long start = region, end = region + region_size;
+        region = end;
+        if ((info.protection & VM_PROT_READ) == 0) {
+            continue;
+        }
+#else
     FILE* maps = std::fopen("/proc/self/maps", "r");
     if (!maps) {
         return hits;
@@ -92,6 +114,7 @@ std::vector<std::uint64_t> FindInMemory(std::span<const std::uint8_t> needle, st
         if (std::sscanf(line, "%llx-%llx %4s", &start, &end, perms) != 3 || perms[0] != 'r') {
             continue;
         }
+#endif
         start = std::max<unsigned long long>(start, lo);
         end = std::min<unsigned long long>(end, hi);
         for (std::uint64_t at = start; at < end && hits.size() < max_hits; at += Piece) {
@@ -118,7 +141,9 @@ std::vector<std::uint64_t> FindInMemory(std::span<const std::uint8_t> needle, st
             }
         }
     }
+#ifndef __APPLE__
     std::fclose(maps);
+#endif
 #endif
     return hits;
 }

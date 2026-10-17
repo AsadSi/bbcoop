@@ -29,7 +29,12 @@ goes through MoltenVK to Metal. Rosetta executes AVX/AVX2; `run.sh` sets
    ```
 
    `build.sh` takes the prefix from `BB_MACOS_DEPS`, else `$VCPKG_ROOT/installed/x64-osx`. The
-   online module (`gpu/bbnet`) is left out without its libraries; the game plays offline.
+   online module (`gpu/bbnet`, `out/gpu/libbbnet.dylib`) is built when the prefix also has its
+   libraries, x86-64 and static: protobuf (with `protoc`), nlohmann_json, OpenSSL, miniupnpc and
+   [epoll-shim](https://github.com/jiixyj/epoll-shim) (epoll on kqueue, as shadPS4 uses on macOS);
+   zlib is the SDK's. Verified with protobuf 21.12, OpenSSL 3.6, miniupnpc 2.3.3, epoll-shim
+   0.0.20240608 and nlohmann_json 3.12. Without them (the CMake log names what is missing) the
+   game plays offline.
 3. MoltenVK: a universal build from the
    [Khronos releases](https://github.com/KhronosGroup/MoltenVK/releases) (`MoltenVK-macos.tar`,
    `MoltenVK/dynamic/dylib/macOS/`). `run.sh` points the Vulkan loader at its manifest with
@@ -88,6 +93,7 @@ key; L3+R3, Z+C on the keyboard, works too).
 | `mov rax, fs:[0]` rewritten to `gs:[0]`, GS base = guest TCB (`arch_prctl`) | GS is the pthread TSD array: the loader points those loads at `gs:[slot*8]`, a TSD slot holding the guest TCB (`patch_tls_loads`, `darwin_compat.c`) |
 | Signal contexts: `uc_mcontext.gregs[REG_*]` | `uc_mcontext->__ss`, exposed as the same array (`BB_GREGS`, `gpu/shim/bbport_ucontext.h`); write faults on protected pages arrive as `SIGBUS` |
 | The game on the main thread, the window on a thread of its own | Cocoa runs windows on the main thread only: the window keeps it (`bbgpu_run_window_loop`, a Metal view) and the game runs on a thread of its own (`run_guest`) |
+| Online module: `libbbnet.so`, `-Bsymbolic`, `--exclude-libs`; epoll, `eventfd`; `/proc/self/maps` (BBSC) | `libbbnet.dylib` exporting only `bbnet_*`; epoll-shim's epoll and `eventfd` (P2P transport too); `mach_vm_region` (BBSC's writable code, its memory search); the shadNet worker stops before exit (libc++ throws on a destroyed mutex) |
 
 Smaller Darwin stand-ins (clocks, timed locks, per-thread CPU times, `gettid`,
 `process_vm_readv`, `MAP_FIXED_NOREPLACE`) are in `src/darwin_compat.h` and, for the GPU library,
@@ -164,8 +170,9 @@ into one dispatch did not change it (each call already was one).
   missing.
 - **FSR 4, DLSS** and other vendor-specific features are unavailable on Apple GPUs; FSR 3.1 and
   TAA work but cost the frame rate above.
-- **Online play** needs the online module's libraries (protobuf, OpenSSL, miniupnpc, …), not
-  covered by the vcpkg list above.
+- **Online play** needs the online module's libraries (see [Setup](#setup)), not covered by the
+  vcpkg list above. Verified against a local shadNet server: sign-in, matchmaking, the WebAPI and
+  the P2P transport's STUN pings; co-op with a second player is not yet tested on the Mac.
 - The **PC memory model** (`BB_PC_MODEL=1`, the layer's memory module) is not ported: it needs the
   game's memory imported as host memory (`VK_EXT_external_memory_host`, which MoltenVK has) and
   is off as on other non-AMD GPUs.

@@ -24,7 +24,7 @@ int main(void) {
         "3KOuC4RmZZU#T#U",  /* sceNpSignalingInitialize */
     };
     static const char *const local="XbkjbobZlCY#l#m"; /* sceNpTrophyCreateContext */
-#ifdef __APPLE__ /* bbcoop */
+#ifdef __APPLE__
     const char *path="out/gpu/libbbnet.dylib";
 #else
     const char *path="out/gpu/libbbnet.so";
