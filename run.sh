@@ -7,6 +7,9 @@ if [[ $(uname -s) == Darwin ]]; then
     # MoltenVK (Vulkan on Metal): BB_MOLTENVK_ICD names its MoltenVK_icd.json when the
     # Vulkan loader does not find it in a standard location.
     if [[ -z ${VK_DRIVER_FILES:-} && -n ${BB_MOLTENVK_ICD:-} ]]; then export VK_DRIVER_FILES=$BB_MOLTENVK_ICD; fi
+    # bbcoop: else the MoltenVK scripts/mac-deps.sh builds (with the Mac port's changes: MetalFX).
+    mvk_icd=${BB_MACOS_DEPS:-$PWD/out/mac-deps}/share/vulkan/icd.d/MoltenVK_icd.json
+    if [[ -z ${VK_DRIVER_FILES:-} && -f $mvk_icd ]]; then export VK_DRIVER_FILES=$mvk_icd; fi
     # Metal argument buffers make every resource resident on each use; with the game's memory as
     # imported buffers of gigabytes that halved the frame rate (8 against 16.5 FPS, M4, clinic).
     export MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=${MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS:-0}

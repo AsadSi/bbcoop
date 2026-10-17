@@ -1,0 +1,1142 @@
+diff --git a/MoltenVK/CMakeLists.txt b/MoltenVK/CMakeLists.txt
+index 1296ce6..eb24022 100644
+--- a/MoltenVK/CMakeLists.txt
++++ b/MoltenVK/CMakeLists.txt
+@@ -61,4 +61,6 @@ else()
+ endif()
+ 
+ include(Vulkan-Headers)
+-target_link_libraries(MoltenVK PUBLIC Vulkan::Headers)
+\ No newline at end of file
++target_link_libraries(MoltenVK PUBLIC Vulkan::Headers)
++# bbport: vkCmdUpscaleMetalFXBB (Commands/MVKCmdBBMetalFX.mm)
++target_link_libraries(MoltenVK PRIVATE "-weak_framework MetalFX")
+diff --git a/MoltenVK/MoltenVK/Commands/MVKBBPassStats.h b/MoltenVK/MoltenVK/Commands/MVKBBPassStats.h
+new file mode 100644
+index 0000000..2759a48
+--- /dev/null
++++ b/MoltenVK/MoltenVK/Commands/MVKBBPassStats.h
+@@ -0,0 +1,155 @@
++/*
++ * MVKBBPassStats.h
++ *
++ * bbport: statistics of the Metal encoders made from each frame's Vulkan commands
++ * (MVK_BB_PASS_STATS=1): render passes, the command that ended each one, compute and blit
++ * encoders, and render passes that reopen the attachments of the one before them with only
++ * other work between (what a pass planner could merge). Printed every 5 s per presented frame.
++ */
++
++#pragma once
++
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cxxabi.h>
++#include <map>
++#include <mutex>
++#include <string>
++#include <typeinfo>
++#include <unordered_map>
++
++namespace mvkbb {
++
++/**
++ * MVK_BB_UNTRACKED=1 (experiment): buffers, textures and heaps without Metal's hazard tracking,
++ * ordered by the per-stage barrier fences instead (as with argument buffers and residency sets).
++ * Tracking is per resource: one big buffer of the game's memory serialized everything touching it.
++ */
++inline bool untracked() {
++	static const bool enabled = [] {
++		const char* env = std::getenv("MVK_BB_UNTRACKED");
++		return env && env[0] == '1';
++	}();
++	return enabled;
++}
++
++inline bool passStatsEnabled() {
++	static const bool enabled = [] {
++		const char* env = std::getenv("MVK_BB_PASS_STATS");
++		return env && env[0] == '1';
++	}();
++	return enabled;
++}
++
++/** A command's class name without namespaces or template arguments ("MVKCmdDispatch"). */
++inline const char* commandName(const std::type_info& type) {
++	static std::mutex lock;
++	static std::unordered_map<const std::type_info*, std::string> names;
++	std::scoped_lock guard{lock};
++	auto [it, added] = names.try_emplace(&type);
++	if (added) {
++		int status = 0;
++		char* full = abi::__cxa_demangle(type.name(), nullptr, nullptr, &status);
++		std::string name = status == 0 && full ? full : type.name();
++		std::free(full);
++		if (auto lt = name.find('<'); lt != std::string::npos) { name.resize(lt); }
++		if (auto colon = name.rfind("::"); colon != std::string::npos) { name.erase(0, colon + 2); }
++		it->second = name;
++	}
++	return it->second.c_str();
++}
++
++class PassStats {
++public:
++	static PassStats& get() {
++		static PassStats stats;
++		return stats;
++	}
++
++	void renderPass(bool restart, const char* reason) {
++		std::scoped_lock guard{_lock};
++		_renderPasses++;
++		if (restart) { _restarts[reason]++; }
++	}
++	void renderEnd(const char* reason) {
++		std::scoped_lock guard{_lock};
++		_ends[reason]++;
++	}
++	void computeEncoder(const char* reason) {
++		std::scoped_lock guard{_lock};
++		_computeEncoders++;
++		_computeReasons[reason]++;
++	}
++	void blitEncoder(const char* reason) {
++		std::scoped_lock guard{_lock};
++		_blitEncoders++;
++		_blitReasons[reason]++;
++	}
++	void planned(uint32_t tessDraws, uint32_t merged, uint32_t groups) {
++		std::scoped_lock guard{_lock};
++		_hoistedPasses++;
++		_hoistedDraws += tessDraws;
++		_merged += merged;
++		_groups += groups;
++	}
++	void reopen(bool sameAttachments, const std::string& between) {
++		std::scoped_lock guard{_lock};
++		if (sameAttachments) {
++			_reopenSame++;
++			_between[between]++;
++		} else {
++			_reopenOther++;
++		}
++	}
++	void present() {
++		std::scoped_lock guard{_lock};
++		_frames++;
++		const auto now = std::chrono::steady_clock::now();
++		if (_since.time_since_epoch().count() == 0) { _since = now; }
++		if (now - _since < std::chrono::seconds{5}) { return; }
++		const double frames = _frames ? double(_frames) : 1.0;
++		std::fprintf(stderr, "[mvk-bb] %.0f frames in %.1f s: per frame %.1f render passes, %.1f compute and %.1f blit encoders; "
++				"%.1f passes reopen the previous one's attachments, %.1f open others; tessellation hoisted for %.1f draws, %.1f passes merged with %.1f groups ahead (%.1f planned)\n",
++				frames, std::chrono::duration<double>(now - _since).count(),
++				_renderPasses / frames, _computeEncoders / frames, _blitEncoders / frames,
++				_reopenSame / frames, _reopenOther / frames, _hoistedDraws / frames, _merged / frames, _groups / frames, _hoistedPasses / frames);
++		print("  render pass ended by", _ends, frames);
++		print("  render pass restarted by", _restarts, frames);
++		print("  compute encoder for", _computeReasons, frames);
++		print("  blit encoder for", _blitReasons, frames);
++		print("  between a pass and its reopening", _between, frames);
++		reset();
++		_since = now;
++	}
++
++private:
++	using Counts = std::map<std::string, uint64_t>;
++
++	static void print(const char* title, const Counts& counts, double frames) {
++		if (counts.empty()) { return; }
++		std::multimap<uint64_t, const std::string*, std::greater<>> ranked;
++		for (const auto& [name, count] : counts) { ranked.emplace(count, &name); }
++		std::fprintf(stderr, "%s:", title);
++		int shown = 0;
++		for (const auto& [count, name] : ranked) {
++			if (shown++ == 8) { break; }
++			std::fprintf(stderr, " %s %.1f;", name->c_str(), count / frames);
++		}
++		std::fprintf(stderr, "\n");
++	}
++
++	void reset() {
++		_frames = _renderPasses = _computeEncoders = _blitEncoders = _reopenSame = _reopenOther = 0;
++		_hoistedPasses = _hoistedDraws = _merged = _groups = 0;
++		_ends.clear(); _restarts.clear(); _computeReasons.clear(); _blitReasons.clear(); _between.clear();
++	}
++
++	std::mutex _lock;
++	std::chrono::steady_clock::time_point _since{};
++	uint64_t _frames = 0, _renderPasses = 0, _computeEncoders = 0, _blitEncoders = 0;
++	uint64_t _reopenSame = 0, _reopenOther = 0, _hoistedPasses = 0, _hoistedDraws = 0, _merged = 0, _groups = 0;
++	Counts _ends, _restarts, _computeReasons, _blitReasons, _between;
++};
++
++}
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdBBMetalFX.h b/MoltenVK/MoltenVK/Commands/MVKCmdBBMetalFX.h
+new file mode 100644
+index 0000000..6d5f372
+--- /dev/null
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdBBMetalFX.h
+@@ -0,0 +1,56 @@
++/*
++ * MVKCmdBBMetalFX.h
++ *
++ * bbport: vkCmdUpscaleMetalFXBB, a command of this MoltenVK build (not a Vulkan extension) that
++ * runs Apple's MetalFX temporal scaler at its place in the command stream: render-size color,
++ * depth and motion vectors in, output-size color out. bbport (gpu/upscale) looks it up with
++ * vkGetDeviceProcAddr and uses it as an upscaler where it exists.
++ */
++
++#pragma once
++
++#include "MVKCommand.h"
++#include <vulkan/vulkan.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct VkBBMetalFXUpscaleInfo {
++	VkImage color;           ///< Render-size scene color (RGBA16F)
++	VkImage depth;           ///< Render-size depth
++	VkImage motion;          ///< Render-size motion vectors (RG16F), current to previous
++	VkImage output;          ///< Output-size color
++	uint32_t inputWidth;
++	uint32_t inputHeight;
++	uint32_t outputWidth;
++	uint32_t outputHeight;
++	float jitterX;           ///< Sub-pixel jitter of this frame, in input pixels
++	float jitterY;
++	float motionScaleX;      ///< Scale that takes the motion texture's values to input pixels
++	float motionScaleY;
++	VkBool32 reset;          ///< The history is invalid (camera cut, resize)
++	VkBool32 depthReversed;  ///< Far is 0
++	VkBool32 hdr;            ///< Linear HDR color (auto exposure); else display-ready color
++} VkBBMetalFXUpscaleInfo;
++
++typedef void (VKAPI_PTR *PFN_vkCmdUpscaleMetalFXBB)(VkCommandBuffer commandBuffer, const VkBBMetalFXUpscaleInfo* pInfo);
++
++void VKAPI_CALL vkCmdUpscaleMetalFXBB(VkCommandBuffer commandBuffer, const VkBBMetalFXUpscaleInfo* pInfo);
++
++#ifdef __cplusplus
++}
++#endif
++
++class MVKCmdBBMetalFXUpscale : public MVKCommand {
++
++public:
++	VkResult setContent(MVKCommandBuffer* cmdBuff, const VkBBMetalFXUpscaleInfo* pInfo);
++
++	void encode(MVKCommandEncoder* cmdEncoder) override;
++
++protected:
++	MVKCommandTypePool<MVKCommand>* getTypePool(MVKCommandPool* cmdPool) override;
++
++	VkBBMetalFXUpscaleInfo _info;
++};
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdBBMetalFX.mm b/MoltenVK/MoltenVK/Commands/MVKCmdBBMetalFX.mm
+new file mode 100644
+index 0000000..99a2e79
+--- /dev/null
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdBBMetalFX.mm
+@@ -0,0 +1,154 @@
++/*
++ * MVKCmdBBMetalFX.mm
++ *
++ * bbport: vkCmdUpscaleMetalFXBB (MVKCmdBBMetalFX.h).
++ */
++
++#include "MVKCmdBBMetalFX.h"
++#include "MVKCommandBuffer.h"
++#include "MVKCommandPool.h"
++#include "MVKImage.h"
++#include "MVKBBPassStats.h"
++#import <MetalFX/MetalFX.h>
++#include <map>
++#include <mutex>
++#include <tuple>
++
++namespace {
++
++/// A temporal scaler per (formats, sizes), kept for the process; with the textures it needs in
++/// place of ours when ours lack a usage MetalFX asks for (filled by blits before and after).
++struct BBScaler {
++	id<MTLFXTemporalScaler> scaler = nil;
++	id<MTLTexture> color = nil, depth = nil, motion = nil, output = nil;
++};
++
++id<MTLTexture> bbStandIn(id<MTLDevice> device, id<MTLTexture> like, MTLTextureUsage usage, uint32_t width, uint32_t height) {
++	MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat: like.pixelFormat
++																					width: width
++																				   height: height
++																				mipmapped: NO];
++	desc.usage = usage;
++	desc.storageMode = MTLStorageModePrivate;
++	return [device newTextureWithDescriptor: desc];
++}
++
++BBScaler* bbGetScaler(id<MTLDevice> device, id<MTLTexture> color, id<MTLTexture> depth, id<MTLTexture> motion,
++					  id<MTLTexture> output, const VkBBMetalFXUpscaleInfo& info) {
++	using Key = std::tuple<NSUInteger, NSUInteger, NSUInteger, NSUInteger, uint32_t, uint32_t, uint32_t, uint32_t, bool, bool>;
++	static std::mutex lock;
++	static std::map<Key, BBScaler> scalers;
++	const Key key{color.pixelFormat, depth.pixelFormat, motion.pixelFormat, output.pixelFormat,
++				  info.inputWidth, info.inputHeight, info.outputWidth, info.outputHeight, bool(info.depthReversed), bool(info.hdr)};
++	std::scoped_lock guard{lock};
++	auto [it, added] = scalers.try_emplace(key);
++	BBScaler& entry = it->second;
++	if ( !added ) { return entry.scaler ? &entry : nullptr; }
++	if ( ![MTLFXTemporalScalerDescriptor supportsDevice: device] ) {
++		fprintf(stderr, "[mvk-bb] MetalFX: the temporal scaler is not supported on this device\n");
++		return nullptr;
++	}
++	MTLFXTemporalScalerDescriptor* desc = [MTLFXTemporalScalerDescriptor new];
++	desc.colorTextureFormat = color.pixelFormat;
++	desc.depthTextureFormat = depth.pixelFormat;
++	desc.motionTextureFormat = motion.pixelFormat;
++	desc.outputTextureFormat = output.pixelFormat;
++	desc.inputWidth = info.inputWidth;
++	desc.inputHeight = info.inputHeight;
++	desc.outputWidth = info.outputWidth;
++	desc.outputHeight = info.outputHeight;
++	desc.autoExposureEnabled = info.hdr ? YES : NO;
++	entry.scaler = [desc newTemporalScalerWithDevice: device];
++	[desc release];
++	if ( !entry.scaler ) {
++		fprintf(stderr, "[mvk-bb] MetalFX: no temporal scaler for color %lu, depth %lu, motion %lu, output %lu, %ux%u to %ux%u\n",
++				(unsigned long)color.pixelFormat, (unsigned long)depth.pixelFormat, (unsigned long)motion.pixelFormat,
++				(unsigned long)output.pixelFormat, info.inputWidth, info.inputHeight, info.outputWidth, info.outputHeight);
++		return nullptr;
++	}
++	entry.scaler.depthReversed = info.depthReversed;
++	const auto needs = [](id<MTLTexture> texture, MTLTextureUsage usage) { return (texture.usage & usage) != usage; };
++	if (needs(color, entry.scaler.colorTextureUsage)) { entry.color = bbStandIn(device, color, entry.scaler.colorTextureUsage, info.inputWidth, info.inputHeight); }
++	if (needs(depth, entry.scaler.depthTextureUsage)) { entry.depth = bbStandIn(device, depth, entry.scaler.depthTextureUsage, info.inputWidth, info.inputHeight); }
++	if (needs(motion, entry.scaler.motionTextureUsage)) { entry.motion = bbStandIn(device, motion, entry.scaler.motionTextureUsage, info.inputWidth, info.inputHeight); }
++	if (needs(output, entry.scaler.outputTextureUsage)) { entry.output = bbStandIn(device, output, entry.scaler.outputTextureUsage, info.outputWidth, info.outputHeight); }
++	fprintf(stderr, "[mvk-bb] MetalFX: temporal scaler %ux%u to %ux%u (stand-ins: color %d, depth %d, motion %d, output %d)\n",
++			info.inputWidth, info.inputHeight, info.outputWidth, info.outputHeight,
++			entry.color != nil, entry.depth != nil, entry.motion != nil, entry.output != nil);
++	return &entry;
++}
++
++void bbBlit(id<MTLCommandBuffer> cmdBuffer, id<MTLTexture> from, id<MTLTexture> to, uint32_t width, uint32_t height) {
++	id<MTLBlitCommandEncoder> blit = [cmdBuffer blitCommandEncoder];
++	[blit copyFromTexture: from sourceSlice: 0 sourceLevel: 0 sourceOrigin: MTLOriginMake(0, 0, 0)
++			   sourceSize: MTLSizeMake(width, height, 1)
++				toTexture: to destinationSlice: 0 destinationLevel: 0 destinationOrigin: MTLOriginMake(0, 0, 0)];
++	[blit endEncoding];
++}
++
++}
++
++VkResult MVKCmdBBMetalFXUpscale::setContent(MVKCommandBuffer* cmdBuff, const VkBBMetalFXUpscaleInfo* pInfo) {
++	_info = *pInfo;
++	return VK_SUCCESS;
++}
++
++void MVKCmdBBMetalFXUpscale::encode(MVKCommandEncoder* cmdEncoder) {
++	cmdEncoder->endCurrentMetalEncoding();
++	id<MTLTexture> color = ((MVKImage*)_info.color)->getMTLTexture();
++	id<MTLTexture> depth = ((MVKImage*)_info.depth)->getMTLTexture();
++	id<MTLTexture> motion = ((MVKImage*)_info.motion)->getMTLTexture();
++	id<MTLTexture> output = ((MVKImage*)_info.output)->getMTLTexture();
++	BBScaler* fx = bbGetScaler(cmdEncoder->getMTLDevice(), color, depth, motion, output, _info);
++	if ( !fx ) { return; }
++	id<MTLCommandBuffer> cmdBuffer = cmdEncoder->_mtlCmdBuffer;
++	const uint32_t iw = _info.inputWidth, ih = _info.inputHeight;
++	id<MTLFXTemporalScaler> scaler = fx->scaler;
++	if (cmdEncoder->bbFencesOn()) {
++		// Untracked resources (MVK_BB_UNTRACKED): after everything before, by the stage fences;
++		// the scaler waits for and updates a fence of its own.
++		static id<MTLFence> fence = [cmdEncoder->getMTLDevice() newFence];
++		id<MTLBlitCommandEncoder> blit = [cmdBuffer blitCommandEncoder];
++		for (int stage = 0; stage < kMVKBarrierStageCount; stage++) { [blit waitForFence: cmdEncoder->bbStageFenceToWait(stage)]; }
++		const auto copy = [&](id<MTLTexture> from, id<MTLTexture> to) {
++			[blit copyFromTexture: from sourceSlice: 0 sourceLevel: 0 sourceOrigin: MTLOriginMake(0, 0, 0)
++					   sourceSize: MTLSizeMake(iw, ih, 1)
++						toTexture: to destinationSlice: 0 destinationLevel: 0 destinationOrigin: MTLOriginMake(0, 0, 0)];
++		};
++		if (fx->color) { copy(color, fx->color); color = fx->color; }
++		if (fx->depth) { copy(depth, fx->depth); depth = fx->depth; }
++		if (fx->motion) { copy(motion, fx->motion); motion = fx->motion; }
++		[blit updateFence: fence];
++		[blit endEncoding];
++		scaler.fence = fence;
++	} else {
++		if (fx->color) { bbBlit(cmdBuffer, color, fx->color, iw, ih); color = fx->color; }
++		if (fx->depth) { bbBlit(cmdBuffer, depth, fx->depth, iw, ih); depth = fx->depth; }
++		if (fx->motion) { bbBlit(cmdBuffer, motion, fx->motion, iw, ih); motion = fx->motion; }
++	}
++	scaler.colorTexture = color;
++	scaler.depthTexture = depth;
++	scaler.motionTexture = motion;
++	scaler.outputTexture = fx->output ? fx->output : output;
++	scaler.inputContentWidth = iw;
++	scaler.inputContentHeight = ih;
++	scaler.jitterOffsetX = _info.jitterX;
++	scaler.jitterOffsetY = _info.jitterY;
++	scaler.motionVectorScaleX = _info.motionScaleX;
++	scaler.motionVectorScaleY = _info.motionScaleY;
++	scaler.reset = _info.reset;
++	[scaler encodeToCommandBuffer: cmdBuffer];
++	if (cmdEncoder->bbFencesOn()) {
++		id<MTLBlitCommandEncoder> blit = [cmdBuffer blitCommandEncoder];
++		[blit waitForFence: scaler.fence];
++		if (fx->output) {
++			[blit copyFromTexture: fx->output sourceSlice: 0 sourceLevel: 0 sourceOrigin: MTLOriginMake(0, 0, 0)
++					   sourceSize: MTLSizeMake(_info.outputWidth, _info.outputHeight, 1)
++						toTexture: output destinationSlice: 0 destinationLevel: 0 destinationOrigin: MTLOriginMake(0, 0, 0)];
++		}
++		for (int stage = 0; stage < kMVKBarrierStageCount; stage++) { [blit updateFence: cmdEncoder->bbStageFence(stage)]; }
++		[blit endEncoding];
++	} else if (fx->output) {
++		bbBlit(cmdBuffer, fx->output, output, _info.outputWidth, _info.outputHeight);
++	}
++}
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdDebug.h b/MoltenVK/MoltenVK/Commands/MVKCmdDebug.h
+index 85f6d38..325a960 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdDebug.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdDebug.h
+@@ -38,11 +38,17 @@ protected:
+ 	NSString* _markerName = nil;
+ };
+ 
++/** bbport: a debug label begin that the pass planner looks for (MVKCommandEncoder::bbPlanRendering). */
++class MVKCmdDebugMarkerBeginNamed : public MVKCmdDebugMarker {
++public:
++	bool bbIsLabelBegin(const char* name) override { return _markerName && [_markerName isEqualToString: @(name)]; }
++};
++
+ 
+ #pragma mark -
+ #pragma mark MVKCmdDebugMarkerBegin
+ 
+-class MVKCmdDebugMarkerBegin : public MVKCmdDebugMarker {
++class MVKCmdDebugMarkerBegin : public MVKCmdDebugMarkerBeginNamed {
+ 
+ public:
+ 	void encode(MVKCommandEncoder* cmdEncoder) override;
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm b/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
+index 664276b..8f14b59 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
+@@ -173,9 +173,17 @@
+ 
+ 	if (_vertexCount == 0 || _instanceCount == 0) { return; }	// Nothing to do.
+ 
+-	cmdEncoder->restartMetalRenderPassIfNeeded();
+-
+ 	auto* pipeline = cmdEncoder->getGraphicsPipeline();
++
++	// bbport: while hoisting (MVKCommandEncoder::bbHoistTessellation), only a tessellated draw's
++	// compute stages are encoded; when its render pass is encoded, it takes their outputs.
++	const bool hoisting = cmdEncoder->bbIsHoisting();
++	if (hoisting && !pipeline->isTessellationPipeline()) { return; }
++	MVKCommandEncoder::BBTessOutputs hoisted;
++	const bool wasHoisted = !hoisting && pipeline->isTessellationPipeline() && cmdEncoder->bbTakeTessOutputs(this, hoisted);
++
++	if ( !hoisting ) { cmdEncoder->restartMetalRenderPassIfNeeded(); }
++
+ 	auto& mtlFeats = cmdEncoder->getMetalFeatures();
+ 	auto& dvcLimits = cmdEncoder->getDeviceProperties().limits;
+ 
+@@ -205,7 +213,15 @@
+         outControlPointCount = pipeline->getOutputControlPointCount();
+         tessParams.patchCount = mvkCeilingDivide(_vertexCount, tessParams.inControlPointCount) * _instanceCount;
+     }
+-    if (pipeline->needsDrawIdBuffer()) {
++    if (wasHoisted) {
++        vtxOutBuff = hoisted.vtxOut;
++        tcOutBuff = hoisted.tcOut;
++        tcPatchOutBuff = hoisted.tcPatchOut;
++        tcLevelBuff = hoisted.tcLevel;
++        tempDrawIDBuff = hoisted.drawId;
++        tessParams.patchCount = hoisted.patchCount;
++        outControlPointCount = hoisted.outControlPointCount;
++    } else if (pipeline->needsDrawIdBuffer()) {
+         tempDrawIDBuff = cmdEncoder->getTempMTLBuffer(sizeof(uint32_t));
+ 
+         // We don't currently support non-indirect multi-draw commands, so just 0.
+@@ -213,6 +229,8 @@
+     }
+     for (uint32_t s : stages) {
+         auto stage = MVKGraphicsStage(s);
++        if (hoisting && stage == kMVKGraphicsStageRasterization) { break; }
++        if (wasHoisted && stage != kMVKGraphicsStageRasterization) { continue; }
+         cmdEncoder->finalizeDrawState(stage);	// Ensure all updated state has been submitted to Metal
+ 
+ 		if ( !pipeline->hasValidMTLPipelineStates() ) { return; }	// Abort if this pipeline stage could not be compiled.
+@@ -288,6 +306,11 @@
+ 					[mtlTessCtlEncoder dispatchThreadgroups: MTLSizeMake(mvkCeilingDivide(tessParams.patchCount * outControlPointCount, wgSize), 1, 1)
+ 									  threadsPerThreadgroup: MTLSizeMake(wgSize, 1, 1)];
+ 				}
++                if (hoisting) {
++                    cmdEncoder->bbStoreTessOutputs(this, {vtxOutBuff, tcOutBuff, tcPatchOutBuff, tcLevelBuff, tempDrawIDBuff,
++                                                          tessParams.patchCount, outControlPointCount});
++                    break;
++                }
+                 // Running this stage prematurely ended the render pass, so we have to start it up again.
+                 // TODO: On iOS, maybe we could use a tile shader to avoid this.
+                 cmdEncoder->beginMetalRenderPass(kMVKCommandUseRestartSubpass);
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h b/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h
+index 5119f85..1dbd0a2 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h
+@@ -110,6 +110,9 @@ public:
+ 
+ 	virtual bool isTessellationPipeline() { return false; };
+ 
++	/** bbport: the pipeline this command binds. */
++	MVKPipeline* getPipeline() { return _pipeline; }
++
+ protected:
+ 	MVKPipeline* _pipeline;
+ 
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.mm b/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.mm
+index 9092954..7f584a8 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.mm
+@@ -157,7 +157,7 @@
+ 	}
+ #endif
+ 
+-	if (!cmdEncoder->_mtlRenderEncoder && cmdEncoder->isUsingMetalArgumentBuffers() && cmdEncoder->getDevice()->hasResidencySet()) {
++	if (!cmdEncoder->_mtlRenderEncoder && cmdEncoder->bbFencesOn()) {
+ 		cmdEncoder->endCurrentMetalEncoding();
+ 
+ 		for (auto& b : _barriers) {
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdRendering.h b/MoltenVK/MoltenVK/Commands/MVKCmdRendering.h
+index 55132e2..b03e20a 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdRendering.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdRendering.h
+@@ -152,6 +152,7 @@ public:
+ 
+ 	void encode(MVKCommandEncoder* cmdEncoder) override;
+ 
++	const VkRenderingInfo* bbRenderingInfo() override { return &_renderingInfo; }
+ 
+ protected:
+ 	MVKCommandTypePool<MVKCommand>* getTypePool(MVKCommandPool* cmdPool) override;
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommand.h b/MoltenVK/MoltenVK/Commands/MVKCommand.h
+index ca02901..63fb277 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommand.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCommand.h
+@@ -67,6 +67,11 @@ public:
+ 	/** Encodes this command on the specified command encoder. */
+ 	virtual void encode(MVKCommandEncoder* cmdEncoder) = 0;
+ 
++	/** bbport (MVK_BB_PASS_MERGE): the rendering a vkCmdBeginRendering command begins, else null. */
++	virtual const VkRenderingInfo* bbRenderingInfo() { return nullptr; }
++	/** bbport (MVK_BB_PASS_MERGE): whether this command begins a debug label named `name`. */
++	virtual bool bbIsLabelBegin(const char* name) { return false; }
++
+ protected:
+ 	friend MVKCommandBuffer;
+ 
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h
+index 76ca788..be1093f 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h
+@@ -26,7 +26,9 @@
+ #include "MVKCmdPipeline.h"
+ #include "MVKQueryPool.h"
+ #include "MVKSmallVector.h"
++#include <string>
+ #include <unordered_map>
++#include <unordered_set>
+ 
+ class MVKCommandPool;
+ class MVKQueueCommandBufferSubmission;
+@@ -334,6 +336,25 @@ public:
+ 									  const uint32_t* pStencilInputAttachmentIndex);
+ 
+ 	/** Called by each graphics draw command to establish any outstanding state just prior to performing the draw. */
++	/**
++	 * bbport (MVK_BB_HOIST_TESS, default on): the outputs of a tessellated draw's compute stages
++	 * (vertex and tessellation control), encoded ahead of its render pass so the pass is not
++	 * split for them. While hoisting, draws encode only those stages and store the outputs here;
++	 * when the render pass is encoded, they take them and encode only the rasterization stage.
++	 */
++	struct BBTessOutputs {
++		const MVKMTLBufferAllocation* vtxOut = nullptr;
++		const MVKMTLBufferAllocation* tcOut = nullptr;
++		const MVKMTLBufferAllocation* tcPatchOut = nullptr;
++		const MVKMTLBufferAllocation* tcLevel = nullptr;
++		const MVKMTLBufferAllocation* drawId = nullptr;
++		uint32_t patchCount = 0;
++		uint32_t outControlPointCount = 0;
++	};
++	bool bbIsHoisting() const { return _bbHoisting; }
++	void bbStoreTessOutputs(const MVKCommand* draw, const BBTessOutputs& outputs) { _bbTessOutputs[draw] = outputs; }
++	bool bbTakeTessOutputs(const MVKCommand* draw, BBTessOutputs& outputs);
++
+ 	void finalizeDrawState(MVKGraphicsStage stage);
+ 
+     /** Called by each compute dispatch command to establish any outstanding state just prior to performing the dispatch. */
+@@ -553,6 +574,28 @@ protected:
+ 	MVKCommandUse _mtlComputeEncoderUse;
+ 	MVKCommandUse _mtlBlitEncoderUse;
+ 	bool _isRenderingEntireAttachment;
++
++	// bbport: MVK_BB_PASS_STATS (MVKBBPassStats.h): the command being encoded, and after a
++	// rendering ends, its attachments' images and the commands encoded since.
++	const char* bbCommandName();
++public:
++	/** Whether the per-stage barrier fences order the encoders (argument buffers with residency sets, or MVK_BB_UNTRACKED). */
++	bool bbFencesOn();
++	/** The fence the given barrier stage last updated, to wait on (MVKCmdBBMetalFX). */
++	id<MTLFence> bbStageFenceToWait(int stage) { return _device->getFence((MVKBarrierStage)stage, _pEncodingContext->fenceSlots.update[stage]); }
++	/** The fence the given barrier stage updates now (MVKCmdBBMetalFX). */
++	id<MTLFence> bbStageFence(int stage) { return getBarrierStageFence((MVKBarrierStage)stage); }
++protected:
++	void bbNoteCommand(MVKCommand* command);
++	void bbPlanRendering(MVKCommand* beginRendering);
++	std::unordered_map<const MVKCommand*, BBTessOutputs> _bbTessOutputs;
++	std::unordered_set<const MVKCommand*> _bbSkip; ///< encoded ahead of their render pass, or merged away
++	bool _bbHoisting = false;
++	MVKCommand* _bbCommand = nullptr;
++	MVKSmallVector<MVKImage*, kMVKDefaultAttachmentCount> _bbLastImages;
++	std::string _bbBetween;
++	uint32_t _bbBetweenCount = 0;
++	bool _bbAfterRendering = false;
+ };
+ 
+ 
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
+index 8c24deb..11bc770 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
+@@ -25,7 +25,9 @@
+ #include "MVKFoundation.h"
+ #include "MVKCmdDraw.h"
+ #include "MVKCmdRendering.h"
++#include "MVKBBPassStats.h"
+ #include <sys/mman.h>
++#include <string_view>
+ 
+ using namespace std;
+ 
+@@ -52,7 +54,7 @@
+ }
+ 
+ void MVKCommandEncodingContext::syncFences(MVKDevice *device, id<MTLCommandBuffer> mtlCommandBuffer) {
+-	if (!device->hasResidencySet()) return;
++	if (!device->hasResidencySet() && !mvkbb::untracked()) return;
+ 
+ 	// Synchronize all stages to their fences at index 0, which will be waited on in the next command buffer.
+ 	for (int i = 0; i < kMVKBarrierStageCount; ++i) {
+@@ -268,7 +270,7 @@
+ 			MVKCommandEncodingContext encodingContext;
+ 			MVKCommandEncoder encoder(this);
+ 			encoder.encode(_prefilledMTLCmdBuffer, &encodingContext);
+-			if (isUsingMetalArgumentBuffers()) {
++			if (isUsingMetalArgumentBuffers() || mvkbb::untracked()) {
+ 				encodingContext.syncFences(getDevice(), _prefilledMTLCmdBuffer);
+ 			}
+ 
+@@ -446,9 +448,24 @@
+ 	}
+ }
+ 
++static bool bbHoistEnabled() {
++	static const bool enabled = [] {
++		const char* env = std::getenv("MVK_BB_HOIST_TESS");
++		return !env || env[0] != '0';
++	}();
++	return enabled;
++}
++
+ void MVKCommandEncoder::encodeCommandsImpl(MVKCommand* command) {
+     while(command) {
+         uint32_t prevMVPassIdx = _multiviewPassIndex;
++        bbNoteCommand(command);
++        if (_bbSkip.count(command)) {
++            _bbSkip.erase(command);
++            command = command->_next;
++            continue;
++        }
++        if (command->bbRenderingInfo()) { bbPlanRendering(command); }
+         command->encode(this);
+ 
+         if(_multiviewPassIndex > prevMVPassIdx) {
+@@ -471,6 +488,7 @@
+ 	secondaryCmdBuffer->beginSecondaryEncoding(this);
+ 	MVKCommand* cmd = secondaryCmdBuffer->_head;
+ 	while (cmd) {
++		bbNoteCommand(cmd);
+ 		cmd->encode(this);
+ 		cmd = cmd->_next;
+ 	}
+@@ -496,6 +514,16 @@
+ 		attCnt++;
+ 	});
+ 
++	if (_bbAfterRendering && mvkbb::passStatsEnabled()) {
++		bool same = attCnt == _bbLastImages.size();
++		for (uint32_t i = 0; same && i < attCnt; i++) {
++			same = (imageViews[i] ? imageViews[i]->getImage() : nullptr) == _bbLastImages[i];
++		}
++		if (_bbBetweenCount > 4) { _bbBetween += " +" + std::to_string(_bbBetweenCount - 4); }
++		mvkbb::PassStats::get().reopen(same, _bbBetween.empty() ? std::string("nothing") : _bbBetween);
++	}
++	_bbAfterRendering = false;
++
+ 	// If we're resuming a suspended renderpass, continue to use the existing renderpass
+ 	// (with updated rendering flags) and framebuffer. Otherwise, create new transient
+ 	// renderpass and framebuffer objects from the pRenderingInfo, and retain them until
+@@ -649,7 +677,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ 
+ 
+ void MVKCommandEncoder::barrierWait(MVKBarrierStage stage, id<MTLRenderCommandEncoder> mtlEncoder, MTLRenderStages beforeStages) {
+-	if (!isUsingMetalArgumentBuffers() || !getDevice()->hasResidencySet()) return;
++	if ( !bbFencesOn() ) return;
+ 	for (int i = 0; i < kMVKBarrierStageCount; ++i) {
+ 		auto fenceIndex = _pEncodingContext->fenceSlots.wait[stage][i];
+ 		auto fence = _device->getFence((MVKBarrierStage)i, fenceIndex);
+@@ -658,7 +686,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ }
+ 
+ void MVKCommandEncoder::barrierWait(MVKBarrierStage stage, id<MTLBlitCommandEncoder> mtlEncoder) {
+-	if (!isUsingMetalArgumentBuffers() || !getDevice()->hasResidencySet()) return;
++	if ( !bbFencesOn() ) return;
+ 	for (int i = 0; i < kMVKBarrierStageCount; ++i) {
+ 		auto fenceIndex = _pEncodingContext->fenceSlots.wait[stage][i];
+ 		auto fence = _device->getFence((MVKBarrierStage)i, fenceIndex);
+@@ -667,7 +695,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ }
+ 
+ void MVKCommandEncoder::barrierWait(MVKBarrierStage stage, id<MTLComputeCommandEncoder> mtlEncoder) {
+-	if (!isUsingMetalArgumentBuffers() || !getDevice()->hasResidencySet()) return;
++	if ( !bbFencesOn() ) return;
+ 	for (int i = 0; i < kMVKBarrierStageCount; ++i) {
+ 		auto fenceIndex = _pEncodingContext->fenceSlots.wait[stage][i];
+ 		auto fence = _device->getFence((MVKBarrierStage)i, fenceIndex);
+@@ -676,19 +704,19 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ }
+ 
+ void MVKCommandEncoder::barrierUpdate(MVKBarrierStage stage, id<MTLRenderCommandEncoder> mtlEncoder, MTLRenderStages afterStages) {
+-	if (!isUsingMetalArgumentBuffers() || !getDevice()->hasResidencySet()) return;
++	if ( !bbFencesOn() ) return;
+ 	auto fence = getBarrierStageFence(stage);
+ 	[mtlEncoder updateFence:fence afterStages:afterStages];
+ }
+ 
+ void MVKCommandEncoder::barrierUpdate(MVKBarrierStage stage, id<MTLBlitCommandEncoder> mtlEncoder) {
+-	if (!isUsingMetalArgumentBuffers() || !getDevice()->hasResidencySet()) return;
++	if ( !bbFencesOn() ) return;
+ 	auto fence = getBarrierStageFence(stage);
+ 	[mtlEncoder updateFence:fence];
+ }
+ 
+ void MVKCommandEncoder::barrierUpdate(MVKBarrierStage stage, id<MTLComputeCommandEncoder> mtlEncoder) {
+-	if (!isUsingMetalArgumentBuffers() || !getDevice()->hasResidencySet()) return;
++	if ( !bbFencesOn() ) return;
+ 	auto fence = getBarrierStageFence(stage);
+ 	[mtlEncoder updateFence:fence];
+ }
+@@ -835,6 +863,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ 		[mtlRPDesc setSamplePositions: sampPosns.data() count: sampPosns.size()];
+ 	}
+ 
++    if (mvkbb::passStatsEnabled()) { mvkbb::PassStats::get().renderPass(cmdUse == kMVKCommandUseRestartSubpass, bbCommandName()); }
+     _mtlRenderEncoder = [_mtlCmdBuffer renderCommandEncoderWithDescriptor: mtlRPDesc];
+ 	retainIfImmediatelyEncoding(_mtlRenderEncoder);
+ 	_cmdBuffer->setMetalObjectLabel(_mtlRenderEncoder, getMTLRenderCommandEncoderName(cmdUse));
+@@ -958,7 +987,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ }
+ 
+ void MVKCommandEncoder::finalizeDrawState(MVKGraphicsStage stage) {
+-    if (stage == kMVKGraphicsStageVertex) {
++    if (stage == kMVKGraphicsStageVertex && !_bbHoisting) {
+         // Must happen before switching encoders.
+         encodeStoreActions(true);
+     }
+@@ -1023,7 +1052,180 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ }
+ 
+ void MVKCommandEncoder::endRendering() {
++	if (mvkbb::passStatsEnabled()) {
++		_bbLastImages.clear();
++		for (auto* view : _attachments.contents()) { _bbLastImages.push_back(view ? view->getImage() : nullptr); }
++		_bbBetween.clear();
++		_bbBetweenCount = 0;
++	}
+ 	endRenderpass();
++	_bbAfterRendering = mvkbb::passStatsEnabled();
++}
++
++
++// Commands that only change Vulkan state (pipelines, descriptors, push constants, vertex and
++// index buffers, dynamic state): replayed while hoisting, so each draw sees its own state.
++static bool bbIsStateCommand(MVKCommand* command) {
++	std::string_view name = mvkbb::commandName(typeid(*command));
++	auto startsWith = [&](std::string_view prefix) { return name.substr(0, prefix.size()) == prefix; };
++	if (startsWith("MVKCmdSet")) { return name != "MVKCmdSetEvent"; }
++	return startsWith("MVKCmdBind") || startsWith("MVKCmdPush");
++}
++
++static bool bbMergeEnabled() {
++	static const bool enabled = [] {
++		const char* env = std::getenv("MVK_BB_PASS_MERGE");
++		return !env || env[0] != '0';
++	}();
++	return enabled;
++}
++
++static bool bbNamed(MVKCommand* command, std::string_view name) {
++	return std::string_view(mvkbb::commandName(typeid(*command))) == name;
++}
++
++// Whether `next` begins rendering into exactly what `prev` rendered into, loading every attachment
++// that `prev` stored: the two can be one Metal render pass.
++static bool bbContinues(const VkRenderingInfo& prev, const VkRenderingInfo& next) {
++	const auto same = [](const VkRenderingAttachmentInfo* a, const VkRenderingAttachmentInfo* b) {
++		if ( !a || !b ) { return a == b; }
++		return a->imageView == b->imageView && a->imageLayout == b->imageLayout &&
++			   a->resolveMode == b->resolveMode && a->resolveImageView == b->resolveImageView &&
++			   (a->imageView == VK_NULL_HANDLE ||
++				(b->loadOp == VK_ATTACHMENT_LOAD_OP_LOAD && a->storeOp == VK_ATTACHMENT_STORE_OP_STORE));
++	};
++	if (prev.colorAttachmentCount != next.colorAttachmentCount || prev.layerCount != next.layerCount ||
++		prev.viewMask != next.viewMask || prev.flags != next.flags ||
++		memcmp(&prev.renderArea, &next.renderArea, sizeof(VkRect2D)) != 0) { return false; }
++	for (uint32_t i = 0; i < prev.colorAttachmentCount; i++) {
++		if ( !same(&prev.pColorAttachments[i], &next.pColorAttachments[i]) ) { return false; }
++	}
++	return same(prev.pDepthAttachment, next.pDepthAttachment) && same(prev.pStencilAttachment, next.pStencilAttachment);
++}
++
++// bbport: plans a dynamic rendering and the ones that continue it, before the first is encoded.
++// - Tessellated vkCmdDraw draws (a PS4 port's rect and quad lists) get their compute stages
++//   (vertex, tessellation control) encoded ahead of the render pass (MVK_BB_HOIST_TESS).
++// - A rendering that ends, is followed only by state commands and "bb-hoist" labelled groups (work
++//   the application found independent of the pass's draws: bbport's uploads), and begins again
++//   into the same attachments, is merged with it into one Metal render pass, the groups encoded
++//   ahead of it (MVK_BB_PASS_MERGE). On a tile-based GPU each restart stores and loads every
++//   attachment.
++// Both are encoded in a first replay of the run (state commands replayed, so each draw and group
++// sees its own state), then the Vulkan state is restored and the run is encoded without them.
++void MVKCommandEncoder::bbPlanRendering(MVKCommand* beginRendering) {
++	_bbTessOutputs.clear();
++	_bbSkip.clear();
++	if (_cmdBuffer->_immediateCmdEncoder) { return; }
++	const bool hoistTess = bbHoistEnabled(), merge = bbMergeEnabled();
++	if ( !hoistTess && !merge ) { return; }
++
++	auto* pipeline = _state.vkGraphics()._pipeline;
++	bool tessellated = false, tessBlocked = false;
++	uint32_t merged = 0, groups = 0;
++	MVKCommand* piece = beginRendering;
++	MVKCommand* runEnd = nullptr;
++	while (true) {
++		MVKCommand* end = piece->_next;
++		bool queries = false;
++		for ( ; end && !dynamic_cast<MVKCmdEndRendering*>(end); end = end->_next) {
++			if (auto* bind = dynamic_cast<MVKCmdBindGraphicsPipeline*>(end)) {
++				pipeline = static_cast<MVKGraphicsPipeline*>(bind->getPipeline());
++			} else if (dynamic_cast<MVKCmdDraw*>(end)) {
++				tessellated |= pipeline && pipeline->isTessellationPipeline();
++			} else if (dynamic_cast<MVKCmdDrawIndexed*>(end) || dynamic_cast<MVKCmdDrawIndirect*>(end) ||
++					   dynamic_cast<MVKCmdDrawIndexedIndirect*>(end)) {
++				tessBlocked |= pipeline && pipeline->isTessellationPipeline();
++			} else if (bbNamed(end, "MVKCmdExecuteCommands")) {
++				return;
++			} else if (bbNamed(end, "MVKCmdBeginQuery") || bbNamed(end, "MVKCmdEndQuery") ||
++					   bbNamed(end, "MVKCmdWriteTimestamp")) {
++				queries = true;
++			}
++		}
++		if ( !end ) { return; }	// The rendering goes on in another command buffer.
++		runEnd = end;
++		if ( !merge || queries ) { break; }
++
++		// What follows: state commands and labelled groups, then the same rendering again?
++		std::vector<std::pair<MVKCommand*, MVKCommand*>> gapGroups;
++		MVKCommand* next = end->_next;
++		while (next && !next->bbRenderingInfo()) {
++			if (next->bbIsLabelBegin("bb-hoist")) {
++				MVKCommand* last = next->_next;
++				int depth = 1;
++				for ( ; last; last = last->_next) {
++					if (last->bbIsLabelBegin("")) { depth++; }	// nested labels of any name
++					if (bbNamed(last, "MVKCmdDebugMarkerBegin")) { depth++; }
++					if (bbNamed(last, "MVKCmdDebugMarkerEnd") && --depth == 0) { break; }
++				}
++				if ( !last ) { break; }
++				gapGroups.emplace_back(next, last);
++				next = last->_next;
++			} else if (bbIsStateCommand(next)) {
++				next = next->_next;
++			} else {
++				break;
++			}
++		}
++		const VkRenderingInfo* nextInfo = next ? next->bbRenderingInfo() : nullptr;
++		if ( !nextInfo || !bbContinues(*piece->bbRenderingInfo(), *nextInfo) ) { break; }
++		_bbSkip.insert(end);
++		_bbSkip.insert(next);
++		for (auto& [first, last] : gapGroups) {
++			for (MVKCommand* cmd = first; ; cmd = cmd->_next) {
++				_bbSkip.insert(cmd);
++				if (cmd == last) { break; }
++			}
++			groups++;
++		}
++		merged++;
++		piece = next;
++	}
++	tessellated &= hoistTess && !tessBlocked;
++	if ( !tessellated && _bbSkip.empty() ) { return; }
++
++	// The first replay: tessellation compute stages and the labelled groups, in stream order.
++	const auto saved = _state.bbSaveVulkanState();
++	_bbHoisting = true;
++	for (MVKCommand* cmd = beginRendering->_next; cmd != runEnd; cmd = cmd->_next) {
++		const bool inGroup = _bbSkip.count(cmd) && !cmd->bbRenderingInfo() && !dynamic_cast<MVKCmdEndRendering*>(cmd);
++		if (inGroup) {
++			if ( !bbNamed(cmd, "MVKCmdDebugMarkerBegin") && !bbNamed(cmd, "MVKCmdDebugMarkerEnd") ) { cmd->encode(this); }
++		} else if ((tessellated && dynamic_cast<MVKCmdDraw*>(cmd)) || bbIsStateCommand(cmd)) {
++			cmd->encode(this);
++		}
++	}
++	_bbHoisting = false;
++	endCurrentMetalEncoding();
++	_state.bbRestoreVulkanState(saved);
++	if (mvkbb::passStatsEnabled()) { mvkbb::PassStats::get().planned((uint32_t)_bbTessOutputs.size(), merged, groups); }
++}
++
++bool MVKCommandEncoder::bbTakeTessOutputs(const MVKCommand* draw, BBTessOutputs& outputs) {
++	auto it = _bbTessOutputs.find(draw);
++	if (it == _bbTessOutputs.end()) { return false; }
++	outputs = it->second;
++	_bbTessOutputs.erase(it);
++	return true;
++}
++
++bool MVKCommandEncoder::bbFencesOn() {
++	return (isUsingMetalArgumentBuffers() && getDevice()->hasResidencySet()) || mvkbb::untracked();
++}
++
++const char* MVKCommandEncoder::bbCommandName() {
++	return _bbCommand ? mvkbb::commandName(typeid(*_bbCommand)) : "none";
++}
++
++void MVKCommandEncoder::bbNoteCommand(MVKCommand* command) {
++	_bbCommand = command;
++	if (_bbAfterRendering && mvkbb::passStatsEnabled()) {
++		if (_bbBetweenCount++ < 4) {
++			if ( !_bbBetween.empty() ) { _bbBetween += ", "; }
++			_bbBetween += mvkbb::commandName(typeid(*command));
++		}
++	}
+ }
+ 
+ void MVKCommandEncoder::endRenderpass() {
+@@ -1045,6 +1247,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+ 
+ void MVKCommandEncoder::endMetalRenderEncoding() {
+     if (_mtlRenderEncoder == nil) { return; }
++	if (mvkbb::passStatsEnabled()) { mvkbb::PassStats::get().renderEnd(bbCommandName()); }
+ 
+ 	if (_cmdBuffer->_hasStageCounterTimestampCommand) { [_mtlRenderEncoder updateFence: getStageCountersMTLFence() afterStages: MTLRenderStageFragment]; }
+ 	encodeBarrierUpdates();
+@@ -1102,6 +1305,7 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
+ 	if (!_mtlComputeEncoder || shouldStartNewEncoder(_mtlComputeEncoderUse, cmdUse)) {
+ 		needWaits = true;
+ 		endCurrentMetalEncoding();
++		if (mvkbb::passStatsEnabled()) { mvkbb::PassStats::get().computeEncoder(bbCommandName()); }
+ 		_mtlComputeEncoder = [_mtlCmdBuffer computeCommandEncoderWithDispatchType:getDispatchType(cmdUse)];
+ 		retainIfImmediatelyEncoding(_mtlComputeEncoder);
+ 		beginMetalComputeEncoding(cmdUse);
+@@ -1122,6 +1326,7 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
+ 	if ( !_mtlBlitEncoder ) {
+ 		needWaits = true;
+ 		endCurrentMetalEncoding();
++		if (mvkbb::passStatsEnabled()) { mvkbb::PassStats::get().blitEncoder(bbCommandName()); }
+ 		_mtlBlitEncoder = [_mtlCmdBuffer blitCommandEncoder];
+ 		retainIfImmediatelyEncoding(_mtlBlitEncoder);
+ 	}
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.h b/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.h
+index 25e6017..db4ac68 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.h
+@@ -512,6 +512,23 @@ public:
+ 	 */
+ 	template <typename Fn>
+ 	void applyToActiveMTLState(VkPipelineBindPoint bindPoint, Fn&& fn);
++
++	/** bbport (MVK_BB_HOIST_TESS): the Vulkan state, saved before replaying a render pass's state commands and restored after. */
++	struct BBVulkanState {
++		MVKVulkanSharedCommandEncoderState shared;
++		MVKVulkanGraphicsCommandEncoderState graphics;
++		MVKVulkanComputeCommandEncoderState compute;
++	};
++	BBVulkanState bbSaveVulkanState() const { return {_vkShared, _vkGraphics, _vkCompute}; }
++	void bbRestoreVulkanState(const BBVulkanState& state) {
++		// Their small vectors copy-construct but do not assign: rebuilt in place.
++		_vkShared.~MVKVulkanSharedCommandEncoderState();
++		new (&_vkShared) MVKVulkanSharedCommandEncoderState(state.shared);
++		_vkGraphics.~MVKVulkanGraphicsCommandEncoderState();
++		new (&_vkGraphics) MVKVulkanGraphicsCommandEncoderState(state.graphics);
++		_vkCompute.~MVKVulkanComputeCommandEncoderState();
++		new (&_vkCompute) MVKVulkanComputeCommandEncoderState(state.compute);
++	}
+ };
+ 
+ #pragma mark -
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandPool.h b/MoltenVK/MoltenVK/Commands/MVKCommandPool.h
+index c59466c..3f669c4 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandPool.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandPool.h
+@@ -29,6 +29,7 @@
+ #include "MVKCmdTransfer.h"
+ #include "MVKCmdQueries.h"
+ #include "MVKCmdDebug.h"
++#include "MVKCmdBBMetalFX.h"
+ #include "MVKMTLBufferAllocation.h"
+ #include <unordered_set>
+ 
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandTypePools.def b/MoltenVK/MoltenVK/Commands/MVKCommandTypePools.def
+index 423fef1..cd8b040 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandTypePools.def
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandTypePools.def
+@@ -143,6 +143,7 @@ MVK_CMD_TYPE_POOL(PushDescriptorSetWithTemplate)
+ MVK_CMD_TYPE_POOL(DebugMarkerBegin)
+ MVK_CMD_TYPE_POOL(DebugMarkerEnd)
+ MVK_CMD_TYPE_POOL(DebugMarkerInsert)
++MVK_CMD_TYPE_POOL(BBMetalFXUpscale)
+ MVK_CMD_TYPE_POOLS_FROM_THRESHOLD(WaitEvents, 1)
+ MVK_CMD_TYPE_POOL(SetEvent)
+ MVK_CMD_TYPE_POOL_LAST(ResetEvent)
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+index e6e7786..da35bc6 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+@@ -16,6 +16,7 @@
+  * limitations under the License.
+  */
+ 
++#include "MVKBBPassStats.h"
+ #include "MVKDeviceMemory.h"
+ #include "MVKBuffer.h"
+ #include "MVKImage.h"
+@@ -223,7 +224,7 @@
+ 	heapDesc.cpuCacheMode = _mtlCPUCacheMode;
+ 	// For now, use tracked resources. Later, we should probably default
+ 	// to untracked, since Vulkan uses explicit barriers anyway.
+-	heapDesc.hazardTrackingMode = MTLHazardTrackingModeTracked;
++	heapDesc.hazardTrackingMode = mvkbb::untracked() ? MTLHazardTrackingModeUntracked : MTLHazardTrackingModeTracked;	// bbport
+ 	heapDesc.size = _allocationSize;
+ 	_mtlHeap = [getMTLDevice() newHeapWithDescriptor: heapDesc];	// retained
+ 	[heapDesc release];
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+index ef8ca60..7c5a69a 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+@@ -16,6 +16,7 @@
+  * limitations under the License.
+  */
+ 
++#include "MVKBBPassStats.h"
+ #include "MVKImage.h"
+ #include "MVKQueue.h"
+ #include "MVKSwapchain.h"
+@@ -176,6 +177,7 @@ static uint32_t mvkGetMTLTextureIOSurfaceID(id<MTLTexture> tex) {
+     mtlTexDesc.arrayLength = _image->_arrayLayers;
+ 	mtlTexDesc.usage = _image->getMTLTextureUsage(_mtlPixFmt);
+     mtlTexDesc.storageMode = _image->getMTLStorageMode();
++    if (mvkbb::untracked()) { mtlTexDesc.hazardTrackingMode = MTLHazardTrackingModeUntracked; }	// bbport
+     mtlTexDesc.cpuCacheMode = _image->getMTLCPUCacheMode();
+     // For 2D views of 3D and block texel views, we alias the underlying memory.
+     // Ensure that it remains consistent by disabling GPU layout optimization.
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKInstance.mm b/MoltenVK/MoltenVK/GPUObjects/MVKInstance.mm
+index 757fe16..0bbaba5 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKInstance.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKInstance.mm
+@@ -17,6 +17,7 @@
+  */
+ 
+ 
++#include "MVKCmdBBMetalFX.h"
+ #include "MVKInstance.h"
+ #include "MVKDevice.h"
+ #include "MVKFoundation.h"
+@@ -634,6 +635,7 @@
+ 	ADD_DVC_ENTRY_POINT(vkCmdBindIndexBuffer);
+ 	ADD_DVC_ENTRY_POINT(vkCmdBindVertexBuffers);
+ 	ADD_DVC_ENTRY_POINT(vkCmdDraw);
++	ADD_DVC_ENTRY_POINT(vkCmdUpscaleMetalFXBB);	// bbport: MVKCmdBBMetalFX.h
+ 	ADD_DVC_ENTRY_POINT(vkCmdDrawIndexed);
+ 	ADD_DVC_ENTRY_POINT(vkCmdDrawIndirect);
+ 	ADD_DVC_ENTRY_POINT(vkCmdDrawIndexedIndirect);
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+index dec4b45..c6449e8 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+@@ -16,6 +16,7 @@
+  * limitations under the License.
+  */
+ 
++#include "MVKBBPassStats.h"
+ #include "MVKInstance.h"
+ #include "MVKQueue.h"
+ #include "MVKSurface.h"
+@@ -146,6 +147,7 @@
+ template VkResult MVKQueue::submit(uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence, MVKCommandUse cmdUse);
+ 
+ VkResult MVKQueue::submit(const VkPresentInfoKHR* pPresentInfo) {
++	if (mvkbb::passStatsEnabled()) { mvkbb::PassStats::get().present(); }
+ 	return submit(new MVKQueuePresentSurfaceSubmission(this, pPresentInfo));
+ }
+ 
+@@ -533,7 +535,7 @@
+ 
+ 	// If this is the last command buffer in the submission, we're losing the context and need synchronize
+ 	// current barrier fences to the ones at index 0, which will be what the next submision starts with.
+-	if (isUsingMetalArgumentBuffers() && signalCompletion) {
++	if ((isUsingMetalArgumentBuffers() || mvkbb::untracked()) && signalCompletion) {
+ 		_encodingContext.syncFences(getDevice(), _activeMTLCommandBuffer);
+ 	}
+ 
+diff --git a/MoltenVK/MoltenVK/Vulkan/mvk_datatypes.mm b/MoltenVK/MoltenVK/Vulkan/mvk_datatypes.mm
+index 9ee4db1..3089c4e 100644
+--- a/MoltenVK/MoltenVK/Vulkan/mvk_datatypes.mm
++++ b/MoltenVK/MoltenVK/Vulkan/mvk_datatypes.mm
+@@ -16,6 +16,7 @@
+  * limitations under the License.
+  */
+ 
++#include "MVKBBPassStats.h"
+ #include "MVKEnvironment.h"
+ #include "mvk_datatypes.hpp"
+ #include "MVKPixelFormats.h"
+@@ -918,5 +919,6 @@ MVK_PUBLIC_SYMBOL MTLCPUCacheMode mvkMTLCPUCacheModeFromVkMemoryPropertyFlags(Vk
+ 
+ MVK_PUBLIC_SYMBOL MTLResourceOptions mvkMTLResourceOptions(MTLStorageMode mtlStorageMode,
+ 														   MTLCPUCacheMode mtlCPUCacheMode) {
+-	return (mtlStorageMode << MTLResourceStorageModeShift) | (mtlCPUCacheMode << MTLResourceCPUCacheModeShift);
++	return (mtlStorageMode << MTLResourceStorageModeShift) | (mtlCPUCacheMode << MTLResourceCPUCacheModeShift) |
++		   (mvkbb::untracked() ? MTLResourceHazardTrackingModeUntracked : 0);	// bbport
+ }
+diff --git a/MoltenVK/MoltenVK/Vulkan/vulkan.mm b/MoltenVK/MoltenVK/Vulkan/vulkan.mm
+index b15fe5e..6852647 100644
+--- a/MoltenVK/MoltenVK/Vulkan/vulkan.mm
++++ b/MoltenVK/MoltenVK/Vulkan/vulkan.mm
+@@ -3924,6 +3924,16 @@ MVK_PUBLIC_VULKAN_SYMBOL void vkQueueInsertDebugUtilsLabelEXT(
+ 	MVKTraceVulkanCallEnd();
+ }
+ 
++// bbport: MVKCmdBBMetalFX.h
++MVK_PUBLIC_VULKAN_SYMBOL void vkCmdUpscaleMetalFXBB(
++	VkCommandBuffer                             commandBuffer,
++	const VkBBMetalFXUpscaleInfo*               pInfo) {
++
++	MVKTraceVulkanCallStart();
++	MVKAddCmd(BBMetalFXUpscale, commandBuffer, pInfo);
++	MVKTraceVulkanCallEnd();
++}
++
+ MVK_PUBLIC_VULKAN_SYMBOL void vkCmdBeginDebugUtilsLabelEXT(
+ 	VkCommandBuffer                             commandBuffer,
+ 	const VkDebugUtilsLabelEXT*                 pLabelInfo) {
