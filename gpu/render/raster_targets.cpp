@@ -669,6 +669,20 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     if (key.motion_vectors) {
         object_motion->Attach(state, state.width, state.height); // the G-buffer's motion target
     }
+    // bbcoop: a pass with no attachments and no pixel shader (vertex shaders that only write
+    // memory) kept the device-maximum area, 16384x16384, which a tile-based GPU (Apple) still
+    // walks: ~0.3 ms each, ~20 per frame (Wooloomooloo2/bloodborne_mac_port 5137a3e: 27.5 -> 33.9
+    // FPS in the city). Not while occlusion queries count samples. BB_NO_OUTPUT_AREA=0: full area.
+    static const bool tiny_area = [] {
+        const char* env = std::getenv("BB_NO_OUTPUT_AREA");
+        return !(env && env[0] == '0');
+    }();
+    if (tiny_area && state.num_color_attachments == 0 && !state.depth_stencil_attachment.has_depth &&
+        !state.depth_stencil_attachment.has_stencil &&
+        !pipeline->GetStages()[u32(Shader::SwStage::Fragment)] && !OcclusionTranslated()) {
+        state.width = 16;
+        state.height = 16;
+    }
     return state;
 }
 

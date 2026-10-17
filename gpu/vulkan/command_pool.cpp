@@ -38,7 +38,11 @@ void CommandPool::Grow() {
     const vk::Device device = instance.GetDevice();
     ASSERT(device.allocateCommandBuffers(&info, buffers.data()) == vk::Result::eSuccess);
     for (const vk::CommandBuffer buffer : buffers) {
+#ifndef __APPLE__
+        // bbcoop: unnamed on macOS: MoltenVK labels every Metal encoder after its command
+        // buffer's name, ~4% of the recording thread (Wooloomooloo2/bloodborne_mac_port 64d6bfb).
         SetObjectName(device, buffer, "CommandPool: Command Buffer {}", entries.size());
+#endif
         entries.push_back({buffer, 0});
     }
 }
