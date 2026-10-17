@@ -12,7 +12,8 @@ checked: the new entries exist and everything else is unchanged. run.sh calls th
 
 Gun gems (on unless BB_GUN_GEMS=0): MOD_DIR also gets dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx,
 where every firearm's WeaponGenParam rows +1..+10 without an open gem slot get the Hunter Pistol's one
-slot at the same level. Only those rows' bytes change; the rest of the file is the game's own.
+slot at the same level (Droplet, or the shape in GUN_GEM_SHAPES). Only those rows' bytes change; the rest of the file
+is the game's own.
 
 Needs soulstruct 2.6 (python3 -m venv ~/.local/share/bbcoop-re; .../bin/pip install soulstruct).
 Works around two soulstruct quirks (docs/respec_re.md):
@@ -110,6 +111,11 @@ SLOT_CLOSED = 0x80000000          # gemSlotType bit 31: closed (0x80000100 in th
 GEN_FIELDS = ("wepParamId",) + tuple(f"{k}_{i}" for i in range(5) for k in ("gemSlotType", "gemGenId")) + (
     "equipableGemSegmentMask", "reserveGemSlotNo_0", "reserveGemSlotNo_1", "reserveGemSlotNo_2")
 GEN_ROW_SIZE = 48                 # wepParamId, then only gem slot fields: bytes 4..47 are what a row's slots are
+GEN_SLOT0 = 4                     # gemSlotType_0 (u32) right after wepParamId
+RADIAL, TRIANGLE = 0x1, 0x2       # gemSlotType = slot shape: 0x1 Radial, 0x2 Triangle, 0x4 Waning, 0x8 Droplet
+# Firearms whose slot gets another shape than the Hunter Pistol's Droplet (Asad, 2026-10-17).
+GUN_GEM_SHAPES = {"Flamesprayer": TRIANGLE, "Rosmarinus": TRIANGLE, "Hunter's Torch": TRIANGLE,
+                  "Fist of Gratia": RADIAL}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Minimal EZL encoder (same encoding as the game; validated against vanilla bytes in `self_test_ezl`).
@@ -397,8 +403,9 @@ def firearm_families(weapons) -> dict[int, list[int]]:
 
 
 def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
-    """(firearm families, model family, {WeaponGenParam row: model row}): every firearm row +1..+10 without an open
-    slot, paired with the Hunter Pistol's row at the same level. +0 rows and slotted rows stay as they are."""
+    """(firearm families, model family, {WeaponGenParam row: (model row, slot shape)}): every firearm row +1..+10
+    without an open slot, paired with the Hunter Pistol's row at the same level and its family's shape (the model's,
+    or GUN_GEM_SHAPES). +0 rows and slotted rows stay as they are."""
     assert WEAPON_GEN_PARAM_ST.get_internal_names() == GEN_FIELDS
     weapons = load_param(gameparam, "EquipParamWeapon", EQUIP_PARAM_WEAPON_ST)
     gen = load_param(gameparam, "WeaponGenParam", WEAPON_GEN_PARAM_ST)
@@ -414,10 +421,17 @@ def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
     model = model[0]
     model_slots = {tuple(open_slots(gen.rows[model * 10000 + level * 100])) for level in range(1, 11)}
     assert len(model_slots) == 1 and len(next(iter(model_slots))) == 1, model_slots
-    # Every gem category may sit in that slot type (GemCategoryParam enableSlotTypeA..F = slot types 1 << 0..5).
-    letter = "ABCDEF"[next(iter(model_slots))[0].bit_length() - 1]
-    assert all(getattr(c, f"EnableSlotType{letter}") for c in load_param(
-        gameparam, "GemCategoryParam", GEM_CATEGORY_PARAM_ST).rows.values())
+    model_shape = next(iter(model_slots))[0]
+    shapes = {}
+    for gun, shape in GUN_GEM_SHAPES.items():
+        found = [f for f in families if weapon_names.get(f * 10000) == gun]
+        assert len(found) == 1, (gun, found)
+        shapes[found[0]] = shape
+    # Every gem category may sit in those slot types (GemCategoryParam enableSlotTypeA..F = slot types 1 << 0..5).
+    categories = load_param(gameparam, "GemCategoryParam", GEM_CATEGORY_PARAM_ST).rows.values()
+    for shape in {model_shape, *shapes.values()}:
+        letter = "ABCDEF"[shape.bit_length() - 1]
+        assert all(getattr(c, f"EnableSlotType{letter}") for c in categories), letter
     edits = {}
     for family in sorted(families):
         for level in range(1, 11):
@@ -426,17 +440,19 @@ def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
                 continue
             assert gen.rows[row_id].WeaponParamID == row_id, row_id
             if not open_slots(gen.rows[row_id]):
-                edits[row_id] = model * 10000 + level * 100
+                edits[row_id] = (model * 10000 + level * 100, shapes.get(family, model_shape))
     return families, model, edits
 
 
-def apply_gun_gems(gameparam: Binder, edits: dict[int, int]):
+def apply_gun_gems(gameparam: Binder, edits: dict[int, tuple[int, int]]):
     entry = find_entry(gameparam, "WeaponGenParam.param")
     data = bytearray(entry.get_uncompressed_data())
     offsets = param_row_offsets(data)
-    for row_id, model_id in edits.items():
+    for row_id, (model_id, shape) in edits.items():
         dst, src = offsets[row_id], offsets[model_id]
+        assert not struct.unpack_from("<I", data, src + GEN_SLOT0)[0] & SLOT_CLOSED, model_id
         data[dst + 4:dst + GEN_ROW_SIZE] = data[src + 4:src + GEN_ROW_SIZE]  # all but wepParamId
+        struct.pack_into("<I", data, dst + GEN_SLOT0, shape)
     entry.set_uncompressed_data(bytes(data))
 
 
@@ -553,8 +569,10 @@ def gun_gems(item: Binder, param_src: Path, param_out: Path):
     param_out.write_bytes(bytes(gameparam))
     verify_gun_gems(param_src, param_out, families, edits)
     changed = sorted({row_id // 10000 for row_id in edits})
+    shape_name = {0x1: "Radial", 0x2: "Triangle", 0x4: "Waning", 0x8: "Droplet"}
+    family_shape = {row_id // 10000: shape for row_id, (_, shape) in edits.items()}
     print(f"Gun gems: {len(edits)} rows in {len(changed)} firearm families get {name(model)}'s slot: "
-          + ", ".join(name(f) for f in changed))
+          + ", ".join(f"{name(f)} ({shape_name[family_shape[f]]})" for f in changed))
     print(f"wrote {param_out}")
 
 
@@ -630,9 +648,9 @@ def same_container(src: Path, out: Path):
     return a, b
 
 
-def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits: dict[int, int]):
+def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits: dict[int, tuple[int, int]]):
     """Only WeaponGenParam changes, and in it only the slot bytes of the planned rows; afterwards every firearm row
-    +1..+10 has exactly one open slot, and each changed row has its model row's slots."""
+    +1..+10 has exactly one open slot, and each changed row has its model row's slots, its first slot in its shape."""
     a, b = same_container(src, out)
     changed = [PureWindowsPath(x.path).name for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
@@ -645,10 +663,11 @@ def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits:
     offsets = param_row_offsets(old)
     assert {r for r, o in offsets.items() if old[o:o + GEN_ROW_SIZE] != new[o:o + GEN_ROW_SIZE]} == set(edits)
     gen = TypedParam(WEAPON_GEN_PARAM_ST).from_bytes(new)
-    for row_id, model_id in edits.items():
+    for row_id, (model_id, shape) in edits.items():
         row, model = gen.rows[row_id], gen.rows[model_id]
         assert row.WeaponParamID == row_id
-        assert [row[f] for f in GEN_FIELDS[1:]] == [model[f] for f in GEN_FIELDS[1:]], row_id
+        assert row["gemSlotType_0"] == shape, row_id
+        assert [row[f] for f in GEN_FIELDS[2:]] == [model[f] for f in GEN_FIELDS[2:]], row_id
     for ids in families.values():
         for row_id in ids:
             if row_id % 10000:
