@@ -24,7 +24,11 @@ int main(void) {
         "3KOuC4RmZZU#T#U",  /* sceNpSignalingInitialize */
     };
     static const char *const local="XbkjbobZlCY#l#m"; /* sceNpTrophyCreateContext */
+#ifdef __APPLE__ /* bbcoop */
+    const char *path="out/gpu/libbbnet.dylib";
+#else
     const char *path="out/gpu/libbbnet.so";
+#endif
     void *module=dlopen(path,RTLD_NOW|RTLD_LOCAL); /* the same handle the runtime gets */
     if (!module) {
         printf("SKIP: no online module (%s)\n",dlerror());

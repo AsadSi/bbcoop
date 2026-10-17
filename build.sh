@@ -9,6 +9,7 @@ darwin=0
 if [[ $(uname -s) == Darwin ]]; then
     darwin=1
     deps=${BB_MACOS_DEPS:-${VCPKG_ROOT:+$VCPKG_ROOT/installed/x64-osx}}
+    [[ -z $deps && -d out/mac-deps/lib ]] && deps=$PWD/out/mac-deps # bbcoop: scripts/mac-deps.sh
     if [[ -z $deps || ! -d $deps/lib ]]; then echo 'Set BB_MACOS_DEPS (or VCPKG_ROOT) to the x86-64 dependency prefix.' >&2; exit 1; fi
     # Only that prefix: the arm64 Homebrew's libraries cannot link into this build.
     export PKG_CONFIG_LIBDIR=$deps/lib/pkgconfig:$deps/share/pkgconfig
@@ -128,18 +129,18 @@ if [[ ${1:-} == --test ]]; then
     out/online-test
     "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
     out/content-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_seamless.c src/runtime_seamless.c -o out/seamless-test
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_seamless.c src/runtime_seamless.c -o out/seamless-test
     out/seamless-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -Isrc tests/test_hooks.c src/runtime_hooks.c -lm -o out/hooks-test
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -Isrc tests/test_hooks.c src/runtime_hooks.c -lm -o out/hooks-test
     out/hooks-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_seamless_hooks.c src/runtime_seamless_hooks.c src/runtime_hooks.c -lm -o out/seamless-hooks-test # bbcoop
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_seamless_hooks.c src/runtime_seamless_hooks.c src/runtime_hooks.c -lm -o out/seamless-hooks-test # bbcoop
     out/seamless-hooks-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
     out/respec-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_camera.c src/runtime_camera.c src/runtime_hooks.c -lm -o out/camera-test # bbcoop
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_camera.c src/runtime_camera.c src/runtime_hooks.c -lm -o out/camera-test # bbcoop
     out/camera-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_messenger.c src/runtime_messenger.c -o out/messenger-test # bbcoop
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror tests/test_messenger.c src/runtime_messenger.c -o out/messenger-test # bbcoop
     out/messenger-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_ik.c src/runtime_ik.c src/runtime_hooks.c -lm -o out/ik-test # bbcoop
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_ik.c src/runtime_ik.c src/runtime_hooks.c -lm -o out/ik-test # bbcoop
     out/ik-test
 fi

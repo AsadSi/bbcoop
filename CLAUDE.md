@@ -52,7 +52,9 @@ what's still open.
 - Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
   `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
   level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
-  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_GUN_GEMS=0` (the respec
+  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_TEST_WARP=<lamp>` (cheat: once in
+  game, to a lamp: dream, cathedral-ward, central-yharnam, old-yharnam or a respawn point ID <map><block>29xx;
+  with tools/new_game.sh --continue it starts a test mid-game), `BB_GUN_GEMS=0` (the respec
   mod leaves out the gem slot it gives every firearm).
 - Camera and frame rate: `BB_CAMERA_ACCEL=1` keeps the game's turn ramp (off by default), `BB_CAMERA_RATES=0`
   leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
@@ -73,10 +75,13 @@ what's still open.
 - `../shadnet-p2p-ref` is its matchmaking server, in C++.
 
 ## Running
-- The game only runs on x86-64 Linux with Asad's own decrypted v1.09 dump. Use `./build.sh`,
-  then `./run.sh`.
+- The game runs on x86-64 Linux (and on macOS, below) with Asad's own decrypted v1.09 dump. Use
+  `./build.sh`, then `./run.sh`.
 - `./build.sh --test` runs the C tests. The Python tests are in `tests/test_*.py`.
-- The Mac (arm64) can edit code and run the Python tests, but can't run the game.
+- macOS (Apple Silicon): upstream's port (bbport `macos-0.6`: PR 191 on 0.6, MetalFX; its `docs/MACOS.md`),
+  an x86-64 build that Rosetta 2 runs, with MoltenVK. `scripts/mac-deps.sh` builds the x86-64 libraries into
+  `out/mac-deps` (build.sh takes it, or `BB_MACOS_DEPS`). bbcoop's own Mac bits are marked `bbcoop` (hook
+  entry symbol, BSD `stat` in run.sh, Rosetta's Intel CPU in patches.py, tools/new_game.sh without setsid).
 - Never commit game files, dumps or saves.
 - Driving the game (Steam Deck, KDE): `tools/new_game.sh` (clinic profile), `--continue` with
   `BB_SNAPSHOT=out/<profile>`, `tools/press.sh` for pad input, and `tools/frame.sh` (or `shot.sh`) for

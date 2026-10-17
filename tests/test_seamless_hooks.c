@@ -107,8 +107,8 @@ int main(void) {
 
     void (*summon_build)(uint64_t, uint64_t) = (void (*)(uint64_t, uint64_t))(image + 0x01874710);
     void (*fountain)(uint64_t) = (void (*)(uint64_t))(image + 0x1000);
+    /* bbcoop: kept reserved, not unmapped: macOS hands a freed address out again (a TLS block). */
     void *gone = mmap(NULL, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    munmap(gone, 4096);
     const uint64_t unmapped = (uint64_t)(uintptr_t)gone;
 
     /* The game's local player (0x0553E878 -> +0x60) with effect 9001 (co-op host) in its list. */

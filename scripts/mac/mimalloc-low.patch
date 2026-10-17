@@ -1,0 +1,35 @@
+diff --git a/src/prim/unix/prim.c b/src/prim/unix/prim.c
+index d31f666..e8a8762 100644
+--- a/src/prim/unix/prim.c
++++ b/src/prim/unix/prim.c
+@@ -329,6 +329,30 @@ static void* unix_mmap(void* addr, size_t size, size_t try_alignment, int protec
+   if (_mi_os_has_overcommit()) {
+     flags |= MAP_NORESERVE;
+   }
++  #if defined(MI_LOW_BASE)
++  // bbcoop: every heap block stays in [MI_LOW_BASE, MI_LOW_END): the PS4 game packs the host
++  // pointers it is given into 40 bits. The window is probed from where the last mapping ended and
++  // wraps once, so address space freed by large blocks is used again.
++  if (addr == NULL) {
++    static _Atomic(uintptr_t) low_next;
++    const size_t align = (try_alignment > _mi_os_page_size() ? try_alignment : _mi_os_page_size());
++    uintptr_t at = mi_atomic_load_relaxed(&low_next);
++    bool wrapped = false;
++    for (;;) {
++      at = _mi_align_up(at < MI_LOW_BASE ? MI_LOW_BASE : at, align);
++      if (at + size > MI_LOW_END) {
++        if (wrapped) break;
++        wrapped = true; at = MI_LOW_BASE; continue;
++      }
++      p = unix_mmap_prim((void*)at, size, protect_flags, flags, fd);
++      if (p == (void*)at) { mi_atomic_store_relaxed(&low_next, at + size); return p; }
++      if (p != MAP_FAILED) munmap(p, size);
++      at += (size < MI_SEGMENT_SIZE ? MI_SEGMENT_SIZE : size);
++    }
++    _mi_error_message(ENOMEM, "no room below %p for 0x%zx bytes\n", (void*)MI_LOW_END, size);
++    return NULL;
++  }
++  #endif
+   #if defined(PROT_MAX)
+   protect_flags |= PROT_MAX(PROT_READ | PROT_WRITE); // BSD
+   #endif
