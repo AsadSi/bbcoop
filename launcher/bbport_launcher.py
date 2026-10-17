@@ -364,7 +364,8 @@ def fsr411_build_command(upscaler, loader=None):
 
 def online_module():
     """The online module beside the GPU library (gpu/bbnet; a build without its libraries has none)."""
-    return (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / "libbbnet.so").is_file()
+    lib = "libbbnet.dylib" if sys.platform == "darwin" else "libbbnet.so"  # bbcoop: macOS
+    return (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / lib).is_file()
 
 
 def game_environment(s):
@@ -426,6 +427,7 @@ def game_environment(s):
         server = s["online_server"].strip() or online.SHADNET_SERVER
         community = online.community_address(s["online_community"])
         env["BB_ONLINE"] = "1"
+        env["BB_SKIP_NETWORK_CHOICE"] = "0"  # bbcoop: the skip patch picks offline (scripts/patches.py)
         env["BB_SHADNET_SERVER"] = server
         env["BB_SHADNET_WEBAPI"] = online.webapi_setting(s["online_webapi"], server, community)
         env["BB_SHADNET_NPID"] = s["online_npid"].strip()
