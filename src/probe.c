@@ -46,6 +46,7 @@ const char *seamless_hooks_install(unsigned char *image, uint64_t size); /* bbco
 const char *camera_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_camera.c */
 const char *messenger_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_messenger.c */
 const char *ik_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_ik.c */
+const char *papers_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_papers.c */
 const char *respec_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_respec.c */
 int respec_text_hook_installed(void); /* bbcoop: runtime_respec.c */
 const char *saveslots_install(unsigned char *image, uint64_t size, int text_hook); /* bbcoop: runtime_saveslots.c */
@@ -560,6 +561,7 @@ int main(int argc, char **argv) {
     { const char *error = camera_install(image, size); if (error) fail(error); } /* bbcoop: docs/camera_re.md */
     messenger_install(image, size); /* bbcoop: BB_MESSENGER_RADIUS */
     { const char *error = ik_install(image, size); if (error) fail(error); } /* bbcoop: docs/animation_re.md */
+    { const char *error = papers_install(image, size); if (error) fail(error); } /* bbcoop: docs/papers_re.md */
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
