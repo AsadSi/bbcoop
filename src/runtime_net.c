@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h> /* _NSGetExecutablePath */
+#endif
 
 static char game_folder[PATH_MAX], game_serial[16], game_title[128], game_version[16];
 
@@ -61,12 +64,21 @@ static BbNetResolveFn module_resolve(void) {
         snprintf(path,sizeof(path),"%s",forced);
     } else {
         char exe[PATH_MAX-32];
+#ifdef __APPLE__
+        uint32_t length=sizeof(exe);
+        if (_NSGetExecutablePath(exe,&length)) return NULL;
+#else
         const ssize_t n=readlink("/proc/self/exe",exe,sizeof(exe)-1);
         if (n<=0) return NULL;
         exe[n]=0;
+#endif
         char *slash=strrchr(exe,'/');
         if (slash) *slash=0;
+#ifdef __APPLE__
+        snprintf(path,sizeof(path),"%s/gpu/libbbnet.dylib",exe);
+#else
         snprintf(path,sizeof(path),"%s/gpu/libbbnet.so",exe);
+#endif
     }
     /* RTLD_LOCAL: its C++ (network and NP libraries) stays out of the process's symbol scope. */
     void *module=dlopen(path,RTLD_NOW|RTLD_LOCAL);
