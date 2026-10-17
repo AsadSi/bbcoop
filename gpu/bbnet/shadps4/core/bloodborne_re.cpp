@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "core/bloodborne_re.h"
+#include "core/bbcoop_loot.h" // bbcoop: mirrored loot (bbcoop_loot.inc)
 
 #include <algorithm>
 #include <array>
@@ -9482,6 +9483,9 @@ std::vector<std::pair<s32, u32>> bbsc_guest_drop_queue; // (item lot, NpcParam r
 
 void NoteBbscGuestEnemyDeath(u64 dead) {
     static const bool enabled = EnvFlagEnabled("SHADPS4_BBSC_GUEST_ITEMS");
+    if (BbcoopLootMirroring()) {
+        return; // bbcoop: the drop a hunter picks up is mirrored to the guest instead (bbcoop_loot.inc)
+    }
     if (!enabled || image_base == 0 || !BbscGuestInHostWorld() || GetLocalPlayerType() != 1 ||
         !ReadablePointer(dead, 0x1E8) || dead == GetLocalPlayerCharacter() ||
         (ReadValue<u32>(dead, 0x1E1) & 0x240000) != 0) {
@@ -13641,6 +13645,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbscRelayHostLock();
         TickBbscBossRewards();
         TickBbscGuestDrops();
+        TickBbcoopLoot(); // bbcoop: mirrored loot
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();
@@ -14331,6 +14336,8 @@ bool BbscConnectFirstPlacementFresh() {
 }
 
 } // namespace
+
+#include "bbcoop_loot.inc" // bbcoop: mirrored loot
 
 void OnBbscHostBossPacket(std::int32_t boss) {
     bbsc_host_boss_id = boss;
@@ -15314,6 +15321,7 @@ void InstallReverseEngineeringTrace() {
     InstallBbscQuitHook();
     InstallBbscDeathTraceHooks();
     InstallBbscBannerHook();
+    InstallBbcoopLoot(); // bbcoop: mirrored loot
 }
 
 BbscPresence GetBbscPresence() {
