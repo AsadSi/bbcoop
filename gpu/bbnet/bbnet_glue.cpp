@@ -505,6 +505,10 @@ extern "C" __attribute__((visibility("default"))) void bbnet_image_ready(std::ui
         return;
     }
     MemoryPatcher::g_game_serial = "CUSA03173";
+    // bbcoop: the executable is 1.09 whatever param.sfo's APP_VER says (prepare.py ran only the
+    // supported image, by its hash); some 1.09 dumps keep APP_VER 01.00 there (the US CUSA00900
+    // one), and BBSC's persistence declined them.
+    Common::Singleton<PSF>::Instance()->app_ver = "01.09";
     // BBSC finds the save it backs up and journals in shadPS4's folders; the port's are
     // <user>/savedata/<user id>/CUSA00207/SPRJ0005 (BBSC_SAVE_DIR: the folder of userdata0000..).
     if (!std::getenv("BBSC_SAVE_DIR")) {
