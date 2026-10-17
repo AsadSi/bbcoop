@@ -21,10 +21,15 @@ FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)']
 # bbcoop: Uncap FPS++ and 120 FPS++ are ps4_cheats' of 2026-10-10, with yogesh1239's timestep fixes
 # and the sprint fix built in. BB_FPS_PATCH=old selects the previous Uncap FPS++ (2026-08-28).
 OLD_FPS_PRESETS={'uncap':['Uncap FPS++ (2026-08-28)','Sprint Fix (High FPS)']}
+# Above 30 FPS the frame rate is done by hooks in the game's code (gpu/shim/bbport_frame_rate.cpp:
+# 60 and 90 are the same as uncap, at most that many frames a second): no patches. The patches
+# only with BB_FRAME_HOOKS=0 (comparisons).
 
 
 def fps_patches(fps, env=os.environ):
     """The frame rate patches for a BB_FPS preset (BB_FPS_PATCH=old: the previous version)."""
+    if fps!='30' and env.get('BB_FRAME_HOOKS','1')!='0':
+        return []
     if env.get('BB_FPS_PATCH','')=='old' and fps in OLD_FPS_PRESETS:
         return list(OLD_FPS_PRESETS[fps])
     return list(FPS_PRESETS[fps])

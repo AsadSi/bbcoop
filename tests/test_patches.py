@@ -155,23 +155,27 @@ def runtime_sites():
 
 
 class FpsPatchTests(unittest.TestCase):
-    """bbcoop: the current Uncap FPS++ (ps4_cheats 2026-10-10) by default, BB_FPS_PATCH=old the previous."""
+    """bbcoop: with the frame rate hooks off (BB_FRAME_HOOKS=0), the current Uncap FPS++ (ps4_cheats
+    2026-10-10), BB_FPS_PATCH=old the previous."""
     NEW = ['Uncap FPS++']
     OLD = ['Uncap FPS++ (2026-08-28)', 'Sprint Fix (High FPS)']
+    PATCHES = {'BB_FRAME_HOOKS': '0'}
 
     def test_uncap_preset_selects_the_current_patch_by_default(self):
-        self.assertEqual(patches.fps_patches('uncap', {}), self.NEW)
-        self.assertEqual(patches.fps_patches('uncap', {'BB_FPS_PATCH': 'new'}), self.NEW)
+        self.assertEqual(patches.fps_patches('uncap', self.PATCHES), self.NEW)
+        self.assertEqual(patches.fps_patches('uncap', {**self.PATCHES, 'BB_FPS_PATCH': 'new'}), self.NEW)
         # The sprint fix is part of it now.
         sprint = covered(['Sprint Fix (High FPS)'])
         uncap = covered(self.NEW)
         self.assertTrue(all(uncap.get(a) == b for a, b in sprint.items()))
 
     def test_old_switch_selects_the_previous_patch(self):
-        self.assertEqual(patches.fps_patches('uncap', {'BB_FPS_PATCH': 'old'}), self.OLD)
+        self.assertEqual(patches.fps_patches('uncap', {**self.PATCHES, 'BB_FPS_PATCH': 'old'}), self.OLD)
         # Only the uncapped preset has an old version.
-        self.assertEqual(patches.fps_patches('90', {'BB_FPS_PATCH': 'old'}), patches.FPS_PRESETS['90'])
-        self.assertEqual(patches.fps_patches('120', {}), ['120 FPS++'])
+        self.assertEqual(patches.fps_patches('90', {**self.PATCHES, 'BB_FPS_PATCH': 'old'}), patches.FPS_PRESETS['90'])
+        self.assertEqual(patches.fps_patches('120', self.PATCHES), ['120 FPS++'])
+        # The hooks (default) take no patches, old or new.
+        self.assertEqual(patches.fps_patches('uncap', {'BB_FPS_PATCH': 'old'}), [])
         for names in (self.NEW, self.OLD, ['120 FPS++']):
             self.assertGreater(len(compile_patches(XML, names, '01.09', SEGMENTS)), 100, names)
 
@@ -237,6 +241,16 @@ class ExternalPatchTests(unittest.TestCase):
 
     def test_built_in_file_is_not_external(self):
         self.assertEqual(external_patches(XML.parent), [])
+
+
+class FrameRateTests(unittest.TestCase):
+    def test_frame_rate_needs_no_patches_but_with_hooks_off(self):
+        # Above 30 FPS hooks in the game's code run the frame rate (gpu/shim/bbport_frame_rate.cpp).
+        for fps in ('uncap', '60', '90', '120', '30'):  # bbcoop: 120
+            self.assertEqual(patches.fps_patches(fps, {}), [], fps)
+        # bbcoop: its Uncap FPS++ has the sprint fix built in (FpsPatchTests).
+        self.assertEqual(patches.fps_patches('uncap', {'BB_FRAME_HOOKS': '0'}), ['Uncap FPS++'])
+        self.assertEqual(patches.fps_patches('60', {'BB_FRAME_HOOKS': '0'}), ['60 FPS++'])
 
 
 class IntelTonemapTests(unittest.TestCase):
