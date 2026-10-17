@@ -39,6 +39,8 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Extra enemies | Only along the main routes of the large areas (Central Yharnam first, then Old Yharnam, Cathedral Ward, Forbidden Woods, Yahar'gul and Cainhurst). One extra group per guest, at points where enemies already gather. Never in boss arenas | Bosses already scale through HP. Adding enemies to an arena changes the fight's design and makes friendly fire chaotic, while open areas are where co-op gets trivial | Claude |
 | Respec | At the Doll, in the Hunter's Dream, outside a session. "Reset Attributes" returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
 | Respec entry | A new option in the Doll's dialogue (her talk script), not a settings-menu button | Feels native; chosen over the faster menu button | Asad, 2026-10-09 |
+| Seamless engine | Upstream 0.6's BBSC (`BB_BBSC=1`, the online module) is the seamless co-op, run with bbcoop's numbers (BBSC_SCALE_ENEMY_HP/BOSS_HP 50, DAMAGE 10 per extra player, BBSC's stagger) and bbcoop's mods (respec, gun gems, camera, IK). bbcoop's own seamless patches and hooks (`BB_SEAMLESS=1`) stay as the fallback and are skipped while BBSC is on: both patch the same sites. BBSC already has scaling, guest items and boss rewards, shared progress, lamp warps together, up to five hunters, the host-death rule and respawn in place | "Take the best of both" | Asad, 2026-10-17 |
+| Frame rate | 0.6's frame-rate hooks (48 per-frame values follow the frame time, running fixed), with bbcoop's camera chase rates and foot-IK correction on top (no shared sites). bbcoop's Uncap FPS++ patch stays selectable with `BB_FRAME_HOOKS=0` | "The best one, a mix of both" | Asad, 2026-10-17 |
 | Seamless patches | Go through `src/runtime_seamless.c`, which checks the original bytes, not bbport's XML loader | The XML path writes without checking, so a wrong address would silently corrupt the game | Claude |
 | Our code | In new `src/runtime_*.c` files, which `build.sh` already compiles, with only small marked edits to upstream files | bbport changes every day, so rebasing must stay cheap | Claude |
 | US edition | CUSA00900 v1.09 is supported alongside CUSA03173 v1.09, with no per-build offset table | Its eboot.bin loads to the same image as EU 1.09 (SHA-256 071df19c…4c0a), so every offset and import is the same. Saves are per title ID, and the NP comm ID is region-specific (US NPWR05818_00) | Asad (request); checked 2026-10-09 by Claude |
@@ -78,6 +80,10 @@ Supporting pieces:
 - **Upgrade costs:** 3/5/8 Blood Stone Shards for +1 to +3, 3/5/8 Twin Shards for +4 to +6, 3/5/8 Chunks for +7 to +9, and 1 Blood Rock for +10 (gamerguides.com). A December 2015 patch changed upgrade costs, so refunds read EquipMtrlSetParam from the game instead of using this table.
 
 ## Open
+
+- **Co-op on BBSC (2026-10-17), not in BBSC yet:** extra enemies in co-op (the Difficulty row); every pickup
+  mirrored to all players (BBSC: each guest keeps what they pick up, boss rewards for all); a guest's death
+  respawning at the host's last lamp (BBSC: respawn in place or spectate). Untested: a real session.
 
 - **Online and co-op are on hold (Asad, 2026-10-11).** Plan: `~/.claude/plans/make-a-plan-on-scalable-kurzweil.md`.
   - **Done:** the launcher's Host/Join, the server, the ported NP libraries, and the seamless patches and hooks.
