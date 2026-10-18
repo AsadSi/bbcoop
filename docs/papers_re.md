@@ -127,7 +127,21 @@ game runs were made.
   - NPC hunters that use papers, with AtkParam_Pc attacks and a real weapon, would get the new formula too.
   - Check both with the trace.
 
-## Not verified yet (needs the game)
+## Verified in game (Asad, 2026-10-18)
+- The test used the Empty Phantasm Shell with `BB_PAPERS_TRACE=1`. Log: `out/play-ab-papers-20261018.log`.
+- Ludwig's Holy Blade +10 (8101000, base 100 at +0 and 200 now). Every bonus matched the formula:
+  - sword R1 810000 (70%): +76.2
+  - 810400/410/430 (100%): +108.9
+  - 810420 (106%): +115.4
+  - sword charged R2 810170 (120%): +130.7
+  - transformed charged R2 810930 (220%): +239.6
+- Threaded Cane +10 (22001000): +84.9.
+- The status screen uses attack 101 (100%) and shows the new value.
+- Viscerals, done with and without the Shell, produced no trace line, so they get no bonus.
+- Against `BB_PAPERS=vanilla`, the transformed R2 did a little more damage with the new formula. That fits an
+  uncharged R2 (+131 instead of +80 arcane before the enemy's arcane defence). Asad accepted it.
+
+## Was open before the test
 - That a paper's bonus in game matches the formula (`BB_PAPERS_TRACE=1` logs it).
 - That the status screen's attack display shows the new value: it uses AtkParam 101 (100%), so it would show
   80 x base/90 + 10% of the current base.
