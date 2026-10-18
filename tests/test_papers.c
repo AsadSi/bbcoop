@@ -83,15 +83,22 @@ static unsigned char *fresh(void) {
 /* Runs the site as the effect loop reaches it: rbx = the attack, r14 = the effect's row, xmm4/xmm3/xmm2 =
  * its +magic/+fire/+bolt (lanes[0..2], written back), rbp = frame (rbp-0x60 is read, 16-byte aligned). */
 void run_site(void *site, const void *attack, const void *row, float *lanes, void *frame);
+#ifdef __APPLE__ /* Mach-O: a leading underscore, no .type or .size */
+#define SITE_BEGIN ".globl _run_site\n_run_site:\n"
+#define SITE_END ""
+#else
+#define SITE_BEGIN ".globl run_site\n.type run_site, @function\nrun_site:\n"
+#define SITE_END ".size run_site, .-run_site\n"
+#endif
 __asm__(
-    ".text\n.globl run_site\n.type run_site, @function\nrun_site:\n"
+    ".text\n" SITE_BEGIN
     "    push %rbp\n push %rbx\n push %r14\n push %rcx\n"
     "    mov %rsi, %rbx\n mov %rdx, %r14\n"
     "    vmovss 0(%rcx), %xmm4\n vmovss 4(%rcx), %xmm3\n vmovss 8(%rcx), %xmm2\n"
     "    mov %r8, %rbp\n sub $8, %rsp\n call *%rdi\n add $8, %rsp\n"
     "    pop %rcx\n vmovss %xmm4, 0(%rcx)\n vmovss %xmm3, 4(%rcx)\n vmovss %xmm2, 8(%rcx)\n"
     "    pop %r14\n pop %rbx\n pop %rbp\n ret\n"
-    ".size run_site, .-run_site\n");
+    SITE_END);
 
 static _Alignas(16) unsigned char frame[256];
 static int near(float a, float b) { return fabsf(a - b) < 1e-3f; }
