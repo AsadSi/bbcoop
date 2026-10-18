@@ -48,6 +48,7 @@ const char *camera_install(unsigned char *image, uint64_t size); /* bbcoop: runt
 const char *messenger_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_messenger.c */
 const char *ik_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_ik.c */
 const char *respec_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_respec.c */
+const char *context_lock_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_context_lock.c */
 
 /* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
  * (andn/bextr/blsr/tzcnt), MOVBE, LZCNT and POPCNT, thousands of each in eboot.bin. A CPU without
@@ -725,6 +726,7 @@ int main(int argc, char **argv) {
     { const char *error = camera_install(image, size); if (error) fail(error); } /* bbcoop: docs/camera_re.md */
     messenger_install(image, size); /* bbcoop: BB_MESSENGER_RADIUS */
     { const char *error = ik_install(image, size); if (error) fail(error); } /* bbcoop: docs/animation_re.md */
+    { const char *error = context_lock_install(image, size); if (error) fail(error); } /* bbcoop: load race */
     if (!cpu_only) bbgpu_patch_image(image, size);
 #ifdef _WIN32
     patch_guest_tls(segments, ns);
