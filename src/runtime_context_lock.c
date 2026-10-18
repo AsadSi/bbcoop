@@ -256,6 +256,12 @@ const char *context_lock_install(unsigned char *image, uint64_t size) {
     }
     for (size_t i = 0; i < HOOK_COUNT; ++i) {
         unsigned char *target = image + hooks[i].offset;
+        /* The GPU library's guest code hooks (#162's guard at 0x2199310 shares the frame job's page) go
+         * in first and leave their page read and execute: write under our own permission. probe.c sets
+         * every segment's protection afterwards. */
+        uintptr_t first = (uintptr_t)target & ~(uintptr_t)4095, last = (uintptr_t)target + hooks[i].prologue_size;
+        if (mprotect((void *)first, last - first, PROT_READ | PROT_WRITE | PROT_EXEC))
+            return "Context lock: the game's code is not writable";
         put_jump(target, (uint64_t)(uintptr_t)entries[i]);
         memset(target + 14, 0xcc, hooks[i].prologue_size - 14); /* never reached */
     }
