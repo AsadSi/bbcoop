@@ -35,6 +35,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <SDL3/SDL.h>
+#include "runtime_padmotion.h" /* bbcoop */
 #include <sys/stat.h>
 
 #define ERR_INVALID_ARG ((int32_t)0x80920001)
@@ -547,6 +548,7 @@ static void sample_host(PadData *d) {
         // Back/Select on pads without a touch surface is a left-side click.
         if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0);
         if (touch_right) touch_click(d,1);
+        padmotion_sample(g,d->orientation,d->acceleration,d->angular_velocity,d->timestamp); /* bbcoop: motion */
     }
     apply_keyboard(d,k); /* the bound mouse buttons too */
     apply_mouse_look(d,mouse_dx,mouse_dy,d->timestamp,captured);
@@ -753,12 +755,16 @@ static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
 }
 static ABI int32_t pad_ok_handle(int32_t handle) { return handle==PAD_HANDLE && opened ? 0 : ERR_INVALID_HANDLE; }
 static ABI int32_t pad_ok_handle_flag(int32_t handle, uint8_t flag) { (void)flag; return pad_ok_handle(handle); }
+static ABI int32_t pad_reset_orientation(int32_t handle) { /* bbcoop: runtime_padmotion.c */
+    if (handle==PAD_HANDLE && opened) padmotion_reset_orientation();
+    return pad_ok_handle(handle);
+}
 
 static const RuntimeExport exports[]={
     {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadClose",pad_close},
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
     {"scePadGetControllerInformation",pad_info}, {"scePadSetVibration",pad_vibration},
-    {"scePadResetOrientation",pad_ok_handle},
+    {"scePadResetOrientation",pad_reset_orientation}, /* bbcoop */
     {"scePadSetAngularVelocityDeadbandState",pad_ok_handle_flag}, {"scePadSetTiltCorrectionState",pad_ok_handle_flag},
     {"scePadSetMotionSensorState",pad_ok_handle_flag},
 };
