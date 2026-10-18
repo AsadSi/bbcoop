@@ -20,6 +20,8 @@ what's still open.
   `runtime_saveslots.c` (Duplicate in the Load Game list, Triangle; `docs/saveslots_re.md`; `BB_SAVESLOTS=0` off),
   `runtime_papers.c` (Fire/Bolt Paper and Empty Phantasm Shell scale with the weapon and the attack; `docs/papers_re.md`;
   `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs the bonuses),
+  `runtime_padmotion.c` (the DualShock's gyro and accelerometer for scePadReadState, called from `runtime_pad.c`;
+  `docs/padmotion_re.md`; `BB_PAD_MOTION=0` off, `BB_PAD_MOTION_TRACE=1` logs the values),
   and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
   files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
