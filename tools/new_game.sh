@@ -47,7 +47,7 @@ alive() { pgrep -f "$own" > /dev/null || { echo "The game exited; see out/sessio
 
 # Title screen: the pad is open and the logos have played.
 for i in $(seq 1 180); do sleep 1; grep -q 'pad opened' out/session.log && break; done
-sleep "${TITLE_WAIT:-25}"; alive
+sleep "${TITLE_WAIT:-5}"; alive  # bbcoop: with skip_intro the title takes input ~2 s after the pad opens
 mounts() { grep -c "save data 'SPRJ0005' mounted" out/session.log; }
 before=$(mounts)
 press down; press cross 1          # Play Offline: the save is read before the notice shows
