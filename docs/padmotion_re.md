@@ -47,6 +47,6 @@ GOT 0x53e4ea0, stub 0x2bbf4d8.
 - Checked on Asad's DualShock 4 (USB, SDL3 outside the game), lying flat: accel (−0.13, 9.60, 1.87) m/s², which is
   (−0.01, 0.98, 0.19) g, and the gyro within ±0.003 rad/s.
 
-## Not verified yet (needs the game)
-- Whether moving the pad while holding X does what it did on the PS4.
-- If it does nothing, or the wrong thing, suspect the signs of the axes first. The trace shows the values.
+## Verified in game (Asad, 2026-10-18)
+- Holding X and moving the DualShock 4 works as on the PS4.
+- If a later change breaks it, suspect the signs of the axes first. `BB_PAD_MOTION_TRACE=1` shows the values.
