@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""bbcoop: builds the respec data mod: "Reset Attributes" and "Refund Weapon Upgrades" in the Plain
-Doll's talk menu (Bloodborne 1.09). The game's files are not in the repository, so the mod is made
+"""bbcoop: builds the respec data mod: "Reset Attributes" in the Plain Doll's talk menu and "Refund
+Weapon Upgrades" in the Workshop's workbench menu (Bloodborne 1.09). The game's files are not in the repository, so the mod is made
 from the player's own copy:
 
     tools/respec_mod.py GAME_DIR MOD_DIR
 
 GAME_DIR is the game folder (with dvdroot_ps4/) or dvdroot_ps4 itself; MOD_DIR gets
 dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx (Doll = t210304.esd, machine x7, the main talk
-menu) and dvdroot_ps4/msg/engus/menu.msgbnd.dcx (entry 30, EventText). The output is re-read and
+menu; workbench = t210692.esd, machine x2) and dvdroot_ps4/msg/engus/menu.msgbnd.dcx (entry 30, EventText). The output is re-read and
 checked: the new entries exist and everything else is unchanged. run.sh calls this.
 
 Gun gems (on unless BB_GUN_GEMS=0): MOD_DIR also gets dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx,
 where every firearm's WeaponGenParam rows +1..+10 without an open gem slot get the Hunter Pistol's one
-slot at the same level. Only those rows' bytes change; the rest of the file is the game's own.
+slot at the same level (Droplet, or the shape in GUN_GEM_SHAPES). Only those rows' bytes change; the rest of the file
+is the game's own.
 
 Needs soulstruct 2.6 (python3 -m venv ~/.local/share/bbcoop-re; .../bin/pip install soulstruct).
 Works around two soulstruct quirks (docs/respec_re.md):
@@ -32,7 +33,9 @@ from pathlib import Path, PureWindowsPath
 from soulstruct.containers import Binder
 from soulstruct.base.params.param import TypedParam
 from soulstruct.base.text.fmg import FMG
-from soulstruct.bloodborne.params.paramdef import EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST, WEAPON_GEN_PARAM_ST
+from soulstruct.bloodborne.params.paramdef import (EQUIP_MTRL_SET_PARAM_ST, EQUIP_PARAM_GOODS_ST,
+                                                   EQUIP_PARAM_PROTECTOR_ST, EQUIP_PARAM_WEAPON_ST, GEM_CATEGORY_PARAM_ST,
+                                                   WEAPON_GEN_PARAM_ST)
 from soulstruct.bloodborne.ezstate.esd import TalkESD
 from soulstruct.base.ezstate.esd.command import Command
 from soulstruct.base.ezstate.esd.condition import Condition
@@ -48,18 +51,21 @@ GAME = OUT = Path()  # set by main()
 TALK_REL = "script/talk/m21_00_00_00.talkesdbnd.dcx"
 MSG_REL = "msg/engus/menu.msgbnd.dcx"
 DOLL_ESD = "t210304.esd"
-WORKSHOP_ESD = "t210692.esd"      # the Workshop tools (the altar); machine x2 state 1 opens Fortify Weapon
-WORKSHOP_FORTIFY_SM = 0x80000000 - 2
+WORKSHOP_ESD = "t210692.esd"      # the Workshop's workbench (Fortify Weapon / Repair Weapons / Blood Gem Fortification /
+WORKSHOP_SM = 0x80000000 - 2      # Arcane Haze / Leave): machine x2; state 1 opens Fortify Weapon
 MENU_SM = 0x80000000 - 7          # "x7" = Doll's main talk menu (Channel Blood Echoes / Talk / Give ... / Leave)
 EVENT_TEXT_ENTRY_ID = 30          # menu.msgbnd entry 30 = EventText (talk-list labels 15000xxx, dialogs 1001xxxx)
 DIALOG_TEXT_ENTRY_ID = 204        # menu.msgbnd entry 204 = MenuDialogs_SP (the Fortify confirm is 221000)
+KEYGUIDE_TEXT_ENTRY_ID = 202      # menu.msgbnd entry 202 = the SP key guide (button labels; "Delete" is 400003)
 
 # Event flags (block 72100xxx: Hunter's Dream NPC flags; 72100500-72100999 unused by every ESD/EMEVD in the game).
 FLAG_RESPEC_REQUESTED = 72100900  # ESD sets 1 after "Yes"; native code performs respec, then clears it.
-FLAG_REFUND_MODE = 72100901       # 1 while the Doll's fortify menu is open; ESD clears on return to menu.
+FLAG_REFUND_MODE = 72100901       # 1 while the workbench's refund menu is open; ESD clears on return to menu.
 
-# Talk-list result indices (existing: 1 Channel, 2 Talk, 3 Give Ornament, 50 Leave).
-IDX_RESPEC, IDX_REFUND = 4, 5
+# Talk-list result indices. Doll: 1 Channel, 2 Talk, 3 Give Ornament, 50 Leave. Workbench: 1 Fortify, 2 Repair,
+# 3 Blood Gem Fortification, 4 Arcane Haze, 50 Leave.
+IDX_RESPEC = 4
+IDX_REFUND = 5
 
 # New EventText IDs (all unused in every FMG of menu.msgbnd and item.msgbnd).
 TXT_RESPEC_LABEL = 15009100
@@ -70,12 +76,29 @@ NEW_TEXT = {
     TXT_REFUND_LABEL: "Refund Weapon Upgrades",
     TXT_RESPEC_CONFIRM: "Reset all attributes?\nThis costs 1 Insight.",
 }
-# The Fortify confirm in refund mode (runtime_respec.c swaps 221000 for it; 22109x is unused).
+# The Fortify confirm in refund mode (runtime_respec.c swaps 221000 for it; 221090..221100 are unused):
+# 221090 + the selected weapon's level (+1..+10) lists the materials it gives back (refund_texts() adds them
+# from the game's own names and costs); 221090 itself is the fallback without a list.
 TXT_REFUND_CONFIRM = 221090
 NEW_DIALOG_TEXT = {TXT_REFUND_CONFIRM: "Refund this weapon's upgrades?\nIts upgrade materials are returned."}
+# The Load Game list's Duplicate (src/runtime_saveslots.c): its button label and its confirm, which replaces
+# Delete's "OK to delete selected profile?" (406013) while Duplicate runs. 400090 and 40609x are unused.
+NEW_KEYGUIDE_TEXT = {400090: "Duplicate"}
+NEW_DIALOG_TEXT.update({
+    406090: "Duplicate selected profile?\nThe copy is added to the list as a separate profile.",
+    406091: "There is no free profile slot to duplicate into.\nDelete a profile to make room.",
+})
+GOODS_NAME_ENTRY_ID = 10          # item.msgbnd entry 10 = goods names
+MAX_UPGRADE = 10
+# The step to +n costs EquipMtrlSetParam row n*100 (first pair only), as src/runtime_respec_rules.c's table,
+# which refunds them: refund_texts() checks the game's rows against this.
+UPGRADE_STEPS = [(3000, 3), (3000, 5), (3000, 8), (3010, 3), (3010, 5), (3010, 8), (3020, 3), (3020, 5), (3020, 8),
+                 (3030, 1)]
 
-# New state IDs in machine x7 (vanilla uses 0..30).
-S_RESPEC_ASK, S_RESPEC_SET, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE = 31, 32, 33, 34, 35
+# New state IDs: the Doll's machine x7 (vanilla 0..30), the workbench's machine x2 (vanilla 0..26).
+S_RESPEC_ASK, S_RESPEC_SET = 31, 32
+S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE = 27, 28, 29
+WS_ROOT, WS_LIST, WS_CHOICE = 2, 6, 3  # workbench: menu root (after every action), list built, list choice
 
 # Gun gems. A weapon's gem slots come from its WeaponGenParam row (row id = weapon id = family*10000 + level*100);
 # upgrading opens the slots the next row has open (0x1a94340) and never closes one.
@@ -88,6 +111,11 @@ SLOT_CLOSED = 0x80000000          # gemSlotType bit 31: closed (0x80000100 in th
 GEN_FIELDS = ("wepParamId",) + tuple(f"{k}_{i}" for i in range(5) for k in ("gemSlotType", "gemGenId")) + (
     "equipableGemSegmentMask", "reserveGemSlotNo_0", "reserveGemSlotNo_1", "reserveGemSlotNo_2")
 GEN_ROW_SIZE = 48                 # wepParamId, then only gem slot fields: bytes 4..47 are what a row's slots are
+GEN_SLOT0 = 4                     # gemSlotType_0 (u32) right after wepParamId
+RADIAL, TRIANGLE = 0x1, 0x2       # gemSlotType = slot shape: 0x1 Radial, 0x2 Triangle, 0x4 Waning, 0x8 Droplet
+# Firearms whose slot gets another shape than the Hunter Pistol's Droplet (Asad, 2026-10-17).
+GUN_GEM_SHAPES = {"Flamesprayer": TRIANGLE, "Rosmarinus": TRIANGLE, "Hunter's Torch": TRIANGLE,
+                  "Fist of Gratia": RADIAL}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Minimal EZL encoder (same encoding as the game; validated against vanilla bytes in `self_test_ezl`).
@@ -274,25 +302,15 @@ def load_esd(bnd: Binder, basename: str) -> TalkESD:
 
 def edit_doll(esd: TalkESD):
     sm = esd.state_machines[MENU_SM]
-    assert max(sm) == 30 and not set(sm) & {S_RESPEC_ASK, S_RESPEC_SET, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE}
+    assert max(sm) == 30 and not set(sm) & {S_RESPEC_ASK, S_RESPEC_SET}
 
-    # State 1 (menu root, re-entered after every action): clear refund mode so an interrupted refund never leaks into
-    # the Workshop's own fortify menu.
-    sm[1].enter_commands.append(cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
-
-    # State 5: add list entries just before "Leave" (index 50, last command).
+    # State 5: add the list entry just before "Leave" (index 50, last command).
     enter = sm[5].enter_commands
     assert bytes(enter[-1].args[0]) == num(50) + END
-    enter[-1:-1] = [
-        cmd(1, C_ADD_TALK_LIST, IDX_RESPEC, TXT_RESPEC_LABEL, -1),
-        cmd(1, C_ADD_TALK_LIST, IDX_REFUND, TXT_REFUND_LABEL, -1),
-    ]
+    enter[-1:-1] = [cmd(1, C_ADD_TALK_LIST, IDX_RESPEC, TXT_RESPEC_LABEL, -1)]
 
     # State 2 (wait for list choice): register 0 holds GetTalkListEntryResult() from the first condition.
-    sm[2].conditions += [
-        Condition(S_RESPEC_ASK, REG0_EQ(IDX_RESPEC)),
-        Condition(S_REFUND_SET, REG0_EQ(IDX_REFUND)),
-    ]
+    sm[2].conditions += [Condition(S_RESPEC_ASK, REG0_EQ(IDX_RESPEC))]
 
     # Reset attributes: Yes/No dialog -> Yes sets FLAG_RESPEC_REQUESTED -> back to menu. No/close -> back to menu.
     sm[S_RESPEC_ASK] = State(
@@ -310,7 +328,26 @@ def edit_doll(esd: TalkESD):
         enter_commands=[cmd(1, C_SET_FLAG, FLAG_RESPEC_REQUESTED, 1)],
     )
 
-    # Refund weapon upgrades: set refund flag -> open the Workshop fortify menu -> wait until closed -> clear flag.
+
+def edit_workshop(esd: TalkESD):
+    """The workbench gets "Refund Weapon Upgrades" just before "Leave": it switches refund mode on, opens the
+    Fortify list (the native refund mode follows the flag writes), waits until it is closed and switches it off.
+    The menu root and Fortify Weapon switch it off first, so an interrupted refund never leaks into a normal
+    fortify."""
+    sm = esd.state_machines[WORKSHOP_SM]
+    assert max(sm) == 26 and not set(sm) & {S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE}
+    state = sm[1]
+    assert [(c.bank, c.index) for c in state.enter_commands] == [(1, C_OPEN_FORTIFY)]
+    state.enter_commands.insert(0, cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
+    sm[WS_ROOT].enter_commands.append(cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
+
+    enter = sm[WS_LIST].enter_commands
+    assert [c.index for c in enter] == [C_ADD_TALK_LIST] * 5 and bytes(enter[-1].args[0]) == num(50) + END
+    assert not any(bytes(c.args[0]) == num(IDX_REFUND) + END for c in enter)
+    enter[-1:-1] = [cmd(1, C_ADD_TALK_LIST, IDX_REFUND, TXT_REFUND_LABEL, -1)]
+    assert sm[WS_CHOICE].conditions[1].test_ezl == REG0_EQ(1)
+    sm[WS_CHOICE].conditions += [Condition(S_REFUND_SET, REG0_EQ(IDX_REFUND))]
+
     sm[S_REFUND_SET] = State(
         S_REFUND_SET,
         conditions=[Condition(S_REFUND_MENU, ALWAYS)],
@@ -324,17 +361,9 @@ def edit_doll(esd: TalkESD):
     )
     sm[S_REFUND_DONE] = State(
         S_REFUND_DONE,
-        conditions=[Condition(1, ALWAYS)],
+        conditions=[Condition(WS_ROOT, ALWAYS)],
         enter_commands=[cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0)],
     )
-
-
-def edit_workshop(esd: TalkESD):
-    """The altar's Fortify Weapon switches refund mode off first: the native refund mode follows the
-    Doll's writes of the flag, and a talk interrupted with her menu open would otherwise leave it on."""
-    state = esd.state_machines[WORKSHOP_FORTIFY_SM][1]
-    assert [(c.bank, c.index) for c in state.enter_commands] == [(1, C_OPEN_FORTIFY)]
-    state.enter_commands.insert(0, cmd(1, C_SET_FLAG, FLAG_REFUND_MODE, 0))
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -374,8 +403,9 @@ def firearm_families(weapons) -> dict[int, list[int]]:
 
 
 def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
-    """(firearm families, model family, {WeaponGenParam row: model row}): every firearm row +1..+10 without an open
-    slot, paired with the Hunter Pistol's row at the same level. +0 rows and slotted rows stay as they are."""
+    """(firearm families, model family, {WeaponGenParam row: (model row, slot shape)}): every firearm row +1..+10
+    without an open slot, paired with the Hunter Pistol's row at the same level and its family's shape (the model's,
+    or GUN_GEM_SHAPES). +0 rows and slotted rows stay as they are."""
     assert WEAPON_GEN_PARAM_ST.get_internal_names() == GEN_FIELDS
     weapons = load_param(gameparam, "EquipParamWeapon", EQUIP_PARAM_WEAPON_ST)
     gen = load_param(gameparam, "WeaponGenParam", WEAPON_GEN_PARAM_ST)
@@ -391,10 +421,17 @@ def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
     model = model[0]
     model_slots = {tuple(open_slots(gen.rows[model * 10000 + level * 100])) for level in range(1, 11)}
     assert len(model_slots) == 1 and len(next(iter(model_slots))) == 1, model_slots
-    # Every gem category may sit in that slot type (GemCategoryParam enableSlotTypeA..F = slot types 1 << 0..5).
-    letter = "ABCDEF"[next(iter(model_slots))[0].bit_length() - 1]
-    assert all(getattr(c, f"EnableSlotType{letter}") for c in load_param(
-        gameparam, "GemCategoryParam", GEM_CATEGORY_PARAM_ST).rows.values())
+    model_shape = next(iter(model_slots))[0]
+    shapes = {}
+    for gun, shape in GUN_GEM_SHAPES.items():
+        found = [f for f in families if weapon_names.get(f * 10000) == gun]
+        assert len(found) == 1, (gun, found)
+        shapes[found[0]] = shape
+    # Every gem category may sit in those slot types (GemCategoryParam enableSlotTypeA..F = slot types 1 << 0..5).
+    categories = load_param(gameparam, "GemCategoryParam", GEM_CATEGORY_PARAM_ST).rows.values()
+    for shape in {model_shape, *shapes.values()}:
+        letter = "ABCDEF"[shape.bit_length() - 1]
+        assert all(getattr(c, f"EnableSlotType{letter}") for c in categories), letter
     edits = {}
     for family in sorted(families):
         for level in range(1, 11):
@@ -403,17 +440,19 @@ def plan_gun_gems(gameparam: Binder, weapon_names: dict[int, str]):
                 continue
             assert gen.rows[row_id].WeaponParamID == row_id, row_id
             if not open_slots(gen.rows[row_id]):
-                edits[row_id] = model * 10000 + level * 100
+                edits[row_id] = (model * 10000 + level * 100, shapes.get(family, model_shape))
     return families, model, edits
 
 
-def apply_gun_gems(gameparam: Binder, edits: dict[int, int]):
+def apply_gun_gems(gameparam: Binder, edits: dict[int, tuple[int, int]]):
     entry = find_entry(gameparam, "WeaponGenParam.param")
     data = bytearray(entry.get_uncompressed_data())
     offsets = param_row_offsets(data)
-    for row_id, model_id in edits.items():
+    for row_id, (model_id, shape) in edits.items():
         dst, src = offsets[row_id], offsets[model_id]
+        assert not struct.unpack_from("<I", data, src + GEN_SLOT0)[0] & SLOT_CLOSED, model_id
         data[dst + 4:dst + GEN_ROW_SIZE] = data[src + 4:src + GEN_ROW_SIZE]  # all but wepParamId
+        struct.pack_into("<I", data, dst + GEN_SLOT0, shape)
     entry.set_uncompressed_data(bytes(data))
 
 
@@ -475,10 +514,11 @@ def main():
     fmg_entry = [e for e in msg.entries if e.entry_id == EVENT_TEXT_ENTRY_ID][0]
     fmg = FMG.from_bytes(fmg_entry.get_uncompressed_data())
     item = Binder.from_path(GAME / ITEM_MSG_REL)
+    NEW_DIALOG_TEXT.update(refund_texts(item, Binder.from_path(GAME / GAMEPARAM_REL)))
     for b in (msg, item):
         for e in b.entries:
             ids = FMG.from_bytes(e.get_uncompressed_data()).entries
-            clash = (set(NEW_TEXT) | set(NEW_DIALOG_TEXT)) & set(ids)
+            clash = (set(NEW_TEXT) | set(NEW_DIALOG_TEXT) | set(NEW_KEYGUIDE_TEXT)) & set(ids)
             assert not clash, (e.path, clash)
     fmg.entries.update(NEW_TEXT)
     fmg_entry.set_uncompressed_data(bytes(fmg.to_writer()))
@@ -486,6 +526,10 @@ def main():
     dialog = FMG.from_bytes(dialog_entry.get_uncompressed_data())
     assert not set(NEW_DIALOG_TEXT) & set(dialog.entries)
     dialog.entries.update(NEW_DIALOG_TEXT)
+    keyguide_entry = [e for e in msg.entries if e.entry_id == KEYGUIDE_TEXT_ENTRY_ID][0]
+    keyguide = FMG.from_bytes(keyguide_entry.get_uncompressed_data())
+    keyguide.entries.update(NEW_KEYGUIDE_TEXT)
+    keyguide_entry.set_uncompressed_data(bytes(keyguide.to_writer()))
     dialog_entry.set_uncompressed_data(bytes(dialog.to_writer()))
     msg_out = OUT / MSG_REL
     msg_out.parent.mkdir(parents=True, exist_ok=True)
@@ -493,6 +537,11 @@ def main():
 
     verify(talk_src, talk_out, msg_src, msg_out)
     print(f"wrote {talk_out}\nwrote {msg_out}")
+    loadout = test_loadout(item, Binder.from_path(GAME / GAMEPARAM_REL))
+    kinds = {k: sum(line.startswith(k + " ") for line in loadout) for k in ("weapon", "armor", "goods")}
+    (OUT.parent / LOADOUT_NAME).write_text("\n".join(loadout) + "\n", encoding="utf-8")
+    print(f"Test loadout: {kinds['weapon']} weapons, {kinds['armor']} armor, {kinds['goods']} goods: wrote "
+          f"{OUT.parent / LOADOUT_NAME}")
 
     # --- 3. WeaponGenParam: one gem slot on every firearm (BB_GUN_GEMS=0: none, and no gameparam file) ---
     param_src, param_out = GAME / GAMEPARAM_REL, OUT / GAMEPARAM_REL
@@ -520,9 +569,68 @@ def gun_gems(item: Binder, param_src: Path, param_out: Path):
     param_out.write_bytes(bytes(gameparam))
     verify_gun_gems(param_src, param_out, families, edits)
     changed = sorted({row_id // 10000 for row_id in edits})
+    shape_name = {0x1: "Radial", 0x2: "Triangle", 0x4: "Waning", 0x8: "Droplet"}
+    family_shape = {row_id // 10000: shape for row_id, (_, shape) in edits.items()}
     print(f"Gun gems: {len(edits)} rows in {len(changed)} firearm families get {name(model)}'s slot: "
-          + ", ".join(name(f) for f in changed))
+          + ", ".join(f"{name(f)} ({shape_name[family_shape[f]]})" for f in changed))
     print(f"wrote {param_out}")
+
+
+def refund_texts(item: Binder, gameparam: Binder) -> dict[int, str]:
+    """The refund confirm for a weapon at +1..+10 (221091..221100): what it gives back, one material a line, as
+    the Fortify confirm names its material ("<name> × <count>")."""
+    rows = load_param(gameparam, "EquipMtrlSetParam", EQUIP_MTRL_SET_PARAM_ST).rows
+    steps = []
+    for n in range(1, MAX_UPGRADE + 1):
+        row = rows[n * 100]
+        assert row["materialId02"] == -1, (n, row["materialId02"])
+        steps.append((row["materialId01"], row["itemNum01"]))
+    assert steps == UPGRADE_STEPS, steps
+    names_entry = [e for e in item.entries if e.entry_id == GOODS_NAME_ENTRY_ID][0]
+    names = FMG.from_bytes(names_entry.get_uncompressed_data()).entries
+    texts = {}
+    for level in range(1, MAX_UPGRADE + 1):
+        totals: dict[int, int] = {}
+        for goods, count in steps[:level]:
+            totals[goods] = totals.get(goods, 0) + count
+        assert all(names.get(goods) for goods in totals), totals
+        texts[TXT_REFUND_CONFIRM + level] = "Refund this weapon's upgrades? You get back:\n" + "\n".join(
+            f"{names[goods]} × {count}" for goods, count in totals.items())
+    return texts
+
+
+# The test character's items (runtime_respec.c, BB_TEST_LOADOUT; a character named TEST): written next to the
+# mod's dvdroot_ps4, which is all the mod loader reads.
+LOADOUT_NAME = "test-loadout.txt"
+ARMOR_NAME_ENTRY_ID = 12          # item.msgbnd entry 12 = armor names
+BARE_FISTS = 1000000
+GOODS_KEY_ITEM = 1                # EquipParamGoods goodsType: 0 tools and consumables, 1 key items, 2 materials,
+LOADOUT_GOODS_TYPES = (0, 2, 6)   # 6 chalices
+GESTURES = range(800, 900)        # goods rows too (Point Forward .. League Oath), not inventory items
+
+
+def test_loadout(item: Binder, gameparam: Binder) -> list[str]:
+    """Every named weapon at its highest level (normal, Uncanny and Lost; shields and the plain Torch at +0), every
+    named armor piece, and every named non-key goods row at its full stack (maxNum), gestures left out."""
+    names = {e.entry_id: FMG.from_bytes(e.get_uncompressed_data()).entries for e in item.entries}
+    named = lambda entry, i: (n := names[entry].get(i)) and n not in ("*", "NOT NEEDED") and not n.startswith("en")
+    weapons = load_param(gameparam, "EquipParamWeapon", EQUIP_PARAM_WEAPON_ST).rows
+    armor = load_param(gameparam, "EquipParamProtector", EQUIP_PARAM_PROTECTOR_ST).rows
+    goods = load_param(gameparam, "EquipParamGoods", EQUIP_PARAM_GOODS_ST).rows
+    lines = [f"# bbcoop test character (BB_TEST_LOADOUT): weapon|armor|goods <id> <count>"]
+    for i in sorted(weapons):
+        if i % 10000 == 0 and i != BARE_FISTS and named(WEAPON_NAME_ENTRY_ID, i):
+            level = max(n for n in range(MAX_UPGRADE + 1) if i + n * 100 in weapons)
+            lines.append(f"weapon {i + level * 100} 1  # {names[WEAPON_NAME_ENTRY_ID][i]} +{level}")
+    for i in sorted(armor):
+        if named(ARMOR_NAME_ENTRY_ID, i):
+            lines.append(f"armor {i} 1  # {names[ARMOR_NAME_ENTRY_ID][i]}")
+    for i in sorted(goods):
+        row = goods[i]
+        if (row["goodsType"] in LOADOUT_GOODS_TYPES and row["maxNum"] > 0 and i not in GESTURES
+                and named(GOODS_NAME_ENTRY_ID, i)):
+            lines.append(f"goods {i} {row['maxNum']}  # {names[GOODS_NAME_ENTRY_ID][i]}")
+    return lines
 
 
 def same_container(src: Path, out: Path):
@@ -540,9 +648,9 @@ def same_container(src: Path, out: Path):
     return a, b
 
 
-def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits: dict[int, int]):
+def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits: dict[int, tuple[int, int]]):
     """Only WeaponGenParam changes, and in it only the slot bytes of the planned rows; afterwards every firearm row
-    +1..+10 has exactly one open slot, and each changed row has its model row's slots."""
+    +1..+10 has exactly one open slot, and each changed row has its model row's slots, its first slot in its shape."""
     a, b = same_container(src, out)
     changed = [PureWindowsPath(x.path).name for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
@@ -555,10 +663,11 @@ def verify_gun_gems(src: Path, out: Path, families: dict[int, list[int]], edits:
     offsets = param_row_offsets(old)
     assert {r for r, o in offsets.items() if old[o:o + GEN_ROW_SIZE] != new[o:o + GEN_ROW_SIZE]} == set(edits)
     gen = TypedParam(WEAPON_GEN_PARAM_ST).from_bytes(new)
-    for row_id, model_id in edits.items():
+    for row_id, (model_id, shape) in edits.items():
         row, model = gen.rows[row_id], gen.rows[model_id]
         assert row.WeaponParamID == row_id
-        assert [row[f] for f in GEN_FIELDS[1:]] == [model[f] for f in GEN_FIELDS[1:]], row_id
+        assert row["gemSlotType_0"] == shape, row_id
+        assert [row[f] for f in GEN_FIELDS[2:]] == [model[f] for f in GEN_FIELDS[2:]], row_id
     for ids in families.values():
         for row_id in ids:
             if row_id % 10000:
@@ -570,7 +679,7 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     for src, out in ((talk_src, talk_out), (msg_src, msg_out)):
         same_container(src, out)
 
-    # Talk: every entry except the Doll is byte-identical; Doll differs only by the intended edit.
+    # Talk: every entry except the Doll and the workbench is byte-identical; they differ only by the intended edits.
     a, b = Binder.from_path(talk_src), Binder.from_path(talk_out)
     changed = [PureWindowsPath(x.path).name for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
@@ -579,7 +688,16 @@ def verify(talk_src, talk_out, msg_src, msg_out):
     check_next_state_pointers(new_workshop)
     expected_workshop = load_esd(a, WORKSHOP_ESD)
     edit_workshop(expected_workshop)
-    assert esd_key(TalkESD.from_bytes(new_workshop)) == esd_key(expected_workshop)
+    workshop = TalkESD.from_bytes(new_workshop)
+    assert esd_key(workshop) == esd_key(expected_workshop)
+    wo, wn = esd_key(load_esd(a, WORKSHOP_ESD))[2], esd_key(workshop)[2]
+    assert set(wo) == set(wn) and all(wo[smi] == wn[smi] for smi in wo if smi != WORKSHOP_SM)
+    ws_states = sorted(s for s in set(wo[WORKSHOP_SM]) | set(wn[WORKSHOP_SM])
+                       if wo[WORKSHOP_SM].get(s) != wn[WORKSHOP_SM].get(s))
+    assert ws_states == [1, WS_ROOT, WS_CHOICE, WS_LIST, S_REFUND_SET, S_REFUND_MENU, S_REFUND_DONE], ws_states
+    ws_adds = [struct.unpack('<i', cmd_key(c)[2][1][1:5])[0]
+               for c in workshop.state_machines[WORKSHOP_SM][WS_LIST].enter_commands if cmd_key(c)[2][1][0] == 0x82]
+    assert ws_adds == [15000110, 15000120, 15000111, 10011050, TXT_REFUND_LABEL, 15000005], ws_adds
     new_bytes = find_entry(b, DOLL_ESD).get_uncompressed_data()
     check_next_state_pointers(new_bytes)
     new = TalkESD.from_bytes(new_bytes)
@@ -593,20 +711,22 @@ def verify(talk_src, talk_out, msg_src, msg_out):
         if smi != MENU_SM:
             assert ko[smi] == kn[smi], smi
     diff_states = sorted(s for s in set(ko[MENU_SM]) | set(kn[MENU_SM]) if ko[MENU_SM].get(s) != kn[MENU_SM].get(s))
-    assert diff_states == [1, 2, 5, 31, 32, 33, 34, 35], diff_states
+    assert diff_states == [2, 5, S_RESPEC_ASK, S_RESPEC_SET], diff_states
     sm = new.state_machines[MENU_SM]
     adds = [(int(cmd_key(c)[2][1][1:5].hex() and struct.unpack('<i', cmd_key(c)[2][1][1:5])[0]))
             for c in sm[5].enter_commands if c.index == C_ADD_TALK_LIST and cmd_key(c)[2][1][0] == 0x82]
-    assert adds == [15000100, 15000007, 15000008, TXT_RESPEC_LABEL, TXT_REFUND_LABEL, 15000005], adds
-    print(f"talk OK: only {DOLL_ESD} and {WORKSHOP_ESD} (fortify clears refund mode) changed; machine x7 states changed/added: {diff_states}; menu labels {adds}")
+    assert adds == [15000100, 15000007, 15000008, TXT_RESPEC_LABEL, 15000005], adds
+    print(f"talk OK: only {DOLL_ESD} (x7 states {diff_states}, labels {adds}) and {WORKSHOP_ESD} "
+          f"(x2 states {ws_states}, labels {ws_adds}) changed")
 
-    # Msg: every FMG except EventText and MenuDialogs_SP byte-identical; those two = vanilla + the new strings.
+    # Msg: every FMG except EventText, the key guide and MenuDialogs_SP byte-identical; those = vanilla + the new strings.
     a, b = Binder.from_path(msg_src), Binder.from_path(msg_out)
     changed = [x.entry_id for x, y in zip(a.entries, b.entries)
                if x.get_uncompressed_data() != y.get_uncompressed_data()]
-    assert changed == sorted([EVENT_TEXT_ENTRY_ID, DIALOG_TEXT_ENTRY_ID]), changed
+    assert changed == sorted([EVENT_TEXT_ENTRY_ID, KEYGUIDE_TEXT_ENTRY_ID, DIALOG_TEXT_ENTRY_ID]), changed
     norm = lambda d: {k: (v or "") for k, v in d.items()}
-    for entry_id, new_text in ((EVENT_TEXT_ENTRY_ID, NEW_TEXT), (DIALOG_TEXT_ENTRY_ID, NEW_DIALOG_TEXT)):
+    for entry_id, new_text in ((EVENT_TEXT_ENTRY_ID, NEW_TEXT), (DIALOG_TEXT_ENTRY_ID, NEW_DIALOG_TEXT),
+                               (KEYGUIDE_TEXT_ENTRY_ID, NEW_KEYGUIDE_TEXT)):
         fa = FMG.from_bytes([e for e in a.entries if e.entry_id == entry_id][0].get_uncompressed_data())
         fb = FMG.from_bytes([e for e in b.entries if e.entry_id == entry_id][0].get_uncompressed_data())
         ea, eb = norm(fa.entries), norm(fb.entries)

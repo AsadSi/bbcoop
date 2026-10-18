@@ -12,6 +12,7 @@
 #define SIZE 0x05600000
 __thread sigjmp_buf *runtime_fault_recover;
 const char *runtime_file_user_dir(void) { return "/nonexistent"; }
+int runtime_savedata_last_host(const char *dir, char *out, size_t size) { (void)dir; (void)out; (void)size; return 0; }
 static unsigned char *image;
 
 /* v1.09's GetLevelUpCost (0x157f050) in float32, as the game computes it. */

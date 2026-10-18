@@ -195,6 +195,146 @@ class FpsPatchTests(unittest.TestCase):
                 with self.subTest(fps=names[0], site=name):
                     self.assertFalse(set(range(offset, offset + length)) & set(fps), path)
 
+    def test_skip_groups_are_lines_of_the_current_patch(self):
+        # Every group address starts a line of Uncap FPS++; groups don't share lines.
+        meta = next(m for m in ET.parse(XML).getroot().iter('Metadata') if m.get('Name') == 'Uncap FPS++')
+        starts = {int(line.get('Address'), 0) for line in meta.iter('Line')}
+        seen = set()
+        for group, addresses in patches.FPS_SKIP_GROUPS.items():
+            with self.subTest(group=group):
+                self.assertTrue(set(addresses) <= starts, [hex(a) for a in set(addresses) - starts])
+                self.assertFalse(seen & set(addresses))
+                seen |= set(addresses)
+
+    def test_skip_and_try_switches(self):
+        # Default: the wind and cloth fixes; "none" or an empty value: Uncap FPS++ as published.
+        self.assertEqual(patches.fps_choices({}), (set(), ['bbcoop: Fixed Wind Offset Step 1/60',
+                                                           'bbcoop: Fixed Cloth Step 1/120',
+                                                           'bbcoop: Frame Time Floor 1/240'], False))
+        self.assertEqual(patches.fps_choices({'BB_FPS_TRY': 'none'}), (set(), [], True))
+        self.assertEqual(patches.fps_choices({'BB_FPS_TRY': ''}), (set(), [], True))
+        skip, variants, _ = patches.fps_choices({'BB_FPS_SKIP': 'grass, cloth', 'BB_FPS_TRY': 'step1972'})
+        self.assertEqual(skip, set(patches.FPS_SKIP_GROUPS['grass']) | set(patches.FPS_SKIP_GROUPS['cloth']))
+        self.assertEqual(variants, ['bbcoop: Frame Time Step at 0x1972A7D'])
+        with self.assertRaisesRegex(ValueError, 'BB_FPS_SKIP'):
+            patches.fps_choices({'BB_FPS_SKIP': 'flowers'})
+        with self.assertRaisesRegex(ValueError, 'BB_FPS_TRY'):
+            patches.fps_choices({'BB_FPS_TRY': 'wind'})
+        writes = compile_patches(XML, self.NEW, '01.09', SEGMENTS)
+        offsets = [o for o, _ in writes]
+        for group, addresses in patches.FPS_SKIP_GROUPS.items():
+            kept = patches.apply_fps_choices(writes, set(addresses), [])
+            self.assertEqual(len(kept), len(writes) - len(addresses), group)
+            # No other line still writes part of a skipped site: it keeps the game's bytes.
+            dropped = {o + i for o, data in writes if o + EBOOT_BASE in addresses for i in range(len(data))}
+            self.assertFalse(dropped & {o + i for o, data in kept for i in range(len(data))}, group)
+        for key, name in patches.FPS_TRY_VARIANTS.items():
+            variant = compile_patches(XML, [name], '01.09', SEGMENTS)
+            result = patches.apply_fps_choices(writes, set(), variant)
+            with self.subTest(variant=key):
+                self.assertEqual(result[-len(variant):], variant)
+                # The variant's bytes are the only writes to its sites (Uncap FPS++ itself has overlapping lines).
+                sites = {o + i for o, data in variant for i in range(len(data))}
+                others = {o + i for o, data in result[:-len(variant)] for i in range(len(data))}
+                self.assertFalse(sites & others)
+        # step1972 replaces Uncap FPS++'s 0x01972A7D line (the same 7 bytes).
+        step = compile_patches(XML, [patches.FPS_TRY_VARIANTS['step1972']], '01.09', SEGMENTS)
+        result = patches.apply_fps_choices(writes, set(), step, set(offsets))
+        self.assertIn(0x01972A7D - EBOOT_BASE, offsets)
+        self.assertEqual([d for o, d in result if o == 0x01972A7D - EBOOT_BASE], [bytes.fromhex('E97EE0B1039090')])
+        # Variants that overlap each other, or cut a line that is not Uncap FPS++'s, are refused.
+        wind = [compile_patches(XML, [patches.FPS_TRY_VARIANTS[k]], '01.09', SEGMENTS) for k in ('wind30', 'wind60')]
+        with self.assertRaisesRegex(ValueError, 'overlap'):
+            patches.apply_fps_choices(writes, set(), wind[0] + wind[1])
+        enemy = compile_patches(XML, ['Enemy Control'], '01.09', SEGMENTS)
+        with self.assertRaisesRegex(ValueError, 'cut'):
+            patches.apply_fps_choices(writes + enemy, set(), step, set(offsets))
+
+    def test_try_variant_branch_targets(self):
+        # The hand-assembled rel32 targets: jmp/call/jcc rel32 and RIP-relative loads.
+        def target(address, data, at, size):
+            return address + at + size + struct.unpack_from('<i', data, at)[0]
+        name = patches.FPS_TRY_VARIANTS['step1972']
+        lines = {o + EBOOT_BASE: d for o, d in compile_patches(XML, [name], '01.09', SEGMENTS)}
+        self.assertEqual(target(0x01972A7D, lines[0x01972A7D], 1, 4), 0x05490B00)
+        cave = lines[0x05490B00]
+        self.assertEqual(target(0x05490B00, cave, 2, 4), 0x0575A908)
+        self.assertEqual(target(0x05490B00, cave, 10, 4), 0x01972A84)
+        for key, constant in (('wind30', 0x04D26364), ('wind60', 0x04D29E70)):
+            lines = {o + EBOOT_BASE: d for o, d in
+                     compile_patches(XML, [patches.FPS_TRY_VARIANTS[key]], '01.09', SEGMENTS)}
+            self.assertEqual(target(0x027149EA, lines[0x027149EA], 4, 4), constant, key)
+            rewrite = lines[0x02714B26]
+            self.assertEqual(target(0x02714B26, rewrite, 14, 5), 0x05940DF9, key)  # cmp byte [rip+x], 0
+            self.assertEqual(0x02714B26 + 21 + rewrite[20], 0x02714B43, key)       # jne rel8
+        # Nothing else in the file writes the variants' sites or the cave.
+        names = [m.get('Name') for m in ET.parse(XML).getroot().iter('Metadata')]
+        ours = set(patches.FPS_TRY_VARIANTS.values())
+        sites = set().union(*(covered([n]) for n in ours))
+        # Other frame rate patches never go with Uncap FPS++; Enemy Control is refused by apply_fps_choices.
+        for other in names:
+            if other in ours or 'FPS' in other or other == 'Enemy Control':
+                continue
+            with self.subTest(other=other):
+                try:
+                    theirs = covered([other])
+                except ValueError:
+                    continue
+                self.assertFalse(sites & set(theirs))
+        for path, name, offset, length in runtime_sites():
+            self.assertFalse(set(range(offset, offset + length)) & sites, name)
+
+    def test_try_variants_fit_the_game_and_the_patch(self):
+        # Cave after Uncap FPS++'s own, outside every other patch.
+        uncap = covered(self.NEW)
+        for key, name in patches.FPS_TRY_VARIANTS.items():
+            ours = covered([name])
+            with self.subTest(variant=key):
+                outside = {a for a in ours if a not in uncap}
+                if key == 'step1972':
+                    cave = set(range(0x05490B00 - EBOOT_BASE, 0x05490B0E - EBOOT_BASE))
+                    self.assertEqual(outside, cave)
+                    self.assertGreater(min(cave), max(a for a in uncap if a < 0x054A0000 - EBOOT_BASE))
+                elif key == 'clothstep':
+                    # Its caves lie after the step1972 cave; inside Uncap FPS++ it replaces whole cloth lines.
+                    caves = {a for a in outside if a >= 0x05490000 - EBOOT_BASE}
+                    self.assertEqual(min(caves), 0x05490B10 - EBOOT_BASE)
+                    writes = compile_patches(XML, self.NEW, '01.09', SEGMENTS)
+                    variant = compile_patches(XML, [name], '01.09', SEGMENTS)
+                    replaced = {o + EBOOT_BASE for o, d in writes if any(o + i in ours for i in range(len(d)))}
+                    self.assertEqual(replaced, set(patches.FPS_SKIP_GROUPS['cloth']))
+                    patches.apply_fps_choices(writes, set(), variant, {o for o, _ in writes})
+                elif key in ('dtfloor', 'ctx30'):
+                    # Same hook as Uncap FPS++'s frame time cave (46 bytes at 0x02418E3D, replaced), its own
+                    # cave after the cloth ones.
+                    caves = {a for a in outside if a >= 0x05490000 - EBOOT_BASE}
+                    self.assertGreaterEqual(min(caves), 0x05490C00 - EBOOT_BASE)
+                    hook = set(range(0x02418E3D - EBOOT_BASE, 0x02418E3D - EBOOT_BASE + 46))
+                    self.assertEqual(outside - caves, set())
+                    self.assertEqual(set(ours) & set(uncap), hook)
+                else:
+                    # The wind step sites are vanilla in Uncap FPS++.
+                    self.assertEqual(outside, set(ours))
+        eboot = ROOT / 'out/eboot.elf'
+        if not eboot.is_file():
+            self.skipTest('needs out/eboot.elf')
+        elf = eboot.read_bytes()
+        text = lambda address, n: elf[address - EBOOT_BASE + 0x4000:address - EBOOT_BASE + 0x4000 + n]
+        # The game's bytes at the sites the variants rewrite, and a free cave.
+        self.assertEqual(text(0x01972A7D, 7).hex(), 'c745d08988083d')
+        self.assertEqual(text(0x027149EA, 8).hex(), 'c5796fb590feffff')
+        self.assertEqual(text(0x02714B26, 29).hex(),
+                         '488d05ccc22203803800c4412857d2448b8548feffff7505c441796fd6')
+        self.assertEqual(text(0x05490B00, 14), bytes(14))
+        # clothstep: the cloth manager's dt store, the pre-step's and adapter's substep reads, free caves,
+        # and its two floats in the zero RTTI slot of vtable 0x578CF60 (data segment).
+        self.assertEqual(text(0x013D545B, 8).hex(), 'c5fa118344010000')
+        self.assertEqual(text(0x00B6FBF0, 11).hex(), '8b401885c07504418b4720')
+        self.assertEqual(text(0x00B72225, 16).hex(), '8b40188945cc85c075068b43208945cc')
+        self.assertEqual(text(0x05490B10, 0x190), bytes(0x190))
+        data = 0x0578CF58 - EBOOT_BASE - 0x50dc000 + 0x50e0000
+        self.assertEqual(elf[data:data + 8], bytes(8))
+
     def test_dead_broken_call_is_left_out(self):
         # Upstream's 0x02715D71 call has its rel32 overwritten by the following 0x02715D75 line.
         writes = compile_patches(XML, self.NEW, '01.09', SEGMENTS)

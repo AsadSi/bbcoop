@@ -1,6 +1,6 @@
-/* bbcoop: respec at the Doll (Bloodborne 1.09, EU/US, one image). The Doll's talk script
- * (tools/respec_mod.py) sets event flag 72100900 for "Reset Attributes" and 72100901 while
- * "Refund Weapon Upgrades" has the weapon list open; this file does the rest on the game thread,
+/* bbcoop: respec at the Doll, weapon refund at the Workshop's workbench (Bloodborne 1.09, EU/US, one
+ * image). The talk scripts (tools/respec_mod.py) set event flag 72100900 for the Doll's "Reset
+ * Attributes" and 72100901 while the workbench's "Refund Weapon Upgrades" has the weapon list open; this file does the rest on the game thread,
  * from hooks on SetEventFlag (the talk script's c1_11 runs on the game thread) and on the per-update
  * SOS status (the session state, which also runs offline). Offsets are image offsets; every hook site and
  * every game function called is checked byte for byte first (docs/respec_re.md has the RE).
@@ -17,6 +17,7 @@
 #include "hooks.h"
 #include "runtime.h"
 #include "runtime_respec.h"
+#include "runtime_saveslots.h"
 #include <dirent.h>
 #include <ftw.h>
 #include <errno.h>
@@ -50,7 +51,7 @@
 #define HANDLE_RELEASE   0x01A8BC00
 #define GEM_FEATURES     0x0555235C /* the chalice feature block the debug "add gem" passes */
 #define ADD_ITEM_OR_STORAGE 0x01B5C8C0 /* what does not fit goes to the Messengers' storage */
-/* The "WeaponUpgrade" menu (the Workshop's Fortify Weapon; the Doll opens it too). It lists every
+/* The "WeaponUpgrade" menu (the workbench's Fortify Weapon, and its Refund Weapon Upgrades). It lists every
  * weapon; an item I holds the inventory index at +0x48, the item key at +0x4C and its cost. Hooked for
  * refund mode. (FrpgMenuDlgEquipCustomShop at 0x1736140 is a dead leftover.) */
 #define UPGRADE_LIST_FILTER_1 0x01C689E1 /* the tabs' "has a next level" filters: eax the id, esi the */
@@ -61,12 +62,14 @@
 #define TEXT_REFERENCE   0x01AE8CD1 /* in the menu text lookup (rdi out, esi FMG, edx text id), after its pushes */
 #define MENU_DIALOGS_FMG 204       /* MenuDialogs_SP */
 #define FORTIFY_CONFIRM_TEXT 221000 /* "Use <?demandSoul?> Blood Echoes and ... to fortify weapon?" */
-#define REFUND_CONFIRM_TEXT 221090 /* added by tools/respec_mod.py */
+#define REFUND_CONFIRM_TEXT 221090 /* added by tools/respec_mod.py; + the level (+1..+10): with the materials */
 #define UPGRADE_APPLY       0x01B5DD88 /* r14: I; rbx: equipment; edx: the target, before ChangeItemId */
 
 #define FLAG_RESPEC 72100900
 #define FLAG_REFUND 72100901
 #define FLAG_ENDGAME_GIVEN 72100902 /* BB_TEST_ENDGAME ran on this save */
+#define FLAG_LOADOUT_GIVEN 72100903 /* BB_TEST_LOADOUT filled this character */
+#define FLAG_TOOLS_GIVEN 72100904   /* BB_TEST_LOADOUT gave this character the Workshop tools */
 #define DREAM_AREA  0x15       /* m21_xx: the Hunter's Dream */
 #define SESSION_HOST 3
 #define SESSION_CLIENT 6
@@ -75,6 +78,7 @@
 #define NO_WEAPON_ROW 0x63 /* what the game looks up for an invalid id: no such row */
 #define BACKUPS_KEPT 20
 #define CATEGORY_WEAPON 0x00000000u
+#define CATEGORY_ARMOR  0x10000000u
 #define CATEGORY_GOODS  0x40000000u
 
 /* PlayerGameData. */
@@ -86,6 +90,7 @@ static const uint64_t pgd_stats[RESPEC_STAT_COUNT] = {0x40, 0x48, 0x58, 0x60, 0x
 #define PGD_ECHOES   0x94
 #define PGD_HP       0x14 /* current, then max */
 #define PGD_ORIGIN   0xCE
+#define PGD_NAME     0xA8 /* the character's name, UTF-16, 16 characters and a terminator */
 #define PGD_EQUIPMENT 0x1D0
 #define PGD_INVENTORY 0x328
 #define PGD_STORAGE  0x5B0
@@ -114,9 +119,15 @@ static int32_t test_warp; /* BB_TEST_WARP: 0 none */
 static const struct { const char *name; int32_t point; } warp_points[] = {
     {"dream", 2102950}, {"cathedral-ward", 2402950}, {"central-yharnam", 2412950}, {"old-yharnam", 2422950},
 };
-/* Refund mode, from the Doll's writes of flag 72100901, which is never stored: a stored flag is saved
+static int text_hook_installed; /* the menu text hook, which runtime_saveslots.c shares */
+int respec_text_hook_installed(void) { return text_hook_installed; }
+static const char *test_loadout; /* BB_TEST_LOADOUT: the item list for a character named TEST */
+/* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
+/* The item key the refund menu last computed a target for: the highlighted weapon, whose confirm is
+ * next. The key, not the item: that item is a temporary copy, gone by the time the confirm opens. */
+static uint32_t refund_item_key;
 static unsigned frames, dense; /* dense: frames of every-frame tracing left after a change */
 
 /* Reads and writes into live game structures arm runtime_fault_recover, as in
@@ -355,6 +366,9 @@ static int32_t find_weapon(uint64_t pgd, int32_t id) {
     return found;
 }
 
+static void give_loose_gems(uint64_t pgd, const char *who);
+static void wake_dream_and_warp(void);
+
 /* BB_TEST_ENDGAME: a late-game character for testing respec on a throwaway profile. */
 static void make_endgame_character(uint64_t pgd) {
     static const RespecStats stats = {150, {50, 40, 25, 40, 30, 15}};
@@ -410,8 +424,27 @@ static void make_endgame_character(uint64_t pgd) {
         }
         printf("Respec: BB_TEST_ENDGAME: gem %#x fitted in the Uncanny Saw Cleaver +10\n", read_u32(weapon, 0x3C));
     } else printf("Respec: BB_TEST_ENDGAME: no open Radial slot for a gem\n");
-    /* Loose gems to fit by hand, one GemGenParam row each with a fixed shape and fixed effects: Droplet
-     * (slot type 0x8, the guns' shape), Radial, Triangle and Waning. */
+    give_loose_gems(pgd, "BB_TEST_ENDGAME");
+    /* Gun gems: the slotless guns get the pistol's slot from +1 when the mod is in (BB_GUN_GEMS). */
+    static const int32_t guns[] = {15000100, 18101000, 18001000, 20001000, 34001000, 35001000};
+    for (size_t i = 0; i < sizeof(guns) / sizeof(guns[0]); ++i) {
+        int32_t index = find_weapon(pgd, guns[i]);
+        uint64_t gun = index >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
+                                                                  (uint32_t)index), 0) & 0xFFFF) * 8) : 0;
+        uint32_t type = gun >= 0x10000 ? read_u32(gun, 0x38) : 0;
+        printf("Respec: BB_TEST_ENDGAME: gun %d first gem slot %#x (%s)\n", guns[i], type,
+               gun < 0x10000 ? "weapon not found" : type & 0x80000000u ? "closed" : "open");
+    }
+    wake_dream_and_warp();
+    printf("Respec: BB_TEST_ENDGAME: level %d, echoes %d, insight %d, %zu item kinds given; warping to %d\n",
+           read_s32(pgd, PGD_LEVEL), read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT),
+           sizeof(items) / sizeof(items[0]), test_warp ? test_warp : 2102950);
+}
+
+/* Loose gems to fit by hand, one GemGenParam row each with a fixed shape and fixed effects: Droplet
+ * (slot type 0x8, the guns' shape), Radial, Triangle and Waning. */
+static void give_loose_gems(uint64_t pgd, const char *who) {
+    uint64_t instances = image_pointer(ITEM_INSTANCES);
     static const int32_t loose_gems[] = {
         110037, /* Droplet: Blood ATK UP +27% */
         110033, /* Droplet: Blood ATK UP +16.2% */
@@ -437,28 +470,107 @@ static void make_endgame_character(uint64_t pgd) {
         if (NATIVE(AddHandle, ADD_HANDLE)(pgd + PGD_INVENTORY, &gem, 1, 0, 0) >= 0) ++loose;
         NATIVE(HandleRelease, HANDLE_RELEASE)(&gem);
     }
-    printf("Respec: BB_TEST_ENDGAME: %d of %zu loose gems in the inventory\n", loose,
+    printf("Respec: %s: %d of %zu loose gems in the inventory\n", who, loose,
            sizeof(loose_gems) / sizeof(loose_gems[0]));
-    /* Gun gems: the slotless guns get the pistol's slot from +1 when the mod is in (BB_GUN_GEMS). */
-    static const int32_t guns[] = {15000100, 18101000, 18001000, 20001000, 34001000, 35001000};
-    for (size_t i = 0; i < sizeof(guns) / sizeof(guns[0]); ++i) {
-        int32_t index = find_weapon(pgd, guns[i]);
-        uint64_t gun = index >= 0 ? read_u64(instances, 8 + (uint64_t)(read_u32(inventory_entry(pgd + PGD_INVENTORY,
-                                                                  (uint32_t)index), 0) & 0xFFFF) * 8) : 0;
-        uint32_t type = gun >= 0x10000 ? read_u32(gun, 0x38) : 0;
-        printf("Respec: BB_TEST_ENDGAME: gun %d first gem slot %#x (%s)\n", guns[i], type,
-               gun < 0x10000 ? "weapon not found" : type & 0x80000000u ? "closed" : "open");
-    }
-    /* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
-     * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
-     * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
+}
+
+/* The first Dream visit done (cutscene 9401 with the sickroom lamp 12417810, clinic death
+ * 9400/9402, Doll respawn 9404), the Workshop open (9403) and the tutorials seen; the Doll wakes
+ * when the Dream loads with 9401 and Insight >= 1. Then to the Dream's lamp arrival point. */
+static void wake_dream_and_warp(void) {
     static const int32_t flags[] = {9400, 9401, 9402, 9403, 9404, 12417810,
                                     6700, 6702, 6703, 6704, 6707, 6710, 6711, 6719};
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) set_flag(flags[i], 1);
     NATIVE(Warp, WARP_TO_RESPAWN)(test_warp ? test_warp : 2102950);
-    printf("Respec: BB_TEST_ENDGAME: level %d, echoes %d, insight %d, %zu item kinds given; warping to %d\n",
-           read_s32(pgd, PGD_LEVEL), read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT),
-           sizeof(items) / sizeof(items[0]), test_warp ? test_warp : 2102950);
+}
+
+/* BB_TEST_LOADOUT=<file>: fills a character named TEST (PGD+0xA8, UTF-16; any case) once, on any
+ * profile: all stats 99, the file's items (tools/respec_mod.py writes mods/bbcoop-respec/test-loadout.txt:
+ * "weapon|armor|goods <id> <count>", weapons at their final level), the test gems, the Dream with the
+ * Doll awake. Any other character is left alone. */
+static int is_test_character(uint64_t pgd) {
+    static const char name[] = "TEST";
+    for (unsigned i = 0; i <= sizeof(name) - 1; ++i) {
+        uint16_t c = (uint16_t)read_u32(pgd, PGD_NAME + 2 * (uint64_t)i);
+        int want = i < sizeof(name) - 1 ? name[i] : 0;
+        if ((c >= 'a' && c <= 'z' ? c - 32 : c) != want) return 0;
+    }
+    return 1;
+}
+
+/* The Workshop tools (key items, so not in the list): Workshop Haze Extractor, Blood Gem Workshop Tool,
+ * Rune Workshop Tool. The workbench's talk script switches Arcane Haze and Blood Gem Fortification on
+ * when it finds them (t210692 states 7/19); the Rune tool opens the Memory Altar. */
+static void give_workshop_tools(void) {
+    static const int32_t tools[] = {4102, 4103, 4104};
+    set_flag(FLAG_TOOLS_GIVEN, 1);
+    for (size_t i = 0; i < sizeof(tools) / sizeof(tools[0]); ++i)
+        NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, CATEGORY_GOODS, tools[i], 1);
+    printf("Respec: BB_TEST_LOADOUT: Workshop tools given (Haze Extractor, Blood Gem Workshop Tool, Rune Workshop Tool)\n");
+}
+
+static void make_test_loadout(uint64_t pgd, const char *path) {
+    FILE *list = fopen(path, "r");
+    if (!list) {
+        printf("Respec: BB_TEST_LOADOUT: cannot read %s\n", path);
+        return;
+    }
+    set_flag(FLAG_LOADOUT_GIVEN, 1);
+    char where[1200];
+    printf("Respec: BB_TEST_LOADOUT: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
+    static const RespecStats stats = {544, {99, 99, 99, 99, 99, 99}};
+    apply_stats(&stats);
+    fill_hp(pgd);
+    write_s32(pgd, PGD_ECHOES, 99999999);
+    write_s32(pgd, PGD_INSIGHT, MAX_INSIGHT);
+    write_s32(pgd, PGD_INSIGHT_COPY, MAX_INSIGHT);
+    char line[128], kind[16];
+    int32_t id, count;
+    int given = 0, upgraded = 0, bad = 0;
+    while (fgets(line, sizeof(line), list)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        if (sscanf(line, "%15s %d %d", kind, &id, &count) != 3 || count < 1) {
+            ++bad;
+            continue;
+        }
+        uint32_t category = !strcmp(kind, "weapon") ? CATEGORY_WEAPON : !strcmp(kind, "armor") ? CATEGORY_ARMOR
+                          : !strcmp(kind, "goods") ? CATEGORY_GOODS : UINT32_MAX;
+        if (category == UINT32_MAX) {
+            ++bad;
+            continue;
+        }
+        /* Weapons are given at +0 (the give path drops the level) and upgraded as the Workshop does. */
+        int32_t give = category == CATEGORY_WEAPON ? respec_weapon_base(id) : id;
+        if (give < 0) {
+            ++bad;
+            continue;
+        }
+        NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, category, give, count);
+        ++given;
+        if (category == CATEGORY_WEAPON && give != id) {
+            int32_t index = find_weapon(pgd, give);
+            if (index >= 0) {
+                NATIVE(ChangeItemId, CHANGE_ITEM_ID)(pgd + PGD_EQUIPMENT, (uint32_t)index, id);
+                ++upgraded;
+            } else printf("Respec: BB_TEST_LOADOUT: weapon %d not found to upgrade\n", give);
+        }
+    }
+    fclose(list);
+    give_loose_gems(pgd, "BB_TEST_LOADOUT");
+    give_workshop_tools();
+    /* What the inventory holds now, by kind (key items included). */
+    uint64_t inventory = pgd + PGD_INVENTORY;
+    uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14), kinds[16] = {0};
+    for (uint32_t i = 0; i < total && i < 4096; ++i) {
+        uint64_t entry = inventory_entry(inventory, i);
+        if (read_u32(entry, 0)) ++kinds[read_u32(entry, 4) >> 28];
+    }
+    printf("Respec: BB_TEST_LOADOUT: %d list lines given (%d weapons upgraded, %d bad lines); inventory now %u weapons, "
+           "%u armor, %u goods, %u gems (of %u slots)\n", given, upgraded, bad, kinds[0], kinds[1], kinds[4], kinds[8],
+           total);
+    wake_dream_and_warp();
+    printf("Respec: BB_TEST_LOADOUT: level %d, echoes %d, insight %d; warping to the Dream\n", read_s32(pgd, PGD_LEVEL),
+           read_s32(pgd, PGD_ECHOES), read_s32(pgd, PGD_INSIGHT));
 }
 
 static void trace_state(void) {
@@ -479,7 +591,7 @@ static uint64_t inventory_entry(uint64_t inventory, uint32_t index) {
                              : read_u64(inventory, 0x48) + (uint64_t)(index - key_items) * 16;
 }
 
-/* Refund mode: the Doll's "Refund Weapon Upgrades" has the Fortify menu open (she writes 72100901
+/* Refund mode: the workbench's "Refund Weapon Upgrades" has the Fortify menu open (it writes 72100901
  * before opening it and again when it closes), in the Dream, with no co-op session. */
 static int refund_mode(void) {
     return refund_requested && (current_packed_map() >> 24) == DREAM_AREA && !in_session();
@@ -542,7 +654,7 @@ static int item_level(uint64_t item, int32_t *id) {
 }
 
 /* Which weapons the list shows. The game lists a weapon when its next level's row exists; with the
- * Doll's menu open it lists those whose +0 row exists, upgraded ones (+10 too), and nothing else
+ * refund menu open it lists those whose +0 row exists, upgraded ones (+10 too), and nothing else
  * (nothing at all when a refund is not allowed, in a co-op session). */
 static void upgrade_list_filter(HookRegs *regs) {
     if (!refund_requested) return;
@@ -564,14 +676,25 @@ static void upgrade_panel_cost(HookRegs *regs) {
     if (refund_requested) blank_cost(regs->rbp - 0x150);
 }
 
-/* Menu text lookups: with the Doll's menu open, the Fortify confirm becomes "Refund this weapon's
- * upgrades?" instead of "Use 0 Blood Echoes and × 1 to fortify weapon?". */
+/* Menu text lookups: with the refund menu open, the Fortify confirm becomes "Refund this weapon's
+ * upgrades? You get back:" and the materials for the highlighted weapon's level, instead of "Use 0
+ * Blood Echoes and × 1 to fortify weapon?" (without a known level, just "Refund this weapon's upgrades?"). */
 static void text_reference(HookRegs *regs) {
-    if ((uint32_t)regs->rdx == FORTIFY_CONFIRM_TEXT && (uint32_t)regs->rsi == MENU_DIALOGS_FMG && refund_requested)
-        regs->rdx = REFUND_CONFIRM_TEXT;
+    uint32_t id = (uint32_t)regs->rdx;
+    if (saveslots_text((uint32_t)regs->rsi, &id)) { /* the Load Game list's Duplicate (runtime_saveslots.c) */
+        regs->rdx = id;
+        return;
+    }
+    if ((uint32_t)regs->rdx != FORTIFY_CONFIRM_TEXT || (uint32_t)regs->rsi != MENU_DIALOGS_FMG || !refund_requested)
+        return;
+    int level = refund_item_key && (refund_item_key & 0xF0000000u) == CATEGORY_WEAPON
+                    ? respec_weapon_level((int32_t)refund_item_key) : -1;
+    regs->rdx = REFUND_CONFIRM_TEXT + (level >= 1 && level <= RESPEC_MAX_UPGRADE ? level : 0);
+    if (trace) printf("Respec: trace refund confirm: item key %#x level %d text %u\n", refund_item_key, level,
+                      (uint32_t)regs->rdx);
 }
 
-/* Each item's cost, as the list, the affordability check and the payment see it: with the Doll's
+/* Each item's cost, as the list, the affordability check and the payment see it: with the refund
  * menu open, nothing (no echoes, no Insight, an empty material list). */
 static void upgrade_item_cost(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_item_cost: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->rbx, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
@@ -584,10 +707,11 @@ static void upgrade_target(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_target: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r15, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
     if (!refund_mode()) return;
     int32_t id;
+    refund_item_key = read_u32(regs->r15, 0x4C);
     if (item_level(regs->r15, &id) >= 1) regs->rbx = (uint32_t)respec_weapon_base(id);
 }
 
-/* Just before that ChangeItemId: gems out, materials back. With the Doll's menu open anything else,
+/* Just before that ChangeItemId: gems out, materials back. With the refund menu open anything else,
  * or a failed refund, gives the game's ChangeItemId the weapon's own id, so nothing changes. */
 static void upgrade_apply(HookRegs *regs) {
     if (trace) printf("Respec: trace upgrade_apply: item key %#x rbx %#llx rdx %#llx refund %d\n", read_u32(regs->r14, 0x4C), (unsigned long long)regs->rbx, (unsigned long long)regs->rdx, refund_mode());
@@ -611,14 +735,24 @@ static void frame_update(HookRegs *regs) {
     uint64_t pgd;
     if (trace && (frames++ % 300 == 0 || (dense && dense-- % 10 == 0))) trace_state();
     /* A new load (the Lua event manager is recreated): the flags are saved, so a game quit with the
-     * Doll's refund menu open would leave refund mode on for the Workshop's own Fortify menu. */
+     * workbench's refund menu open would leave refund mode on for its own Fortify Weapon. */
     static uint64_t loaded;
+    static int loadout_checked;
     uint64_t lua = image_pointer(LUA_EVENT_MAN);
     if (lua >= 0x10000 && lua != loaded && player_data() >= 0x10000) {
         loaded = lua;
         refund_requested = 0;
         if (get_flag(FLAG_REFUND)) set_flag(FLAG_REFUND, 0); /* saved by builds before it was never stored */
         if (get_flag(FLAG_RESPEC)) set_flag(FLAG_RESPEC, 0);
+        loadout_checked = 0;
+    }
+    /* BB_TEST_LOADOUT: checked once per load, when the character is in the world. */
+    if (test_loadout && !loadout_checked && in_game(&pgd)) {
+        loadout_checked = 1;
+        if (!is_test_character(pgd)) printf("Respec: BB_TEST_LOADOUT: this character is not named TEST: left alone\n");
+        else if (!get_flag(FLAG_LOADOUT_GIVEN)) make_test_loadout(pgd, test_loadout);
+        else if (!get_flag(FLAG_TOOLS_GIVEN)) give_workshop_tools(); /* filled before the tools were added */
+        else printf("Respec: BB_TEST_LOADOUT: TEST was filled before: left alone\n");
     }
     if (!(test_endgame || test_warp) || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
@@ -645,13 +779,14 @@ static void dump_inventory(void) {
 }
 
 /* SetEventFlag(manager rdi, flag esi, on edx). The Doll's "Yes" sets 72100900: reset the attributes
- * here. Her refund menu writes 72100901: that is refund mode. Either way the original instructions
+ * here. The workbench's refund menu writes 72100901: that is refund mode. Either way the original instructions
  * then write the flag as 0, so neither is ever stored (or saved). Other callers (about 85, some on
  * other threads) only pay for the compare. */
 static void set_event_flag(HookRegs *regs) {
     uint32_t flag = (uint32_t)regs->rsi, on = (uint32_t)regs->rdx != 0;
     if (flag == FLAG_REFUND) {
         refund_requested = on;
+        refund_item_key = 0;
         regs->rdx &= ~(uint64_t)UINT32_MAX;
         if (trace) {
             printf("Respec: trace refund mode %d\n", on);
@@ -738,6 +873,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
             test_warp = 0;
         }
     }
+    test_loadout = (env = getenv("BB_TEST_LOADOUT")) && *env ? env : NULL;
     trace = (env = getenv("BB_RESPEC_TRACE")) && !strcmp(env, "1");
     const char *failure = hooks_init(image, size);
     for (size_t i = 0; !failure && i < count; ++i)
@@ -747,7 +883,9 @@ const char *respec_install(unsigned char *image, uint64_t size) {
         }
     if (!failure) failure = hooks_seal();
     if (failure) return failure;
-    printf("Respec: %zu hooks installed%s%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
-           test_endgame ? ", BB_TEST_ENDGAME" : "", test_warp ? ", BB_TEST_WARP" : "");
+    text_hook_installed = 1;
+    printf("Respec: %zu hooks installed%s%s%s%s\n", hooks, respec_free ? ", free (BB_RESPEC_FREE)" : "",
+           test_endgame ? ", BB_TEST_ENDGAME" : "", test_warp ? ", BB_TEST_WARP" : "",
+           test_loadout ? ", BB_TEST_LOADOUT (a character named TEST)" : "");
     return NULL;
 }

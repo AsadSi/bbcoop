@@ -55,7 +55,8 @@ The origin's row is `CharaInitParam[3000 + origin index]`. The start values are 
 - **Thread:** it runs on the game thread.
 
 ## The Doll's talk script (`script/talk/m21_00_00_00.talkesdbnd.dcx`)
-- **Who's who:** t210304 is the Plain Doll (`c8030_0000`), and t210692 is the Workshop tools (Fortify Weapon, Repair, Blood Gem, Arcane Haze).
+- **Who's who:** t210304 is the Plain Doll (`c8030_0000`), and t210692 is the Workshop's workbench (machine x2: Fortify Weapon, Repair Weapons, Blood Gem Fortification, Arcane Haze, Leave; list built in state 6, choice in state 3, menu root state 2, Fortify state 1).
+- **Where:** "Reset Attributes" is in the Doll's menu (machine x7), "Refund Weapon Upgrades" in the workbench's, just before Leave (states 27–29: flag 72100901 on, `c1_48`, wait for the menu to close, flag off; the menu root and Fortify Weapon switch it off too). It was at the Doll until 2026-10-12.
 - **Commands, as bank_index:**
   - `c1_19(slot, text, flag)` adds a menu entry.
   - `c1_48()` opens the Fortify Weapon list (menu type 13, closed when `f59(13,0)==0`).
@@ -87,7 +88,7 @@ The origin's row is `CharaInitParam[3000 + origin index]`. The start values are 
   - Fitted gems are not in the inventory list.
 - **Gem slots:** they open at +1/+3/+6 (melee) or +1 (firearms). Upgrading opens slots but never closes them, so a downgrade has to close them itself.
   - Upgrade path: ChangeItemId → 0x14db020 builds a temporary instance from WeaponGenParam[new id] (0x1a876d0) and 0x1a94340 copies each of its open slots into a slot of the weapon that is still closed (0x80000000).
-  - Gun gems (`tools/respec_mod.py`, off with `BB_GUN_GEMS=0`): firearms are the `leftHandEquipable` weapons that can be upgraded (have a +1 row), which leaves out the shields and the plain Torch (+0 only). Cannon, Rosmarinus, Flamesprayer, Fist of Gratia, Church Cannon and the Hunter's Torch +1..+10 get the Hunter Pistol's row (one droplet slot, type 0x8). Every GemCategoryParam row enables all slot types, and no EquipParamWeapon field separates them from the slotted guns. A gun gets the slot at its next upgrade (or as a new instance); one already at +10 needs a refund at the Doll and a new upgrade.
+  - Gun gems (`tools/respec_mod.py`, off with `BB_GUN_GEMS=0`): firearms are the `leftHandEquipable` weapons that can be upgraded (have a +1 row), which leaves out the shields and the plain Torch (+0 only). Cannon, Rosmarinus, Flamesprayer, Fist of Gratia, Church Cannon and the Hunter's Torch +1..+10 get the Hunter Pistol's row (one droplet slot, type 0x8). Since 2026-10-17 (Asad's choice) that slot is a Triangle (0x2) on the Flamesprayer, Rosmarinus and Hunter's Torch and a Radial (0x1) on the Fist of Gratia (`GUN_GEM_SHAPES`); the Cannon and Church Cannon keep the Droplet. A weapon instance keeps the shape its slot opened with (+0x38), so one that already has the Droplet slot keeps it until a refund and a new upgrade. Every GemCategoryParam row enables all slot types, and no EquipParamWeapon field separates them from the slotted guns. A gun gets the slot at its next upgrade (or as a new instance); one already at +10 needs a refund at the workbench and a new upgrade.
 - **Equip slots:** 15 of them. The inventory index is at EGD+0x24+4s and the handle at EGD+0x94+4s. Weapons are slots 0..7.
 
 | Function | Offset |
@@ -135,6 +136,7 @@ The Workshop altar and the Doll's `c1_48` open it. It is registered at 0x1bb9d00
 
 **Refund-mode cosmetics**
 - The info panel's cost is computed separately, in 0x1c5e500 → 0x1b5eec0. At the hooked site 0x1c5e82b (r15 = I) it sits at rbp-0x150, in the same layout as at 0x1bd2d73, and refund mode blanks it.
+- The confirm lists what comes back (2026-10-12, verified in game by Asad): `tools/respec_mod.py` adds 221091..221100, one per level +1..+10, with the game's goods names and EquipMtrlSetParam counts (checked against the refund table). The target hook remembers the highlighted weapon's item key (the menu item it sees is a temporary copy, gone when the confirm opens), and the text hook picks 221090 + its level; 221090 is the fallback without a list.
 - The confirm text is MenuDialogs_SP (FMG 204) id 221000, "Use <?demandSoul?> Blood Echoes and …". The menu text lookup 0x1ae8cc0(out, fmg, id) is hooked after its pushes at 0x1ae8cd1. That hook turns it into 221090, which `tools/respec_mod.py` adds: "Refund this weapon's upgrades?".
 
 **Gems in the test character**
@@ -161,6 +163,23 @@ The level-up commit (0x1c13d00) changes current HP by the change in max HP, clam
 - It also puts 12 loose gems in the inventory, from GemGenParam rows with one fixed shape and fixed effects: 5 Droplet (the guns' slot shape), 3 Radial, 2 Triangle and 2 Waning. Each is generated, added with AddHandle and released, as for a refunded gem.
 - **Slot shapes** (GemGenParam slotTypeRateA..F = slot types 1 << 0..5): A Radial, B Triangle, C Waning, D (0x8) Droplet. The Petrified Droplet gems (goods 1678-1683) give rows 110031-110037 (JP 円型). The English description reads "Droplet blood gem. Fortifies any weapon".
 - `SprjLuaEventUpdateTask::_STEP_Update` (0x1393fd0) never runs in this game. The per-update hook is inside SosStatus.Update (0x187236d), which runs offline too.
+
+## The TEST character (BB_TEST_LOADOUT, 2026-10-12)
+- **Name:** PlayerGameData +0xA8 holds the character's name, UTF-16 (found in userdata0000: the player data block there has
+  the same layout as in memory: HP +0x14, stats +0x40.., Insight +0x84, level +0x90, Echoes +0x94).
+- **What it does:** a character named TEST (any case) is filled once, flag 72100903. It backs up the saves, sets all stats to
+  99 (level 544), 99,999,999 Echoes and 99 Insight, then gives the list.
+  - Weapons are given at +0 and changed to their final level, as the Workshop does.
+  - Armor uses category 0x10000000, goods 0x40000000.
+  - It adds the 12 test gems, sets the Dream flags and warps to the Dream (as BB_TEST_ENDGAME).
+  - It gives the three Workshop tools (4102, 4103, 4104; key items) under their own flag 72100904, so a TEST filled
+    before they were added gets them on its next load. The workbench's talk script sets 72100200/72100201 (Blood Gem
+    Fortification, Arcane Haze) itself when it finds them (t210692 x2 states 7/8 and 19/20).
+- **The list:** `tools/respec_mod.py` writes it from the game's params and names:
+  - EquipParamWeapon rows `id % 10000 == 0` with a name, except Bare Fists, at their highest level;
+  - EquipParamProtector rows with a name;
+  - EquipParamGoods with goodsType 0, 2 or 6 (not 1, the key items), a name and maxNum > 0, gestures 800–899 left out,
+    at maxNum.
 
 ## Event flags, the frame hook, sessions and saving
 - **Flag manager:** SprjEventFlagMan is the global `0x553b100`.

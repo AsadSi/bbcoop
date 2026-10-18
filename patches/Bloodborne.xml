@@ -4119,4 +4119,58 @@
             <Line Type="bytes" Address="0x01f39030" Value="554889e5534883ec184889fb488d05ed2d80034889042448897424084889e6e87c0c01004889d84883c4185b5dc3"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Frame Time Step at 0x1972A7D" Author="bbcoop" Note="A/B candidate for Uncap FPS++ (BB_FPS_TRY=step1972; docs/animation_re.md, Foliage speed). The update context that 0x1972900 passes to 0x21145B0 carries a fixed 1/30 (game: mov dword [rbp-0x30], 1/30; the old Uncap FPS++ had 1/240), so whatever it advances runs 4x at 120 FPS. The hook loads the clamped frame time that Uncap FPS++ stores at 0x0575A908 each frame (0x02418E3D). Cave after Uncap FPS++'s caves; rax is dead at the site." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x01972A7D" Value="E97EE0B1039090"/>
+            <Line Type="bytes" Address="0x05490B00" Value="8B05029E2C008945D0E9761F4EFC"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Fixed Wind Offset Step 1/30" Author="bbcoop" Note="A/B candidate for Uncap FPS++ (BB_FPS_TRY=wind30; docs/animation_re.md, Foliage speed). In 0x2713870 (wind sources to per-instance shader constants) the step xmm14 scales offsets that are rebuilt every frame (step x velocity), so with the frame time they change size with every frame-time change. xmm14 gets the game's 1/30 (0x4D26364); the timers (xmm10) keep the frame time from [rbp-0x170] (0x02714B26: mov r8d,[rbp-0x1b8]; vxorps xmm10; cmp byte [0x5940DF9],0; jne; vmovss xmm10,[rbp-0x170])." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x027149EA" Value="C57A103572196102"/>
+            <Line Type="bytes" Address="0x02714B26" Value="448B8548FEFFFFC4412857D2803DC0C22203007508C57A109590FEFFFF"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Fixed Wind Offset Step 1/60" Author="bbcoop" Note="As Fixed Wind Offset Step 1/30 (BB_FPS_TRY=wind60), with the old Uncap FPS++'s 1/60 (0x4D29E70) for the offsets." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x027149EA" Value="C57A10357E546102"/>
+            <Line Type="bytes" Address="0x02714B26" Value="448B8548FEFFFFC4412857D2803DC0C22203007508C57A109590FEFFFF"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Fixed Cloth Step 1/120" Author="bbcoop" Note="A/B candidate for Uncap FPS++ (BB_FPS_TRY=clothstep; docs/animation_re.md, Foliage speed). Havok Cloth gets the clamped frame time (task context, 0x02418E3D) and applies stiffness once per substep, so more substeps a second make it stiffer and quicker. Uncap FPS++ forces 1 substep and scales stiffness by (min(dt,1/60)*60)^2, which changes every frame (stiff cloth flickers). Here the cloth manager 0x13D5440 keeps an accumulator (0x0578CF58, the RTTI slot of vtable 0x578CF60) and steps n = round(acc*120) substeps of exactly 1/120 (n at 0x0578CF5C; none above 120 FPS: the vanilla no-step path), execute (0xB6E67A), the pre-step (0xB6FBF0) and the stiffness adapter (0xB72225) use n, and the six stiffness hooks multiply by a constant 0.25 (0x05490B1C; 120.0, 0.5, 1/120 before it)." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x05490B10" Value="0000F0420000003F8988083C0000803E"/>
+            <Line Type="bytes" Address="0x05490B20" Value="C5FA100D30C42F00C5F258C8C5F25915DCFFFFFFC5EA5815D8FFFFFFC5FA2CC285C07E2BC5EA2AD0C5EA5905C8FFFFFFC5F25CC8C5FA110DFCC32F008905FAC32F00C5FA118344010000E9F448F4FBC5FA110DE1C32F00E9B349F4FB"/>
+            <Line Type="bytes" Address="0x05490B80" Value="C5FA104588C5FA590583FFFFFFC5FA58057FFFFFFFC5FA2CD885DB7F05BB01000000E9DEDA6DFB"/>
+            <Line Type="bytes" Address="0x05490BB0" Value="C4C17A100424C5FA590552FFFFFFC5FA58054EFFFFFFC5FA2CC085C07F05B801000000E923F06DFB"/>
+            <Line Type="bytes" Address="0x05490BE0" Value="C5FA590534FFFFFFC5F82945A0E9010269FB"/>
+            <Line Type="bytes" Address="0x05490C00" Value="C5FA590514FFFFFFC5F82945A0E9F1A669FB"/>
+            <Line Type="bytes" Address="0x05490C20" Value="C5FA5905F4FEFFFFC5F82945A0E9B1FE69FB"/>
+            <Line Type="bytes" Address="0x05490C40" Value="C5FA5905D4FEFFFFC5F82945B0E9C47A6AFB"/>
+            <Line Type="bytes" Address="0x05490C60" Value="C5FA5905B4FEFFFFC5F8294580E9E1126BFB"/>
+            <Line Type="bytes" Address="0x05490C80" Value="C5FA590594FEFFFFC5F82945A0E961146BFB"/>
+            <Line Type="bytes" Address="0x013D545B" Value="E9C0B60B040F1F00"/>
+            <Line Type="bytes" Address="0x00B6E67A" Value="E901259204660F1F440000"/>
+            <Line Type="bytes" Address="0x00B6FBF0" Value="E9BB0F9204660F1F440000"/>
+            <Line Type="bytes" Address="0x00B20DEE" Value="E9EDFD9604"/>
+            <Line Type="bytes" Address="0x00B2B2FE" Value="E9FD589604"/>
+            <Line Type="bytes" Address="0x00B30ADE" Value="E93D019604"/>
+            <Line Type="bytes" Address="0x00B38711" Value="E92A859504"/>
+            <Line Type="bytes" Address="0x00B41F4E" Value="E90DED9404"/>
+            <Line Type="bytes" Address="0x00B420EE" Value="E98DEB9404"/>
+            <Line Type="bytes" Address="0x00B72225" Value="8B0531ADC1048945CC0F1F8000000000"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Frame Time Floor 1/240" Author="bbcoop" Note="BB_FPS_TRY=dtfloor. Uncap FPS++'s cave at 0x02418E3D stores the clamped frame time (min(max(flipper dt, +0x18), 1/30)) as the task context's dt and in 0x0575A908. The flipper's dt can be 0 (frames presented back to back), and with 0 Havok Cloth / character code divides by it: the character editor's model came out invisible or white (Asad 2026-10-13). This cave adds a floor of 1/240 and is otherwise the same code (same hook, 46 bytes at 0x02418E3D, cave at 0x05490CA0)." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x05490CA0" Value="F30F108364020000F30F5F4318F30F5D05AF5689FFF30F5F0523000000F30F1145C8F30F11053E9C2C00488D053FF84A00E99581F8FC000000000000000000008988883B"/>
+            <Line Type="bytes" Address="0x02418E3D" Value="E95E7E07039090909090909090909090909090909090909090909090909090909090909090909090909090909090"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="bbcoop: Context dt 1/30 (test)" Author="bbcoop" Note="BB_FPS_TRY=ctx30. Uncap FPS++'s cave at 0x02418E3D stores the clamped frame time (min(max(flipper dt, +0x18), 1/30)) as the task context's dt and in 0x0575A908. The flipper's dt can be 0 (frames presented back to back), and with 0 Havok Cloth / character code divides by it: the character editor's model came out invisible or white (Asad 2026-10-13). This cave adds a floor of 1/240 and is otherwise the same code (same hook, 46 bytes at 0x02418E3D, cave at 0x05490CA0)." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x05490CA0" Value="F30F108364020000F30F5F4318F30F5D05AF5689FFF30F5F05230000009090909090F30F11053E9C2C00488D053FF84A00E99581F8FC000000000000000000008988883B"/>
+            <Line Type="bytes" Address="0x02418E3D" Value="E95E7E07039090909090909090909090909090909090909090909090909090909090909090909090909090909090"/>
+        </PatchList>
+    </Metadata>
 </Patch>

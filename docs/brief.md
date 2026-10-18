@@ -10,7 +10,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 - beat Father Gascoigne together without being sent home,
 - travel by lamp together,
 - both receive every pickup and boss drop,
-- respec stats or refund a weapon's materials at the Doll.
+- respec stats at the Doll, or refund a weapon's materials at the Workshop's workbench.
 
 ## Not building
 
@@ -36,7 +36,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Online code | shadp2p's C++ NP, Net and Http libraries (about 25k lines), adapted into a C++ library linked like the GPU library, with no rewrite into C. Tested by a fake-game client that makes Bloodborne's online calls against the real server | A C rewrite would take 7-9k lines plus a protobuf C port, for no gain | Claude |
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player (BBSC's scaling with these numbers). No extra enemies | "No need for more enemies" (2026-10-17) | Asad |
-| Respec | At the Doll, in the Hunter's Dream, outside a session. "Reset Attributes" returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
+| Respec | In the Hunter's Dream, outside a session. "Reset Attributes" (at the Doll) returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" (at the workbench, just before Leave; moved from the Doll 2026-10-12, Asad) opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
 | Respec entry | A new option in the Doll's dialogue (her talk script), not a settings-menu button | Feels native; chosen over the faster menu button | Asad, 2026-10-09 |
 | Seamless engine | Upstream 0.6's BBSC (`BB_BBSC=1`, the online module) is the seamless co-op, run with bbcoop's numbers (BBSC_SCALE_ENEMY_HP/BOSS_HP 50, DAMAGE 10 per extra player, BBSC's stagger) and bbcoop's mods (respec, gun gems, camera, IK). bbcoop's own seamless patches and hooks (`BB_SEAMLESS=1`) stay as the fallback and are skipped while BBSC is on: both patch the same sites. BBSC already has scaling, guest items and boss rewards, shared progress, lamp warps together, up to five hunters, the host-death rule and respawn in place | "Take the best of both" | Asad, 2026-10-17 |
 | Frame rate | 0.6's frame-rate hooks (48 per-frame values follow the frame time, running fixed), with bbcoop's camera chase rates and foot-IK correction on top (no shared sites). bbcoop's Uncap FPS++ patch stays selectable with `BB_FRAME_HOOKS=0` | "The best one, a mix of both" | Asad, 2026-10-17 |
@@ -107,6 +107,7 @@ Supporting pieces:
   `SHADPS4_BBSC_DEATH_TO_HOST_LAMP`, `docs/coop_respawn_re.md`). Verified alone with the test seam; the
   session-keeping part needs a real two-player session.
 
+- **Character editor invisible/white/unchanged (Asad, 2026-10-13), USABLE.** Cause: Uncap FPS++'s frame time can be 0 when frames are presented back to back (Havok Cloth and character code divide by it); the default had the model stay unchanged on skin/gender changes. Fix: `dtfloor` (`BB_FPS_TRY`, now default; 1/240 floor, `patches/Bloodborne.xml`). Verified by Asad: changes apply. Remaining: the model flickers invisible/visible on every second change, accepted as fine. Not the cause: `BB_GPU_WRITE_TWINS_MAX`. Unfinished bisect over Uncap FPS++ units (0:81 dropped = visible; culprit among units 40-59, 70-74, 78-80) needs a rerun without other game launches (each step `pkill`s bb-probe). Build: `build.sh` skips the probe compile when unchanged (`BB_REBUILD=1` forces); a corrupt out/gpu/.ninja_deps (killed builds) made ninja recompile 180 files on every launch (58 s -> 0.7 s after deleting it).
 - **Online and co-op are on hold (Asad, 2026-10-11).** Plan: `~/.claude/plans/make-a-plan-on-scalable-kurzweil.md`.
   - **Done:** the launcher's Host/Join, the server, the ported NP libraries, and the seamless patches and hooks.
   - **Missing:** `src/runtime_coop.c` (lamp sync, mirrored loot, flag sync, death rules), HP/damage scaling, and a real two-player session.
@@ -132,8 +133,14 @@ Supporting pieces:
   - **Messengers:** the notes' and bloodstains' messengers emerge within 5 m and sink beyond it, by design. Static analysis found no frame-rate, Intel-math or renderer cause (`docs/messengers_re.md`). `BB_MESSENGER_RADIUS` tests it in the game.
 - **Firearm gem slots (Asad, 2026-10-11):**
   - Every firearm already fortifies to +10.
-  - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`.
+  - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`. Its shape is Droplet, except Triangle on the Flamesprayer, Rosmarinus and Hunter's Torch and Radial on the Fist of Gratia (2026-10-17).
   - Shields and the Torch stay as they are.
+- **Fire Paper, Bolt Paper, Empty Phantasm Shell (Asad, 2026-10-18), verified in game and accepted by Asad:**
+  - Instead of a flat +80 per hit, the bonus is 80 × (base at +0 × the attack's multiplier) / 90 + 10% × (base at the current level × multiplier).
+  - It keeps the early-game punch and adds a late-game share, and no longer favours fast weapons.
+  - Viscerals still get nothing, and stats and gems don't change it.
+  - `src/runtime_papers.c`, `docs/papers_re.md`; `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs each bonus.
+  - Tested with the Shell on Ludwig's Holy Blade +10 and the Threaded Cane +10: the trace matched the formula, the status screen shows the new value, and viscerals got none. Against `BB_PAPERS=vanilla`, the transformed R2 did a little more damage.
 - **Verified in game 2026-10-11** (throwaway profile, `BB_TEST_ENDGAME`, 2160p, FSR 4, 120 FPS cap):
   - **Camera:**
     - With a full stick, turning stays at ~120°/s.
