@@ -14,9 +14,14 @@ what's still open.
 - New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
   without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
   `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`),
-  `runtime_respec.c` (the Doll's respec and weapon refund, 7 hooks, on by default;
+  `runtime_respec.c` (the Doll's respec and the workbench's weapon refund, 7 hooks, on by default;
   `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
   `runtime_ik.c` (the foot-IK height correction at uncapped frame rates, `docs/animation_re.md`),
+  `runtime_saveslots.c` (Duplicate in the Load Game list, Triangle; `docs/saveslots_re.md`; `BB_SAVESLOTS=0` off),
+  `runtime_papers.c` (Fire/Bolt Paper and Empty Phantasm Shell scale with the weapon and the attack; `docs/papers_re.md`;
+  `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs the bonuses),
+  `runtime_padmotion.c` (the DualShock's gyro and accelerometer for scePadReadState, called from `runtime_pad.c`;
+  `docs/padmotion_re.md`; `BB_PAD_MOTION=0` off, `BB_PAD_MOTION_TRACE=1` logs the values),
   and later `runtime_coop.c`. Data mods go in
   `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
   files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
@@ -58,7 +63,10 @@ what's still open.
   level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
   only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_TEST_WARP=<lamp>` (cheat: once in
   game, to a lamp: dream, cathedral-ward, central-yharnam, old-yharnam or a respawn point ID <map><block>29xx;
-  with tools/new_game.sh --continue it starts a test mid-game), `BB_GUN_GEMS=0` (the respec
+  with tools/new_game.sh --continue it starts a test mid-game), `BB_TEST_LOADOUT=<list>` (fills a character
+  named TEST once, on any profile: stats 99, every weapon +10 with Uncanny/Lost, all armor, full stacks of non-key items,
+  test gems; the list is `mods/bbcoop-respec/test-loadout.txt` from `tools/respec_mod.py`; launcher
+  `~/.local/bin/bloodborne-testchar.sh`), `BB_GUN_GEMS=0` (the respec
   mod leaves out the gem slot it gives every firearm).
 - Camera and frame rate: `BB_CAMERA_ACCEL=1` keeps the game's turn ramp (off by default), `BB_CAMERA_RATES=0`
   leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
@@ -66,6 +74,10 @@ what's still open.
   Uncapped defaults to 120 (`run.sh`; the launcher's 0 keeps that default), `BB_FPS_LIMIT=0` means no limit.
   Uncap FPS++ is ps4_cheats' version of 2026-10-10 (timestep fixes, Sprint Fix built in); `BB_FPS_PATCH=old` selects
   the previous one, and `BB_FPS=120` applies 120 FPS++ (`docs/animation_re.md`).
+  A/B switches for it (`scripts/patches.py`, "Foliage speed" in `docs/animation_re.md`): `BB_FPS_SKIP=<group>[,..]`
+  leaves groups of its lines out (`cloth grass sfx fps60 hknp timeobj clip`), `BB_FPS_TRY=<variant>[,..]` picks
+  bbcoop fixes (`step1972 wind30 wind60 clothstep dtfloor`); default `wind60,clothstep,dtfloor` (no flicker on foliage, capes or
+  the Doll's hood, Asad 2026-10-12), `none` for Uncap FPS++ as published. `~/.local/bin/bloodborne-ab.sh ENV=VALUE...` starts the game with them.
   `BB_CAMERA_TRACE=1` logs the camera's frame time, rates, ramp and yaw. `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
   `docs/messengers_re.md`).
   `BB_IK_HEIGHT` (`src/runtime_ik.c`, `docs/animation_re.md`): characters' foot-IK height correction gains

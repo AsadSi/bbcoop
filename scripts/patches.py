@@ -33,6 +33,89 @@ def fps_patches(fps, env=os.environ):
     if env.get('BB_FPS_PATCH','')=='old' and fps in OLD_FPS_PRESETS:
         return list(OLD_FPS_PRESETS[fps])
     return list(FPS_PRESETS[fps])
+
+
+# bbcoop: A/B switches for the current Uncap FPS++ (docs/animation_re.md "Foliage speed").
+# BB_FPS_SKIP=<group>[,<group>] leaves out the lines that start at these addresses, so the sites keep
+# the game's bytes (a cave the hook jumped to stays, unused). Each group is a set of hooks or values
+# that works without the others.
+FPS_SKIP_GROUPS={
+    # Havok Cloth: constraint stiffness x (frame time x 60)^2 and one sub-step (hclSimulateOperator).
+    'cloth':[0x00B20DEE,0x00B2B2FE,0x00B30ADE,0x00B38711,0x00B41F4E,0x00B420EE,0x00B6E67A],
+    # The wind/foliage constants function 0x2713870: both steps follow the frame time (back: 1/60 a frame).
+    'grass':[0x02713D76,0x02713DB1,0x02713DBB,0x02715D75],
+    # SFX frame rate 30 -> 60 (frame counts / rate = seconds) and its fade-time floors.
+    'sfx':[0x026FB39F,0x04CAD7FC,0x04C9F358,0x04CAD65C,0x04CAD660,0x04CAD664],
+    # Other "per second at 30" values doubled.
+    'fps60':[0x013EF51C,0x013EF6EC,0x0187305D,0x0187458D,0x0187AFEC,0x0187B0AD,0x01880CFD,0x01880E1A,
+             0x018B254D,0x018B382D,0x01AB67EF,0x01C9F889,0x01CA975A,0x01CA9892,0x0203ACB7,0x021BB004,
+             0x023DD026,0x023DEDE6,0x04D02F10,0x04D02F14,0x04D02F18,0x04D02F1C,0x04D02F70,0x04D02F74,
+             0x04D02F78,0x04D02F7C],
+    # hknpWorldCinfo default solver step 1/30 -> 1/120 (the old patch's line missed it).
+    'hknp':[0x00F383CA],
+    # Time accumulators of 0x12BBDA0's objects: real frame time instead of 1/60 a frame.
+    'timeobj':[0x0267784B,0x02677892],
+    # The character clip player 0x1915EC0: real frame time instead of 1/30 a frame.
+    'clip':[0x01915FAB,0x01916030,0x01915F71],
+}
+# BB_FPS_TRY=<variant>[,<variant>] picks the bbcoop fixes (patches/Bloodborne.xml) for Uncap FPS++ (default
+# DEFAULT_FPS_TRY, "none" for none); a variant's bytes replace the Uncap FPS++ lines they overlap.
+FPS_TRY_VARIANTS={
+    # The update context at 0x1972A7D gets the clamped frame time (0x0575A908) instead of a fixed 1/30.
+    'step1972':'bbcoop: Frame Time Step at 0x1972A7D',
+    # The wind offsets of 0x2713870 (a step x velocity, sent to the GPU every frame) get a fixed step
+    # again (1/30: the game's; 1/60: the old patch's), its timers keep the frame time.
+    'wind30':'bbcoop: Fixed Wind Offset Step 1/30',
+    'wind60':'bbcoop: Fixed Wind Offset Step 1/60',
+    # Havok Cloth stepped in fixed 1/120 substeps from an accumulator, with one constant stiffness factor
+    # (Uncap FPS++'s factor follows every frame's time, so stiff cloth flickers).
+    'clothstep':'bbcoop: Fixed Cloth Step 1/120',
+    # The clamped frame time (0x02418E3D) gets a 1/240 floor: the flipper's dt can be 0 (character editor model invisible).
+    'ctx30':'bbcoop: Context dt 1/30 (test)',
+    'dtfloor':'bbcoop: Frame Time Floor 1/240',
+}
+
+
+# Applied with Uncap FPS++ unless BB_FPS_TRY says otherwise (BB_FPS_TRY=none: Uncap FPS++ as published). Asad's
+# A/B 2026-10-12: wind60 calms the flowers and capes, clothstep the Doll's hood and skirt. dtfloor (2026-10-13):
+# the character editor's model stayed unchanged or invisible when the frame time was 0; with the floor it updates.
+DEFAULT_FPS_TRY='wind60,clothstep,dtfloor'
+
+
+def fps_choices(env=os.environ):
+    """(skipped line addresses, variant patch names, explicit) from BB_FPS_SKIP / BB_FPS_TRY; explicit is
+    False when only the default variants apply."""
+    def parse(name, table, default=''):
+        value=env.get(name,default)
+        keys=[] if value.strip()=='none' else [k.strip() for k in value.split(',') if k.strip()]
+        unknown=[k for k in keys if k not in table]
+        if unknown: raise ValueError(f'{name}: unknown {unknown}; known: {sorted(table)}')
+        return keys
+    skip={a for k in parse('BB_FPS_SKIP',FPS_SKIP_GROUPS) for a in FPS_SKIP_GROUPS[k]}
+    variants=[FPS_TRY_VARIANTS[k] for k in parse('BB_FPS_TRY',FPS_TRY_VARIANTS,DEFAULT_FPS_TRY)]
+    return skip,variants,bool(skip) or 'BB_FPS_TRY' in env
+
+
+def apply_fps_choices(writes, skip, variants, replaceable=None):
+    """writes without the skipped lines and without the lines a variant replaces, then the variants'.
+    A variant may only replace whole lines whose offsets are in replaceable (Uncap FPS++'s), and
+    variants may not overlap each other."""
+    skip={a-EBOOT_BASE for a in skip}
+    taken=set()
+    for o,data in variants:
+        span={o+i for i in range(len(data))}
+        if span&taken: raise ValueError(f'BB_FPS_TRY: variants overlap at {o+EBOOT_BASE:#x}')
+        taken|=span
+    out=[]
+    for o,data in writes:
+        span={o+i for i in range(len(data))}
+        if o in skip: continue
+        if span&taken:
+            if (replaceable is not None and o not in replaceable) or not span<=taken:
+                raise ValueError(f'BB_FPS_TRY: a variant would cut the line at {o+EBOOT_BASE:#x}')
+            continue
+        out.append((o,data))
+    return out+list(variants)
 # Upscaler presets (bbport.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
@@ -372,6 +455,35 @@ def main():
     names=validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
+    skip,variants,explicit=fps_choices()  # bbcoop: BB_FPS_SKIP / BB_FPS_TRY (default: DEFAULT_FPS_TRY)
+    if (skip or variants) and ('Uncap FPS++' in names or explicit):
+        if 'Uncap FPS++' not in names:
+            raise ValueError('BB_FPS_SKIP / BB_FPS_TRY need the current Uncap FPS++ (BB_FPS=uncap, no BB_FPS_PATCH=old)')
+        before=len(writes)
+        uncap={o for o,_ in compile_patches(a.xml,['Uncap FPS++'],a.app_version,segments)}
+        writes=apply_fps_choices(writes,skip,compile_patches(a.xml,variants,a.app_version,segments),uncap)
+        print(f'Patches: BB_FPS_SKIP={os.environ.get("BB_FPS_SKIP","")} BB_FPS_TRY={os.environ.get("BB_FPS_TRY","")}: '
+              f'{before} -> {len(writes)} writes')
+        names+=variants
+    if os.environ.get('BB_PATCH_BISECT'):  # bbcoop debug: drop units (a hook with its cave, or a plain line) lo..hi-1
+        lo,hi=map(int,os.environ['BB_PATCH_BISECT'].split(':'))
+        cur=[(o,d) for o,d in compile_patches(a.xml,['Uncap FPS++'],a.app_version,segments)]
+        caves=[(o,o+len(d)) for o,d in cur if o+EBOOT_BASE>=0x5400000]
+        def cave_of(t): return next((s for s,e in caves if s<=t<e),None)
+        units={}; order=[]
+        for o,d in cur:
+            if o+EBOOT_BASE>=0x5400000: continue
+            key=o; extra=[]
+            if len(d)>=5 and d[0] in (0xE9,0xE8):
+                t=(o+5+struct.unpack('<i',d[1:5])[0]) & 0xffffffff
+                c=cave_of(t)
+                if c is not None: extra=[c]
+            units[key]=[o]+extra; order.append(key)
+        drop=set()
+        for k in order[lo:hi]: drop.update(units[k])
+        n0=len(writes)
+        writes=[w for w in writes if w[0] not in drop]
+        print(f'Patches: BB_PATCH_BISECT={lo}:{hi}: dropped {n0-len(writes)} writes, {len(order)} units')
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
     # it into the output-size image with a viewport scaled by output / 1920

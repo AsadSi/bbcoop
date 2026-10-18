@@ -65,6 +65,8 @@ static int initialized;
 static char title_id[16]="UNKNOWN";
 static struct { int used; char host[700], meta[700]; } slots[SLOTS];
 static char memory_path[720];
+/* bbcoop: the host directory each save directory name was last mounted from (runtime_saveslots.c). */
+static struct { char dir[40]; char host[700]; } bbcoop_last[8];
 static uint64_t memory_size;
 static size_t mounts_done, memory_writes;
 
@@ -183,6 +185,12 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     result->status=exists ? 0 : 1; /* CREATED */
     runtime_file_mount(result->point.data,host);
     ++mounts_done;
+    for (int i=0;i<8;++i) /* bbcoop */
+        if (!bbcoop_last[i].dir[0] || !strcmp(bbcoop_last[i].dir,dir->data)) {
+            snprintf(bbcoop_last[i].dir,sizeof(bbcoop_last[i].dir),"%s",dir->data);
+            snprintf(bbcoop_last[i].host,sizeof(bbcoop_last[i].host),"%s",host);
+            break;
+        }
     pthread_mutex_unlock(&lock);
     printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
            exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
@@ -357,4 +365,15 @@ static const RuntimeExport exports[]={
     {"sceSaveDataSetSaveDataMemory",memory_set},
 };
 uintptr_t runtime_savedata_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+int runtime_savedata_last_host(const char *dir, char *out, size_t size) { /* bbcoop */
+    int found=0;
+    pthread_mutex_lock(&lock);
+    for (int i=0;i<8 && !found;++i)
+        if (bbcoop_last[i].dir[0] && !strcmp(bbcoop_last[i].dir,dir)) {
+            snprintf(out,size,"%s",bbcoop_last[i].host);
+            found=1;
+        }
+    pthread_mutex_unlock(&lock);
+    return found;
+}
 void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",mounts_done,memory_writes); }

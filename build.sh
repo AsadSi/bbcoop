@@ -112,13 +112,25 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
     for source in "${atrac9[@]}"; do "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
     ar rcs out/libatrac9.a out/atrac9/*.o
 fi
-"$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -pthread ${pie[@]+"${pie[@]}"} "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/bb-probe
-echo "Built $PWD/out/bb-probe"
+# bbcoop: the probe is compiled again only when its sources, headers, this script, the compiler or the GPU
+# library changed (the full compile took about a minute on every launch). BB_REBUILD=1 forces it.
+probe_stamp=$({ cat -- src/probe.c "${runtime[@]}" src/vulkan_smoke.c src/*.h *.h build.sh out/libatrac9.a out/gpu/libbbgpu.so 2>/dev/null
+                printf '%s\n' "$CC" ${arch_flags[@]+"${arch_flags[@]}"} ${pie[@]+"${pie[@]}"} "${includes[@]}" "${libraries[@]}"; } | cksum)
+if [[ ${BB_REBUILD:-0} != 1 && -x out/bb-probe && $(cat out/bb-probe.stamp 2>/dev/null) == "$probe_stamp" ]]; then
+    echo "Up to date: $PWD/out/bb-probe (BB_REBUILD=1 forces a rebuild)"
+else
+    rm -f out/bb-probe.stamp
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -pthread ${pie[@]+"${pie[@]}"} "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/bb-probe
+    printf '%s' "$probe_stamp" > out/bb-probe.stamp
+    echo "Built $PWD/out/bb-probe"
+fi
 # GPU check for run.sh (live_resolution=auto) and the launcher's gamepad list (--gamepads).
 "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 if [[ ${1:-} == --test ]]; then
-    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_pad.c "${libraries[@]}" -lm -o out/pad-test
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_padmotion.c "${libraries[@]}" -lm -o out/pad-test # bbcoop: + padmotion
     out/pad-test
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror "${includes[@]}" -I. -Isrc tests/test_padmotion.c src/runtime_padmotion.c "${libraries[@]}" -lm -o out/padmotion-test # bbcoop
+    out/padmotion-test
     "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test
     out/runtime-test
     "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Isrc tests/test_file_mods.c -o out/file-mods-test
@@ -135,7 +147,7 @@ if [[ ${1:-} == --test ]]; then
     out/hooks-test
     "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_seamless_hooks.c src/runtime_seamless_hooks.c src/runtime_hooks.c -lm -o out/seamless-hooks-test # bbcoop
     out/seamless-hooks-test
-    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_respec.c src/runtime_respec.c src/runtime_respec_rules.c src/runtime_saveslots.c src/runtime_hooks.c -lm -o out/respec-test # bbcoop
     out/respec-test
     "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_camera.c src/runtime_camera.c src/runtime_hooks.c -lm -o out/camera-test # bbcoop
     out/camera-test
@@ -143,4 +155,6 @@ if [[ ${1:-} == --test ]]; then
     out/messenger-test
     "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_ik.c src/runtime_ik.c src/runtime_hooks.c -lm -o out/ik-test # bbcoop
     out/ik-test
+    "$CC" ${arch_flags[@]+"${arch_flags[@]}"} -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_papers.c src/runtime_papers.c src/runtime_hooks.c -lm -o out/papers-test # bbcoop
+    out/papers-test
 fi

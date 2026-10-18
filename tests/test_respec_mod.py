@@ -1,7 +1,7 @@
 """bbcoop: tools/respec_mod.py on the game's own files. Needs the game (BB_GAME_DIR, or the US or EU
 folder next to the repository) and soulstruct in BB_RE_PYTHON (default ~/.local/share/bbcoop-re);
-skipped without them. The script itself checks that only the Doll's talk script and the EventText
-entry change, and in the gameparam only the firearms' WeaponGenParam rows; this test checks the result
+skipped without them. The script itself checks that only the Doll's and the workbench's talk scripts and
+the EventText and MenuDialogs_SP entries change, and in the gameparam only the firearms' WeaponGenParam rows; this test checks the result
 once more from the outside."""
 from paths import ROOT
 import json
@@ -14,7 +14,8 @@ import unittest
 PYTHON = Path(os.environ.get('BB_RE_PYTHON', Path.home() / '.local/share/bbcoop-re/bin/python'))
 CANDIDATES = [os.environ.get('BB_GAME_DIR', ''), ROOT.parent / 'CUSA03173', ROOT.parent / 'CUSA00900']
 GAME = next((Path(c) for c in CANDIDATES if c and (Path(c) / 'dvdroot_ps4/script/talk').is_dir()), None)
-TALK_AND_MSG = ['dvdroot_ps4/msg/engus/menu.msgbnd.dcx', 'dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx']
+TALK_AND_MSG = ['dvdroot_ps4/msg/engus/menu.msgbnd.dcx', 'dvdroot_ps4/script/talk/m21_00_00_00.talkesdbnd.dcx',
+                'test-loadout.txt']
 GAMEPARAM = 'dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx'
 
 # WeaponGenParam rows of a gameparam as {row id: [row bytes (hex), open gem slot types]}, read with soulstruct.
@@ -77,10 +78,35 @@ class RespecModTests(unittest.TestCase):
         self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
 
     def test_builds_the_three_files(self):
-        self.assertIn('talk OK: only t210304.esd and t210692.esd', self.result.stdout)
+        # Reset Attributes at the Doll, Refund Weapon Upgrades at the workbench (just before Leave).
+        self.assertIn('talk OK: only t210304.esd (x7 states [2, 5, 31, 32], labels [15000100, 15000007, 15000008, '
+                      '15009100, 15000005]) and t210692.esd (x2 states [1, 2, 3, 6, 27, 28, 29], labels [15000110, '
+                      '15000120, 15000111, 10011050, 15009110, 15000005]) changed', self.result.stdout)
         self.assertIn("'Reset Attributes'", self.result.stdout)
         self.assertIn("'Refund Weapon Upgrades'", self.result.stdout)
+        # The refund confirm per level lists what comes back (the game's names and EquipMtrlSetParam counts).
+        self.assertIn('221091: "Refund this weapon\'s upgrades? You get back:\\nBlood Stone Shard × 3"', self.result.stdout)
+        self.assertIn('221100: "Refund this weapon\'s upgrades? You get back:\\nBlood Stone Shard × 16\\n'
+                      'Twin Blood Stone Shards × 16\\nBlood Stone Chunk × 16\\nBlood Rock × 1"', self.result.stdout)
         self.assertEqual(files(self.out), sorted(TALK_AND_MSG + [GAMEPARAM]))
+
+    def test_test_loadout(self):
+        # The TEST character's list (BB_TEST_LOADOUT): beside dvdroot_ps4, which is all the mod loader reads.
+        lines = [l.split('#')[0].split() for l in (Path(self.out) / 'test-loadout.txt').read_text().splitlines()
+                 if not l.startswith('#')]
+        kinds = {k: [(int(i), int(n)) for kind, i, n in lines if kind == k] for k in ('weapon', 'armor', 'goods')}
+        self.assertIn('Test loadout: 94 weapons, 126 armor, 177 goods', self.result.stdout)
+        weapons = dict(kinds['weapon'])
+        for weapon in (7001000, 7011000, 7021000, 14001000, 38021000):  # Saw Cleaver, Uncanny, Lost; Pistol; Lost Parasite
+            self.assertEqual(weapons.get(weapon), 1, weapon)
+        for shield in SHIELDS_AND_TORCH:
+            self.assertIn(shield, weapons)
+        self.assertNotIn(1000000, weapons)  # Bare Fists
+        goods = dict(kinds['goods'])
+        self.assertEqual(goods[1000], 20)   # Blood Vial: a full stack
+        self.assertEqual(goods[3030], 99)   # Blood Rock
+        self.assertNotIn(4000, goods)       # Oedon Tomb Key: no key items
+        self.assertFalse(set(range(800, 900)) & set(goods))  # no gestures
 
     def test_firearms_are_upgradable_left_hand_weapons(self):
         line = next(l for l in self.result.stdout.splitlines() if l.startswith('Gun gems: firearm families: '))

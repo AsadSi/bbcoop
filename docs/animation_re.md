@@ -80,3 +80,92 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
 2. `BB_UPSCALER=off`, and `object_motion=0` in bbport.ini. If the dip goes away, it is the upscaler's history, not geometry.
 3. `BB_PC_MODEL=0`. If the dip goes away, it is the memory model.
 4. Then the switches for candidates 1 and 2, once they are coded.
+
+## Foliage speed (2026-10-12)
+- **Report (Asad):** with the current Uncap FPS++ (465bcf7), flowers in the Hunter's Dream move "way faster than they
+  should", which reads as flickering, even when the player stands still. It was not there with the 2026-08-28 patch.
+  Normal launcher: uncapped, 120 FPS limit, 2160p output.
+- **Frame time:** `[[0x059404F8]+0x264]` is SprjFlipper's wall-clock frame time in seconds (`0x2434CF0`: µs difference /
+  1e6). The patch's caves clamp it to 1/30. `0x02418E3D` also stores the clamped value to `0x0575A908` every frame,
+  so `0x0575A908` holds min(max(dt, flipper+0x18), 1/30); `+0x18` is 0 under the patch. The 1/120 written there is
+  only its first value.
+- **Frame mode flag:** `[[0x59406C8]+0x100]` copies SprjFlipper+0x10, the flip interval (2 = 30 FPS, 1 = 60 FPS).
+  Both patches force 1.
+
+### The wind/foliage constants function `0x2713870`–`0x27165EE`
+- **Callers:** two render-instance vtables (owners built near "CSLod"/"RendMan"). Its output is 28 float4s packed
+  into per-instance shader constants (`0x2126B60`).
+- **What it does:** it reads wind sources (Perlin fBm, a jittered direction).
+  - It integrates per-slot timers, age and fade with one step: age in `.w`, a 0.1 s fade-in, a 0.75 s lifetime.
+  - Every frame it rebuilds the offsets `disp = step × velocity` and `dist = step × (speed + |random delta|)`
+    (`xmm14`, at `0x2714A66` and `0x2714AE7`). These are not integrated.
+  - There are no "grass"/"wind" strings, so the label is inferred.
+- **Steps by version:**
+  - vanilla: 1/30 a frame;
+  - both patches: flag 1, so 1/60 a frame. At 120 FPS the timers run 2× in the old patch;
+  - current patch: the clamped frame time for both (`0x02713D76`, and `0x02713DB1`/`DBB` read `0x0575A908`). The timers
+    run in real time. The offsets shrink as FPS rises and change size with every frame-time change.
+- **Candidates:**
+  - `BB_FPS_SKIP=grass`: back to 1/60 a frame;
+  - `BB_FPS_TRY=wind30` or `wind60`: a fixed offset step of 1/30 or 1/60, while the timers keep the frame time
+    (`0x027149EA`, `0x02714B26`).
+
+### Other lines of the current patch that can make something faster or unstable
+- **`0x01972A7D`:** the update context `0x1972900` passes to `0x21145B0(obj [r12+0xD0])` carries 1/30, the game's
+  value. The old patch had 1/240. It runs only when `[r12+0xC4]==1`, from one caller (`0x1D3AC10`). If that runs once a
+  frame, it is 4× real time at 120 FPS; how often it runs was not checked, and the system is not identified. Candidate: `BB_FPS_TRY=step1972`, which uses the clamped frame time (cave at `0x05490B00`).
+- **Havok Cloth (`cloth`):** stiffness × (min(dt,1/60)·60)², sub-steps forced to 1 (`0x00B6E67A`). The old patch
+  left cloth alone, and wind on plants can be cloth (`hclSimpleWindAction` is in the binary).
+- **`sfx`:** the SFX frame rate goes 30 → 60 (`0x026FB39F`; frame counts / rate = seconds). It may run 2× unless
+  something compensates. `fps60` holds the other "per second at 30" values that were doubled.
+- **`hknp`:** the default solver step 1/30 → 1/120 (`0x00F383CA`). The old patch's line hit padding at `0x011383CA`
+  (the 30/60/90 FPS++ blocks still carry that typo).
+- **`timeobj`** (`0x2677780` → `0x12BBDA0`) and **`clip`:** real time now (the old patch was 2× or 4×), so they are
+  not "faster".
+- **Not grouped:** camera, sleeps, smoothing and the 1/30 → 1/60 task contexts: character, thread or camera code,
+  slower than the old patch.
+- **Frame limiter:** `[+0x18]` = 0 removes the game's 240 FPS cap. Only `BB_FPS_LIMIT=0` exceeds it.
+
+### A/B (Hunter's Dream, by the flowers, standing still)
+`~/.local/bin/bloodborne-ab.sh ENV=VALUE...` (log `out/play-ab.log`):
+1. no settings (baseline);
+2. `BB_FPS_PATCH=old`;
+3. `BB_FPS_LIMIT=30`;
+4. `BB_FPS_TRY=step1972`;
+5. `BB_FPS_SKIP=cloth`;
+6. `BB_FPS_TRY=wind60`;
+7. `BB_FPS_SKIP=sfx,fps60`;
+8. `BB_FPS_SKIP=hknp`.
+
+### Cloth (2026-10-12, after the first A/B runs)
+- **A/B so far:**
+  - `wind60` fixes the flowers; `step1972` alone does not.
+  - Flowers and capes flickered in sync without `wind60`: the same wind sources drive both.
+  - `BB_FPS_SKIP=cloth` makes capes too fast.
+  - With Uncap FPS++'s cloth group, the Doll's hood and skirt flicker.
+- **Cloth step:** the cloth task (FrpgHavokMan, `0x1BF9D90` → `0x13D3520` → cloth manager `0x13D5440`) gets the task
+  context's dt, which Uncap FPS++ sets to the clamped frame time (`0x02418E3D`). Execute (`0xB6E370`) divides it by the
+  substep count from the asset (setup `+0x18`, else the operator's `+0x20`; the ELF cannot tell the values).
+- **Why vanilla bytes run fast:** gravity and damping follow h, but the position-based constraints apply stiffness once
+  per substep, so more substeps a second make cloth stiffer and quicker.
+- **What Uncap FPS++ does:** it forces 1 substep and multiplies the stiffness by (min(dt,1/60)·60)², which assumes 2
+  substeps of 1/60.
+  - The factor changes every frame, and rigid links (k≈1) become springs, which is a likely cause of the flicker.
+  - The pre-step (`0xB6FBF0`) and the adapter (`0xB72225`) still read the asset count.
+- **Candidate:** `BB_FPS_TRY=clothstep`.
+  - An accumulator steps n = round(acc·120) substeps of exactly 1/120 each frame. Above 120 FPS some frames take none.
+  - Execute, the pre-step and the adapter all use n.
+  - The stiffness factor is a constant 0.25, which is Uncap FPS++'s at a steady 120 FPS.
+  - The tunables at `0x05490B10` are 120.0, 0.5, 1/120 and the factor.
+
+### Result (2026-10-12)
+- **Default:** `wind60` and `clothstep` are on by default with Uncap FPS++ (`DEFAULT_FPS_TRY`). `BB_FPS_TRY=none`
+  restores the published patch.
+- **Asad's A/B:**
+  - `wind60,clothstep`: no flicker on flowers, capes or the Doll's hood and skirt.
+  - `step1972` made no visible difference, so it stays optional.
+- **Remaining difference from the PS4:** the Doll's cape sometimes clips through her dress when it flows. Likely cause:
+  the constant stiffness factor 0.25 assumes the assets use 2 substeps of 1/60. If they use more (4 → factor 1.0, which
+  is exact vanilla behaviour at 1/120), the cloth is softer than on the PS4 and stretches into the body.
+- **Next step if needed:** log the asset substep count (`ebx` at `0xB6E685`) with a runtime hook. Then set the factor
+  at `0x05490B1C` from it, or drop the stiffness hooks when it is 4.
