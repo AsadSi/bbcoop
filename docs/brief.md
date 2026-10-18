@@ -92,7 +92,9 @@ Supporting pieces:
   - At 30 FPS some frames show 50 ms then 17 ms (judder). `BB_SWAPCHAIN_IMAGES=3` may help; inconclusive.
   - The intermittent "PM4 type 0" crash on loads (2 of ~14 loads today) is a game race between the main
     thread's GPU setup (0xebb960) and GXRenderThread's frame job (0x2199af0) on one immediate context;
-    Wooloomooloo2/bloodborne_mac_port 12a0ac5 serialises them with one lock. Not ported yet.
+    Wooloomooloo2/bloodborne_mac_port 12a0ac5 serialises them with one lock; ported 2026-10-18
+    (`src/runtime_context_lock.c`, `BB_CONTEXT_LOCK=0` off). Installed and played at the Dream; loads with
+    the lock not yet counted.
 - **Mirrored loot on BBSC (2026-10-17, merged):** every pickup, enemy drop and boss drop goes to every hunter
   (`gpu/bbnet/shadps4/core/bbcoop_loot.inc`, relay "SHAD" 0x28, `SHADPS4_BBSC_MIRROR_LOOT=0` off,
   `docs/coop_loot_re.md`). Verified alone with its test seam (receive side); a real pickup's send side and a
