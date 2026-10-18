@@ -1,6 +1,6 @@
 /* bbcoop: the characters' foot-IK height correction at uncapped frame rates (1.09, EU/US, one image).
  * Models dipped into the ground for a moment when they started a new animation (the Doll at Level Up,
- * the messengers; Asad, 2026-10-11); docs/animation_re.md has the reverse engineering.
+ * the messengers; Asad, 2026-10-11); docs/bbcoop/animation_re.md has the reverse engineering.
  *
  * ChrCtrl::Update (0x1514da0, rdi = ChrCtrl, xmm0 = frame time) moves the drawn model up or down by a
  * height correction (+0x260, clamped to +-0.5 m) that follows the feet's IK error: each frame

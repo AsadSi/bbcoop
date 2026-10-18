@@ -16,7 +16,7 @@ slot at the same level (Droplet, or the shape in GUN_GEM_SHAPES). Only those row
 is the game's own.
 
 Needs soulstruct 2.6 (python3 -m venv ~/.local/share/bbcoop-re; .../bin/pip install soulstruct).
-Works around two soulstruct quirks (docs/respec_re.md):
+Works around two soulstruct quirks (docs/bbcoop/respec_re.md):
   * ESD.to_writer() keys next-state offsets by state id across all state machines and shares
     conditions file-wide, so in multi-machine talk ESDs (all of Bloodborne's) conditions jump into
     the wrong machine: write_esd() below keeps offsets and condition sharing per machine.

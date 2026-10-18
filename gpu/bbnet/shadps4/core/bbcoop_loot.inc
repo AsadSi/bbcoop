@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbcoop: mirrored loot (docs/brief.md, Loot: "every pickup, enemy drop and boss drop is mirrored to
+// bbcoop: mirrored loot (docs/bbcoop/brief.md, Loot: "every pickup, enemy drop and boss drop is mirrored to
 // each player"). Included by bloodborne_re.cpp after its internal namespace, so it uses BBSC's
-// helpers; declared in core/bbcoop_loot.h. Addresses and how they were found: docs/coop_loot_re.md.
+// helpers; declared in core/bbcoop_loot.h. Addresses and how they were found: docs/bbcoop/coop_loot_re.md.
 //
 // Send: every item get of the local player goes through the game's ItemGet (0x017D89F0: inventory,
 // storage when full, the popup). A hook just after its prologue reads the item list and, from the

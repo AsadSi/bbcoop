@@ -1,5 +1,5 @@
 /* bbcoop: one lock around the two engine paths that write the immediate graphics context (the load
- * race behind "PM4 type 0", docs/brief.md). Taken from Wooloomooloo2/bloodborne_mac_port 12a0ac5
+ * race behind "PM4 type 0", docs/bbcoop/brief.md). Taken from Wooloomooloo2/bloodborne_mac_port 12a0ac5
  * (src/runtime_hooks.c there, Mark Hall, GPL-2.0), with both sites checked before either is written.
  *
  * During a load the main thread records cloth/texture setup dispatches (0xebb960) straight into

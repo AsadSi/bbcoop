@@ -1,6 +1,6 @@
 # Mirrored loot: reverse-engineering notes (v1.09)
 
-Asad's decision (`docs/brief.md`, Loot): every pickup, enemy drop and boss drop is mirrored to each
+Asad's decision (`docs/bbcoop/brief.md`, Loot): every pickup, enemy drop and boss drop is mirrored to each
 player. Code: `gpu/bbnet/shadps4/core/bbcoop_loot.inc`, included by BBSC's `bloodborne_re.cpp`
 (so it runs only with `BB_ONLINE=1 BB_BBSC=1`). Switch: `SHADPS4_BBSC_MIRROR_LOOT` (on by default
 with BBSC, `=0` off). All addresses are image offsets. Found on 2026-10-17 by disassembling
@@ -70,7 +70,7 @@ it, one handle per item, as the lot roll `0x01A8B080` makes them:
 | goods | `0xB0000000 \| id` |
 | gem | `0x01A88130(&out, [0x0553E990], &doping, &modify, features, GemGenParam id)`: a new gem of the same row (its random effects are rolled again) |
 
-`doping` and `modify` are `{u32 -1, u32 0, u64 0}` (no param, as `docs/respec_re.md` passes them);
+`doping` and `modify` are `{u32 -1, u32 0, u64 0}` (no param, as `docs/bbcoop/respec_re.md` passes them);
 `features` is 0x48 bytes of -1, the award's default when no chalice feature applies (`0x0556B888`).
 After ItemGet the handles are released (`0x01A8BC00`); the inventory keeps its own reference.
 

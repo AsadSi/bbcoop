@@ -142,7 +142,7 @@ export BB_FPS=$fps
 # previous Uncap FPS++ (2026-08-28) with the separate sprint fix (scripts/patches.py reads it).
 # bbcoop A/B for those patches: BB_FPS_SKIP=<group>[,..] leaves groups of Uncap FPS++ lines out (cloth grass sfx
 # fps60 hknp timeobj clip), BB_FPS_TRY=<variant>[,..] picks bbcoop fixes (step1972 wind30 wind60 clothstep dtfloor; default wind60,clothstep,dtfloor,
-# none for none); docs/animation_re.md.
+# none for none); docs/bbcoop/animation_re.md.
 # bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.
@@ -292,7 +292,7 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     # BBSC: its game server on this PC when the server's own does not answer (online.py
     # bbsc-local). It lives as long as the game: a watcher stops it when this process (exec'd into
     # the game below) is gone. Messages and bloodstains are then this PC's only.
-    # bbcoop: BBSC's co-op scaling with Asad's numbers (docs/brief.md: +50% HP and +10% damage per
+    # bbcoop: BBSC's co-op scaling with Asad's numbers (docs/bbcoop/brief.md: +50% HP and +10% damage per
     # extra player; bosses scale through HP too); BBSC's own stagger numbers. Each is overridable.
     if [[ ${BB_BBSC:-0} == 1 ]]; then
         export BBSC_SCALE_ENEMY_HP=${BBSC_SCALE_ENEMY_HP:-50} BBSC_SCALE_BOSS_HP=${BBSC_SCALE_BOSS_HP:-50}
