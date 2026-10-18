@@ -3,7 +3,7 @@
  * Attributes" and 72100901 while the workbench's "Refund Weapon Upgrades" has the weapon list open; this file does the rest on the game thread,
  * from hooks on SetEventFlag (the talk script's c1_11 runs on the game thread) and on the per-update
  * SOS status (the session state, which also runs offline). Offsets are image offsets; every hook site and
- * every game function called is checked byte for byte first (docs/respec_re.md has the RE).
+ * every game function called is checked byte for byte first (docs/bbcoop/respec_re.md has the RE).
  *   BB_RESPEC=0        no respec hooks
  *   BB_RESPEC_FREE=1   the stat reset costs no Insight (testing)
  *   BB_RESPEC_TRACE=1  logs the player state the hooks see, every 5 s of frames

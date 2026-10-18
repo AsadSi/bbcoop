@@ -1,5 +1,5 @@
 /* bbcoop: the characters' foot-IK height correction at uncapped frame rates (runtime_ik.c,
- * docs/animation_re.md). */
+ * docs/bbcoop/animation_re.md). */
 #ifndef BB_RUNTIME_IK_H
 #define BB_RUNTIME_IK_H
 #include <stdint.h>

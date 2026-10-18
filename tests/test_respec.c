@@ -57,7 +57,7 @@ static void rules(void) {
     bad.level++;
     assert(!respec_stats_valid(&bad));
 
-    /* Level costs: the game's values (docs/respec_re.md), and the refund sums. */
+    /* Level costs: the game's values (docs/bbcoop/respec_re.md), and the refund sums. */
     assert(game_cost(11) == 829 && game_cost(12) == 847 && game_cost(13) == 1039);
     assert(game_cost(20) == 2601 && game_cost(100) == 60265);
     assert(respec_echo_refund(10, 10, game_cost) == 0);

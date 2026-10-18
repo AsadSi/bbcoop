@@ -727,11 +727,11 @@ int main(int argc, char **argv) {
     }
     { const char *error = respec_install(image, size); if (error) fail(error); } /* bbcoop: BB_RESPEC=0 skips */
     { const char *error = saveslots_install(image, size, respec_text_hook_installed()); if (error) fail(error); } /* bbcoop: BB_SAVESLOTS=0 skips */
-    { const char *error = camera_install(image, size); if (error) fail(error); } /* bbcoop: docs/camera_re.md */
+    { const char *error = camera_install(image, size); if (error) fail(error); } /* bbcoop: docs/bbcoop/camera_re.md */
     messenger_install(image, size); /* bbcoop: BB_MESSENGER_RADIUS */
-    { const char *error = ik_install(image, size); if (error) fail(error); } /* bbcoop: docs/animation_re.md */
+    { const char *error = ik_install(image, size); if (error) fail(error); } /* bbcoop: docs/bbcoop/animation_re.md */
     { const char *error = context_lock_install(image, size); if (error) fail(error); } /* bbcoop: load race */
-    { const char *error = papers_install(image, size); if (error) fail(error); } /* bbcoop: docs/papers_re.md */
+    { const char *error = papers_install(image, size); if (error) fail(error); } /* bbcoop: docs/bbcoop/papers_re.md */
     if (!cpu_only) bbgpu_patch_image(image, size);
 #ifdef _WIN32
     patch_guest_tls(segments, ns);

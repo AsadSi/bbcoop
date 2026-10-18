@@ -1,5 +1,5 @@
 /* bbcoop: respec rules (no game access, tested by tests/test_respec.c). Values are v1.09's own:
- * CharaInitParam rows 3000-3008 and EquipMtrlSetParam rows 100-1000 (docs/respec_re.md). */
+ * CharaInitParam rows 3000-3008 and EquipMtrlSetParam rows 100-1000 (docs/bbcoop/respec_re.md). */
 #include "runtime_respec.h"
 #include <stddef.h>
 

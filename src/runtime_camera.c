@@ -1,5 +1,5 @@
 /* bbcoop: the third-person camera at uncapped frame rates (1.09, EU/US, one image). The camera
- * sped up at times (Asad, 2026-10-10); docs/camera_re.md has the reverse engineering.
+ * sped up at times (Asad, 2026-10-10); docs/bbcoop/camera_re.md has the reverse engineering.
  *
  * - Turn ramp: holding the stick fully for 0.6 s (RotHiSpeedRateIncTime) ramps the camera from
  *   ~120 to ~260 degrees/s; the ramp is vanilla behaviour. It is set to 1e9 s, so turning keeps one

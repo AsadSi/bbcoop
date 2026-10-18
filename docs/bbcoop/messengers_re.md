@@ -1,6 +1,6 @@
 # Messengers: reverse-engineering notes (v1.09)
 
-Image offsets, as in `docs/respec_re.md`. This is static analysis from 2026-10-11; the game was not run. The symptom: messengers
+Image offsets, as in `docs/bbcoop/respec_re.md`. This is static analysis from 2026-10-11; the game was not run. The symptom: messengers
 "vanish at odd distances, everywhere" (Asad; 2160p output, FSR 4, uncapped at ~240 FPS).
 
 ## The renderer
