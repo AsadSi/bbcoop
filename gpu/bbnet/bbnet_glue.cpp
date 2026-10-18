@@ -521,13 +521,16 @@ extern "C" __attribute__((visibility("default"))) void bbnet_image_ready(std::ui
     if (!std::getenv("BBSC_SAVE_DIR")) {
         const char* user = std::getenv("BB_GPU_USER_DIR");
         std::error_code error;
+        // bbcoop: any title folder, not only CUSA00207 (the US release saves under CUSA00900;
+        // without a save folder BBSC's kit of bells is never given).
         for (const auto& id : std::filesystem::directory_iterator(
                  std::filesystem::path(user ? user : "user") / "savedata", error)) {
-            const auto folder = id.path() / "CUSA00207" / "SPRJ0005";
-            if (std::filesystem::is_directory(folder, error)) {
-                setenv("BBSC_SAVE_DIR", folder.c_str(), 0);
-                std::printf("BBSC: save folder %s\n", folder.c_str());
-                break;
+            for (const auto& title : std::filesystem::directory_iterator(id.path(), error)) {
+                const auto folder = title.path() / "SPRJ0005";
+                if (!getenv("BBSC_SAVE_DIR") && std::filesystem::is_directory(folder, error)) {
+                    setenv("BBSC_SAVE_DIR", folder.c_str(), 0);
+                    std::printf("BBSC: save folder %s\n", folder.c_str());
+                }
             }
         }
     }
