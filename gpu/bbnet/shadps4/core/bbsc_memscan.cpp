@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #ifndef _WIN32
+#include <fcntl.h> // bbcoop: /proc/self/mem
 #include <sys/uio.h>
 #include <unistd.h>
 #endif
@@ -105,6 +106,10 @@ std::vector<std::uint64_t> FindInMemory(std::span<const std::uint8_t> needle, st
     if (!maps) {
         return hits;
     }
+    // bbcoop: the game's memory is mostly the GPU driver's dma-buf (AMD's default guest memory),
+    // which process_vm_readv cannot pin ("Bad address"): BBSC found none of the game's param tables,
+    // so no kit, no duel bell and no scaling. /proc/self/mem reads it (the driver's access hook).
+    const int mem = ::open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
     constexpr std::size_t Piece = 1u << 20;
     std::vector<std::uint8_t> buffer(Piece + needle.size());
     char line[512];
@@ -122,7 +127,12 @@ std::vector<std::uint64_t> FindInMemory(std::span<const std::uint8_t> needle, st
                 std::size_t(std::min<std::uint64_t>(end - at, Piece + needle.size() - 1));
             iovec local{buffer.data(), want};
             iovec remote{reinterpret_cast<void*>(at), want};
-            const ssize_t got = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+            ssize_t got = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+#ifndef __APPLE__
+            if (got < ssize_t(needle.size()) && mem >= 0) { // bbcoop: dma-buf
+                got = ::pread(mem, buffer.data(), want, static_cast<off_t>(at));
+            }
+#endif
             if (got < ssize_t(needle.size())) {
                 continue;
             }
@@ -143,6 +153,9 @@ std::vector<std::uint64_t> FindInMemory(std::span<const std::uint8_t> needle, st
     }
 #ifndef __APPLE__
     std::fclose(maps);
+    if (mem >= 0) {
+        ::close(mem);
+    }
 #endif
 #endif
     return hits;
