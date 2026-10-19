@@ -125,6 +125,28 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
     DrawRecord(pipeline, used_prepared, is_indexed, index_offset);
 }
 
+// bbcoop (diagnostics): BB_DRAW_LIST=<file>: once the file exists, the next 4096 draws print
+// their pixel shader, primitive type (rect and quad lists are drawn tessellated), blending and whether
+// they are tessellated or indirect; for BB_SKIP_PS.
+static void ListDraw(const GraphicsPipeline* pipeline, bool indirect) {
+    static const char* draw_list = std::getenv("BB_DRAW_LIST");
+    static u32 draw_list_left = 0;
+    if (draw_list && !draw_list_left && std::remove(draw_list) == 0) {
+        draw_list_left = 4096;
+    }
+    if (draw_list_left) {
+        --draw_list_left;
+        const auto& stages = pipeline->GetStages();
+        const auto* ps = stages[u32(Shader::SwStage::Fragment)];
+        const auto& key = pipeline->GetGraphicsKey();
+        std::printf("Draw: ps %llx prim %u blend %d/%d/%d tess %d indirect %d\n",
+                    ps ? (unsigned long long)ps->pgm_hash : 0ull, u32(key.prim_type),
+                    key.blend_controls[0].enable, u32(key.blend_controls[0].color_src_factor),
+                    u32(key.blend_controls[0].color_dst_factor),
+                    stages[u32(Shader::SwStage::TessellationControl)] != nullptr, indirect);
+    }
+}
+
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
                             bool is_indexed, u32 index_offset) {
     BB_SECTION(DrawRecord);
@@ -182,6 +204,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             return;
         }
     }
+    ListDraw(pipeline, false); // bbcoop
     // bbport: the key guide icons for the device in use (a change: uploaded before this draw).
     prompts->Update();
     bind_prepared = used_prepared;
@@ -479,6 +502,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         FrameCapture::Poll();
         scheduler.PopPendingOperations();
     }
+    ListDraw(pipeline, true); // bbcoop
     const VAddr count_address = indirect.count;
     const u32 stride = indirect.stride;
     const u32 max_count = indirect.max_count;
