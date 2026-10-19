@@ -381,10 +381,7 @@ def fsr411_build_command(upscaler, loader=None):
 def online_module(pool="seamless"):
     """The online module beside the GPU library (gpu/bbnet, or gpu/bbnet20 for the shadNet and The
     Hunter's Dream pools; a build without its libraries has none)."""
-    # bbcoop: macOS has only the shadp2p module (run.sh plays it there), so the seamless pool only.
-    if sys.platform == "darwin":
-        return pool == "seamless" and (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / "libbbnet.dylib").is_file()
-    name = "libbbnet20.so"
+    name = "libbbnet20.dylib" if sys.platform == "darwin" else "libbbnet20.so"  # bbcoop
     return (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / name).is_file()
 
 

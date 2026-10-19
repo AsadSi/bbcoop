@@ -298,10 +298,9 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
         BB_NET_GEN=20
         unset BB_BBSC
     fi
-    # bbcoop: the 0.20 module is not ported to macOS yet; there the shadp2p module (with BBSC) plays.
-    [[ $(uname -s) == Darwin ]] && BB_NET_GEN=19
     if [[ $BB_NET_GEN == 20 && -z ${BB_NET_MODULE:-} ]]; then
-        if [[ -n ${BB_PREBUILT:-} ]]; then BB_NET_MODULE=$PWD/bin/gpu/libbbnet20.so; else BB_NET_MODULE=$PWD/out/gpu/libbbnet20.so; fi
+        suffix=so; [[ $(uname -s) == Darwin ]] && suffix=dylib  # bbcoop
+        if [[ -n ${BB_PREBUILT:-} ]]; then BB_NET_MODULE=$PWD/bin/gpu/libbbnet20.$suffix; else BB_NET_MODULE=$PWD/out/gpu/libbbnet20.$suffix; fi
         export BB_NET_MODULE
     fi
     export BB_SHADNET_SERVER=${BB_SHADNET_SERVER:-play.seamlesshunt.com:31313}
