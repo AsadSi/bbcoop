@@ -261,6 +261,7 @@ Rasterizer::BeginSignature Rasterizer::MakeBeginSignature(const GraphicsPipeline
     sig.raster_scaling = upscaler->RasterScaling();
     sig.upscaler_state = upscaler->RedirectState();
     sig.generation = texture_cache.RegistryGeneration();
+    sig.backings = VideoCore::Image::backing_generation.load(std::memory_order_relaxed); // bbcoop
     std::memcpy(&sig.depth_control, &regs.depth_control, sizeof(u32));
     sig.depth_valid = regs.depth_buffer.DepthValid();
     sig.stencil_valid = regs.depth_buffer.StencilValid();

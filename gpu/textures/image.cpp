@@ -5,7 +5,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <mutex>
+#include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <fmt/format.h>
 
@@ -100,7 +102,22 @@ bool NeedsBarrier(const Image::State& state, vk::ImageLayout layout, vk::AccessF
            bool(state.access_mask & WriteAccess);
 }
 
+// bbcoop: the images that needed the full usage once (guest address, size, format). The game
+// creates many of them again (the same ~330 every scene, Huax-1839 P10.1 step 2); one made again
+// at the same place starts with the usage instead of being promoted mid-frame again.
+std::mutex full_usage_mutex;
+std::set<std::tuple<VAddr, u32, u32, vk::Format>> full_usage_keys;
+
+auto FullUsageKey(const ImageInfo& info) {
+    return std::tuple{info.guest_address, info.size.width, info.size.height, info.pixel_format};
+}
+
 } // namespace
+
+void Image::RememberFullUsage(const ImageInfo& info) {
+    std::scoped_lock lock{full_usage_mutex};
+    full_usage_keys.insert(FullUsageKey(info));
+}
 
 Common::IncrementalIdProvider<u64> Image::next_uid{};
 
@@ -186,6 +203,24 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     }
     usage_flags = UsageOf(instance, info);
     format_features = FeaturesOf(usage_flags);
+#ifdef __APPLE__
+    // bbcoop: colour images without the storage usage and format views until one is needed
+    // (Runtime::PromoteUsage): on Apple GPUs either one costs the lossless compression of a
+    // texture (Huax-1839/bloodborne-macos P10.1: GPU time -15% at 720p). BB_FULL_IMAGE_USAGE=1: off.
+    static const bool lean_usage = [] {
+        const char* env = std::getenv("BB_FULL_IMAGE_USAGE");
+        return !(env && env[0] == '1');
+    }();
+    const auto needed_full = [&] {
+        std::scoped_lock lock{full_usage_mutex};
+        return full_usage_keys.contains(FullUsageKey(info));
+    };
+    if (lean_usage && !info.props.is_block && !info.props.is_depth && info.num_samples == 1 &&
+        !needed_full()) {
+        usage_flags &= ~vk::ImageUsageFlagBits::eStorage;
+        create_flags &= ~(vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage);
+    }
+#endif
     if (info.props.is_depth) {
         aspect_mask = vk::ImageAspectFlagBits::eDepth;
         if (info.props.has_stencil) {
@@ -240,6 +275,9 @@ ImageView& Image::FindView(const ImageViewInfo& view_info, bool ensure_guest_sam
     if (ensure_guest_samples && (backing->num_samples > 1) != (info.num_samples > 1)) {
         runtime->SetBackingSamples(this, info.num_samples);
     }
+    if (NeedsFullUsage(view_info)) {
+        runtime->PromoteUsage(this); // bbcoop
+    }
     auto& infos = backing->image_view_infos;
     auto& ids = backing->image_view_ids;
     if (backing->last_view < infos.size() && infos[backing->last_view] == view_info) {
@@ -253,6 +291,15 @@ ImageView& Image::FindView(const ImageViewInfo& view_info, bool ensure_guest_sam
     infos.push_back(view_info);
     ids.push_back(id);
     return (*slot_image_views)[id];
+}
+
+bool Image::NeedsFullUsage(const ImageViewInfo& view_info) const {
+    const auto& ci = backing->image.image_ci;
+    if (ci.flags & vk::ImageCreateFlagBits::eMutableFormat) {
+        return false;
+    }
+    return view_info.is_storage ||
+           runtime->GetInstance().GetSupportedFormat(view_info.format, format_features) != ci.format;
 }
 
 void Image::GetBarriers(Barriers& out, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
