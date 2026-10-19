@@ -212,6 +212,9 @@ public:
     }
 
     // Extensions.
+    bool IsDisplayTimingSupported() const { // bbcoop
+        return ext.display_timing;
+    }
     bool IsMaintenance8Supported() const {
         return ext.maintenance_8;
     }
@@ -371,7 +374,7 @@ private:
             trinary_minmax, nv_mixed_samples, amd_mixed_samples, atomic_float, atomic_float2,
             workgroup_layout, view_2d_of_3d, image_view_min_lod, memory_budget, memory_fd,
             dma_buf, memory_host, compute_derivatives, mixed_float_dot, cooperative_matrix,
-            float8, shader_clock;
+            float8, shader_clock, display_timing;
     };
 
     vk::UniqueInstance instance;

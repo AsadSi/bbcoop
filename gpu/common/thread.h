@@ -36,6 +36,13 @@ public:
     [[nodiscard]] std::chrono::nanoseconds GetTotalWait() const {
         return total_wait;
     }
+    /// bbcoop: when the current period ends, and moving it (a phase kept to another clock).
+    [[nodiscard]] std::chrono::steady_clock::time_point GetDeadline() const {
+        return deadline;
+    }
+    void Shift(std::chrono::nanoseconds by) {
+        deadline += by;
+    }
 
 private:
     std::chrono::nanoseconds period;

@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono> // bbcoop
 #include <cstdio> // bbcoop
+#include <ctime>  // bbcoop: clock_gettime_nsec_np
 #include <cstdlib> // bbcoop: BB_SWAPCHAIN_IMAGES
 #include <limits>
 
@@ -238,14 +240,38 @@ bool Swapchain::AcquireNextImage() {
 }
 
 bool Swapchain::Present() {
-    const vk::PresentInfoKHR info{
+    vk::PresentInfoKHR info{
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &present_ready[image_index],
         .swapchainCount = 1,
         .pSwapchains = &swapchain,
         .pImageIndices = &image_index,
     };
+    // bbcoop: at a fixed frame rate below the refresh rate (30 FPS on 60 Hz) each frame is asked
+    // to appear a whole number of refreshes after the last one shown (Metal's presentAtTime), so a
+    // frame that is ready a little early or late still gets its slot: every frame stays two
+    // refreshes instead of 3 then 1 (the 50/17 ms judder). BB_PRESENT_PACE=0: off.
+    static const bool pace = [] {
+        const char* env = std::getenv("BB_PRESENT_PACE");
+        return !(env && env[0] == '0');
+    }();
+    vk::PresentTimeGOOGLE time{.presentID = display_stats.next_id++};
+    const vk::PresentTimesInfoGOOGLE times{.swapchainCount = 1, .pTimes = &time};
+    if (instance.IsDisplayTimingSupported()) {
+        const u64 period = display_clock.period_ns.load(std::memory_order_relaxed);
+        const u32 refreshes = display_clock.refreshes_per_flip.load(std::memory_order_relaxed);
+        if (pace && refreshes && period && display_stats.last_raw) {
+            // Half a refresh early: the frame is shown at the first refresh after that time.
+            time.desiredPresentTime = display_stats.last_raw +
+                                      u64(time.presentID - display_stats.last_id) * refreshes * period -
+                                      period / 2;
+        }
+        info.pNext = &times;
+    }
     const vk::Result result = instance.GetPresentQueue().presentKHR(info);
+    if (instance.IsDisplayTimingSupported()) {
+        ReadDisplayTimes();
+    }
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
         needs_recreation = true;
     } else {
@@ -253,6 +279,60 @@ bool Swapchain::Present() {
     }
     frame_index = (frame_index + 1) % image_count;
     return !needs_recreation;
+}
+
+void Swapchain::ReadDisplayTimes() {
+    const vk::Device device = instance.GetDevice();
+    if (!display_clock.period_ns.load(std::memory_order_relaxed)) {
+        const auto [result, cycle] = device.getRefreshCycleDurationGOOGLE(swapchain);
+        if (result == vk::Result::eSuccess) {
+            display_clock.period_ns.store(cycle.refreshDuration, std::memory_order_relaxed);
+        }
+    }
+    const auto [result, timings] = device.getPastPresentationTimingGOOGLE(swapchain);
+    if (result != vk::Result::eSuccess && result != vk::Result::eIncomplete) {
+        return;
+    }
+    const u64 now = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count());
+#ifdef __APPLE__
+    // Metal's presentedTime is the uptime clock, which stops while the Mac sleeps; the steady
+    // clock does not (Wooloomooloo2/bloodborne_mac_port, DisplayTimeToSteady).
+    const u64 to_steady = now - clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#else
+    const u64 to_steady = 0;
+#endif
+    const u64 period = display_clock.period_ns.load(std::memory_order_relaxed);
+    auto& stats = display_stats;
+    for (const vk::PastPresentationTimingGOOGLE& timing : timings) {
+        if (!timing.actualPresentTime) {
+            ++stats.not_shown;
+            continue;
+        }
+        const u64 shown = timing.actualPresentTime + to_steady;
+        if (stats.last_ns && period && shown > stats.last_ns) {
+            const u64 refreshes = (shown - stats.last_ns + period / 2) / period;
+            ++stats.shown[std::clamp<u64>(refreshes, 1, 4) - 1];
+        }
+        stats.last_ns = shown;
+        stats.last_raw = timing.actualPresentTime;
+        stats.last_id = timing.presentID;
+        display_clock.shown_ns.store(shown, std::memory_order_relaxed);
+    }
+    static const bool report = std::getenv("BB_FRAME_STATS") != nullptr;
+    if (report && now >= stats.report_ns) {
+        if (stats.report_ns) {
+            std::printf("Display: frames on screen for 1/2/3/4+ refreshes: %llu/%llu/%llu/%llu, "
+                        "not shown %llu\n",
+                        (unsigned long long)stats.shown[0], (unsigned long long)stats.shown[1],
+                        (unsigned long long)stats.shown[2], (unsigned long long)stats.shown[3],
+                        (unsigned long long)stats.not_shown);
+        }
+        std::fill(std::begin(stats.shown), std::end(stats.shown), 0);
+        stats.not_shown = 0;
+        stats.report_ns = now + 5'000'000'000ULL;
+    }
 }
 
 } // namespace Vulkan
