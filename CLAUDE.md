@@ -66,6 +66,8 @@ Runtime mods (`src/`):
   - `BB_TEST_ENDGAME=1`: level-150 character, upgraded weapons, warped to the Dream with the Doll awake, once per save.
   - `BB_TEST_WARP=<lamp>`: once in game, to `dream`, `cathedral-ward`, `central-yharnam`, `old-yharnam` or a respawn
     point ID `<map><block>29xx`; with `tools/new_game.sh --continue` it starts a test mid-game.
+  - `BB_TEST_GIVE=<id>,..`: weapons (final ids, `27001000` = Rakuyo +10) the character doesn't hold yet, on any save,
+    saves backed up first.
   - `BB_TEST_LOADOUT=<list>`: fills a character named TEST once (stats 99, every weapon +10 Uncanny/Lost, all armor,
     stacks, gems); list `mods/bbcoop-respec/test-loadout.txt`; launcher `~/.local/bin/bloodborne-testchar.sh`.
 - **Frame rate and camera:**
