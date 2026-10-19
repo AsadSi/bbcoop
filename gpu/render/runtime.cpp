@@ -2,6 +2,9 @@
 #include "render/runtime.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
 
 #include <boost/container/small_vector.hpp>
 #include <vulkan/vulkan_format_traits.hpp>
@@ -524,6 +527,9 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     }
     if (src->info.num_samples == 1 && dst->info.props.is_depth) {
         // A draw puts the source's channels into the samples of the destination.
+        if (src->backing->image.image_ci.format != src->info.pixel_format) {
+            PromoteUsage(src); // bbcoop: viewed in its own format below
+        }
         bool needs_flush = Transit(src, Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader,
                                    AccessBit::eShaderRead);
         needs_flush |= Transit(dst, Layout::eDepthStencilAttachmentOptimal,
@@ -617,13 +623,18 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     const auto& info = image->info;
     ASSERT_MSG(!info.props.is_depth, "only color images change sample counts");
     VideoCore::Image::BackingImage* target;
-    const auto it = std::ranges::find(image->backing_images, num_samples,
-                                      &VideoCore::Image::BackingImage::num_samples);
+    const auto it = std::ranges::find_if(image->backing_images, [&](const auto& b) {
+        return b.num_samples == num_samples && !b.retired; // bbcoop: retired by PromoteUsage
+    });
     if (it != image->backing_images.end()) {
         target = std::addressof(*it);
     } else {
         auto create_info = backing->image.image_ci;
         create_info.samples = GcnToVk::NumSamples(num_samples, image->supported_samples);
+        if (num_samples > 1) { // bbcoop: nothing promotes a multisampled backing
+            create_info.usage |= vk::ImageUsageFlagBits::eStorage;
+            create_info.flags |= vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage;
+        }
         target = &image->backing_images.emplace_back();
         target->num_samples = num_samples;
         target->image = VideoCore::HostImage{instance.GetDevice(), instance.GetAllocator()};
@@ -664,6 +675,85 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         target->state.pl_stage = Stages;
     }
     backing = target;
+}
+
+void Runtime::PromoteUsage(VideoCore::Image* image) {
+    BeforeImageAccess();
+    auto* old = image->backing;
+    auto create_info = old->image.image_ci;
+    if (create_info.flags & vk::ImageCreateFlagBits::eMutableFormat) {
+        return;
+    }
+    create_info.usage |= vk::ImageUsageFlagBits::eStorage;
+    create_info.flags |= vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage;
+    VideoCore::Image::RememberFullUsage(image->info);
+    if (static const bool log = std::getenv("BB_PROMOTE_LOG") != nullptr; log) {
+        static std::atomic<u64> count{0};
+        std::printf("Promote: %ux%u %s at %#llx (%llu)\n", image->info.size.width,
+                    image->info.size.height, vk::to_string(image->info.pixel_format).c_str(),
+                    (unsigned long long)image->info.guest_address,
+                    (unsigned long long)++count);
+    }
+    auto* target = &image->backing_images.emplace_back();
+    target->num_samples = old->num_samples;
+    target->image = VideoCore::HostImage{instance.GetDevice(), instance.GetAllocator()};
+    target->image.Create(create_info);
+    const auto& info = image->info;
+    SetObjectName(instance.GetDevice(), target->image.image, "Image {}x{}x{} {} {:#x} (promoted)",
+                  info.size.width, info.size.height, info.size.depth,
+                  vk::to_string(info.pixel_format), info.guest_address);
+
+    if (old->state.layout != Layout::eUndefined || !old->subresource_states.empty()) {
+        // The contents, in stream order.
+        scheduler.EndRendering();
+        Transit(image, Layout::eTransferSrcOptimal, Stage::eCopy, AccessBit::eTransferRead);
+        image_barriers.push_back({
+            .srcStageMask = Stage::eNone,
+            .srcAccessMask = AccessBit::eNone,
+            .dstStageMask = Stage::eCopy,
+            .dstAccessMask = AccessBit::eTransferWrite,
+            .oldLayout = Layout::eUndefined,
+            .newLayout = Layout::eTransferDstOptimal,
+            .image = target->image,
+            .subresourceRange = {image->aspect_mask, 0, VK_REMAINING_MIP_LEVELS, 0,
+                                 VK_REMAINING_ARRAY_LAYERS},
+        });
+        FlushBarriers();
+        boost::container::small_vector<vk::ImageCopy, 16> regions;
+        const vk::Extent3D extent = create_info.extent;
+        for (u32 level = 0; level < create_info.mipLevels; ++level) {
+            const vk::ImageSubresourceLayers layers{image->aspect_mask, level, 0,
+                                                    create_info.arrayLayers};
+            regions.push_back({
+                .srcSubresource = layers,
+                .dstSubresource = layers,
+                .extent = {std::max(extent.width >> level, 1u), std::max(extent.height >> level, 1u),
+                           std::max(extent.depth >> level, 1u)},
+            });
+        }
+        scheduler.Record([src = vk::Image(old->image), dst = vk::Image(target->image),
+                          regions = scheduler.RecordData(std::span<const vk::ImageCopy>(regions))](
+                             vk::CommandBuffer cmdbuf) {
+            cmdbuf.copyImage(src, Layout::eTransferSrcOptimal, dst, Layout::eTransferDstOptimal,
+                             u32(regions.size()), regions.data());
+        });
+        target->state = {Stage::eCopy, AccessBit::eTransferWrite, Layout::eTransferDstOptimal};
+    }
+    image->backing = target;
+    image->usage_flags = create_info.usage;
+    VideoCore::Image::backing_generation.fetch_add(1, std::memory_order_relaxed);
+
+    // The old backing and its views go once the GPU is done with them; it is never found again.
+    old->retired = true;
+    scheduler.DeferOperation([views = std::move(old->image_view_ids), dead = std::move(old->image),
+                              slot = image->slot_image_views]() mutable {
+        for (const VideoCore::ImageViewId view_id : views) {
+            slot->erase(view_id);
+        }
+    });
+    old->image_view_ids.clear();
+    old->image_view_infos.clear();
+    old->last_view = 0;
 }
 
 } // namespace Vulkan
