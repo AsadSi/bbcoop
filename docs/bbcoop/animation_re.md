@@ -1,10 +1,10 @@
 # Models dipping into the ground at an animation change: research notes (v1.09)
 
-Image offsets, as in `docs/respec_re.md`. This is static analysis and web research from 2026-10-11; the game was not run.
+Image offsets, as in `docs/bbcoop/respec_re.md`. This is static analysis and web research from 2026-10-11; the game was not run.
 
 **Symptom** (Asad, "always there"): when a model starts a new animation, it briefly moves down into the ground, then
 returns. Seen on the Plain Doll (e.g. opening Level Up) and on the messengers. This is what "messengers popping up and
-disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probably not the cause.
+disappearing" meant, so the 5 m emerge rule (`docs/bbcoop/messengers_re.md`) is probably not the cause.
 
 ## Candidate 1: foot-IK height correction (per-frame gains, vanilla)
 - **Where:** ChrCtrl::Update `0x1514da0(ctrl, dt = xmm0)`, called each frame from the ChrIns update at `0x18be236`. The
@@ -60,7 +60,7 @@ disappearing" meant, so the 5 m emerge rule (`docs/messengers_re.md`) is probabl
   - **Checked** (`tests/test_patches.py`): no overlap with the other uncap-preset patches or with any byte-checked
     `src/runtime_*.c` site. Its caves (`0x05490000`–`0x05490AC5`, `0x054A0000`–`0x054A00F3`) lie in the zero run at the end
     of the text segment, which nothing else uses.
-  - **Camera:** it scales four of the camera chase rates itself (see `docs/camera_re.md`).
+  - **Camera:** it scales four of the camera chase rates itself (see `docs/bbcoop/camera_re.md`).
   - **Still at the 2026-08-28 versions:** 60 FPS++ and 90 FPS++.
 - **Not reported anywhere:** no public report of the dip itself was found (shadPS4 issues, the compatibility repo, bbport
   #1–#149, Reddit, Paleblood).

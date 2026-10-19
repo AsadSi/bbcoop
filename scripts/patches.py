@@ -35,7 +35,7 @@ def fps_patches(fps, env=os.environ):
     return list(FPS_PRESETS[fps])
 
 
-# bbcoop: A/B switches for the current Uncap FPS++ (docs/animation_re.md "Foliage speed").
+# bbcoop: A/B switches for the current Uncap FPS++ (docs/bbcoop/animation_re.md "Foliage speed").
 # BB_FPS_SKIP=<group>[,<group>] leaves out the lines that start at these addresses, so the sites keep
 # the game's bytes (a cave the hook jumped to stays, unused). Each group is a set of hooks or values
 # that works without the others.

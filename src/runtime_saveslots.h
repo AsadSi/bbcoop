@@ -1,4 +1,4 @@
-/* bbcoop: Duplicate in the Load Game list (runtime_saveslots.c, docs/saveslots_re.md). */
+/* bbcoop: Duplicate in the Load Game list (runtime_saveslots.c, docs/bbcoop/saveslots_re.md). */
 #ifndef BB_SAVESLOTS_H
 #define BB_SAVESLOTS_H
 #include <stdint.h>

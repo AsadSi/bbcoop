@@ -104,6 +104,9 @@ public:
     /// Switches `image` to its backing with `num_samples` (made on first use), copying the
     /// contents over when `copy_backing`.
     void SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool copy_backing = true);
+    /// bbcoop: gives a lean image (image.cpp, macOS) a backing with the storage usage and format
+    /// views, its contents copied in stream order; the old backing goes once the GPU is done.
+    void PromoteUsage(VideoCore::Image* image);
 
     /// Records an access of [offset, offset + size) of `buffer` by commands just recorded.
     void AccessBuffer(const VideoCore::Buffer* buffer, u64 offset, u64 size,

@@ -36,7 +36,7 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Online code | shadp2p's C++ NP, Net and Http libraries (about 25k lines), adapted into a C++ library linked like the GPU library, with no rewrite into C. Tested by a fake-game client that makes Bloodborne's online calls against the real server | A C rewrite would take 7-9k lines plus a protobuf C port, for no gain | Claude |
 | Loot | Every pickup, enemy drop and boss drop is mirrored to each player | "Fair for co-op" | Asad |
 | Difficulty | +50% HP and +10% damage per extra player (BBSC's scaling with these numbers). No extra enemies | "No need for more enemies" (2026-10-17) | Asad |
-| Respec | In the Hunter's Dream, outside a session. "Reset Attributes" (at the Doll) returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" (at the workbench, just before Leave; moved from the Doll 2026-10-12, Asad) opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/respec_re.md`) | | Asad, 2026-10-10 |
+| Respec | In the Hunter's Dream, outside a session. "Reset Attributes" (at the Doll) returns level and stats to the origin's and refunds every echo spent on levels, for 1 Insight (`BB_RESPEC_FREE=1`: free). "Refund Weapon Upgrades" (at the workbench, just before Leave; moved from the Doll 2026-10-12, Asad) opens the Fortify list of upgraded weapons, +10 and firearms included. Picking one sets it to +0 for free and returns every upgrade material, with fitted gems going to the inventory. The echoes spent on upgrades are lost. Saves a backup first. Built and verified in game 2026-10-10 (`src/runtime_respec.c`, `docs/bbcoop/respec_re.md`) | | Asad, 2026-10-10 |
 | Respec entry | A new option in the Doll's dialogue (her talk script), not a settings-menu button | Feels native; chosen over the faster menu button | Asad, 2026-10-09 |
 | Seamless engine | Upstream 0.6's BBSC (`BB_BBSC=1`, the online module) is the seamless co-op, run with bbcoop's numbers (BBSC_SCALE_ENEMY_HP/BOSS_HP 50, DAMAGE 10 per extra player, BBSC's stagger) and bbcoop's mods (respec, gun gems, camera, IK). bbcoop's own seamless patches and hooks (`BB_SEAMLESS=1`) stay as the fallback and are skipped while BBSC is on: both patch the same sites. BBSC already has scaling, guest items and boss rewards, shared progress, lamp warps together, up to five hunters, the host-death rule and respawn in place | "Take the best of both" | Asad, 2026-10-17 |
 | Frame rate | 0.6's frame-rate hooks (48 per-frame values follow the frame time, running fixed), with bbcoop's camera chase rates and foot-IK correction on top (no shared sites). bbcoop's Uncap FPS++ patch stays selectable with `BB_FRAME_HOOKS=0` | "The best one, a mix of both" | Asad, 2026-10-17 |
@@ -89,11 +89,21 @@ Supporting pieces:
     frames), `MVK_BB_UNTRACKED=1` (0 late frames once, 240 the next run: noise).
   - 60 FPS is CPU-bound on the Air: uncapped ~43 FPS at Quality and at Performance alike, the GPU thread idle
     57–69%. Wooloomooloo2/bloodborne_mac_port reaches 60+ with a native arm64 GPU process; not done here.
-  - At 30 FPS some frames show 50 ms then 17 ms (judder). `BB_SWAPCHAIN_IMAGES=3` may help; inconclusive.
+  - At 30 FPS some frames showed 50 ms then 17 ms (judder): the 60 Hz vblank was a free-running timer.
+    Fixed 2026-10-19 (0370330): present times and vblank phase follow the display (VK_GOOGLE_display_timing);
+    frames off the 2-refresh grid 16.7% -> 4.8% at the Central Yharnam street, most of it one hitch.
+  - 2026-10-19: Asad plays locked 30 at 720p with every effect on (but SSR) and model_lod 0: the street runs ~44 FPS
+    uncapped there (900p: ~37, worst frames over 33 ms). 60 is out of reach in the streets (~55 with every effect
+    off; GPU-bound, 1127 draws/frame). Lean texture usages (8ddcac0, Huax P10.1) +5 FPS; their mist flicker in
+    1 of 2 sessions fixed by remembering promoted images. Immediate present had the steadiest pacing uncapped
+    (p99 19.8 vs 23.1 ms FIFO); not made the default.
+  - Asad still saw flicker at the Dream's graves during test runs (30 FPS, before the pacing fix); dumped frames
+    were clean (whole-frame tile check), so it was on-screen pacing. Recheck with the fix.
   - The intermittent "PM4 type 0" crash on loads (2 of ~14 loads today) is a game race between the main
     thread's GPU setup (0xebb960) and GXRenderThread's frame job (0x2199af0) on one immediate context;
     Wooloomooloo2/bloodborne_mac_port 12a0ac5 serialises them with one lock; ported 2026-10-18
-    (`src/runtime_context_lock.c`, `BB_CONTEXT_LOCK=0` off). Installed and played at the Dream; loads with
+    (`src/runtime_context_lock.c`, `BB_CONTEXT_LOCK=0` off). It still happened in 4 of 84 test launches; since
+    ad3c5ce a bad packet skips the rest of its buffer instead of ending the game. Installed and played at the Dream; loads with
     the lock not yet counted.
 - **Upstream 0.6 merged (2026-10-19):** online on shadPS4 0.20 (`gpu/bbnet20`, `libbbnet20.so`, now the default;
   `BB_NET_GEN=19` = the older `gpu/bbnet`), The Hunter's Dream pool (Discord sign-in, without BBSC), Laurence above 30 FPS,
@@ -102,14 +112,14 @@ Supporting pieces:
   Built and the C/Python tests pass; not yet run in the game.
 - **Mirrored loot on BBSC (2026-10-17, merged):** every pickup, enemy drop and boss drop goes to every hunter
   (`gpu/bbnet/shadps4/core/bbcoop_loot.inc`, relay "SHAD" 0x28, `SHADPS4_BBSC_MIRROR_LOOT=0` off,
-  `docs/coop_loot_re.md`). Verified alone with its test seam (receive side); a real pickup's send side and a
+  `docs/bbcoop/coop_loot_re.md`). Verified alone with its test seam (receive side); a real pickup's send side and a
   real session are not.
 - **BBSC packets 0x23..0x27 (2026-10-17, fixed):** life, scaling, PvP, shared progress and the boss bar were sent
   but dropped by the receive thread (upstream 0.6-pre1 too), so a guest never got the host's scaling or
   progress. Now handed on. Needs a real session to see end to end.
 - **Guest death at the host's lamp (2026-10-17):** BBSC respawns a guest at the host's lamp only when that
   lamp is loaded on the guest's side; bbcoop now loads the guest there otherwise (outside boss fights,
-  `SHADPS4_BBSC_DEATH_TO_HOST_LAMP`, `docs/coop_respawn_re.md`). Verified alone with the test seam; the
+  `SHADPS4_BBSC_DEATH_TO_HOST_LAMP`, `docs/bbcoop/coop_respawn_re.md`). Verified alone with the test seam; the
   session-keeping part needs a real two-player session.
 
 - **Character editor invisible/white/unchanged (Asad, 2026-10-13), USABLE.** Cause: Uncap FPS++'s frame time can be 0 when frames are presented back to back (Havok Cloth and character code divide by it); the default had the model stay unchanged on skin/gender changes. Fix: `dtfloor` (`BB_FPS_TRY`, now default; 1/240 floor, `patches/Bloodborne.xml`). Verified by Asad: changes apply. Remaining: the model flickers invisible/visible on every second change, accepted as fine. Not the cause: `BB_GPU_WRITE_TWINS_MAX`. Unfinished bisect over Uncap FPS++ units (0:81 dropped = visible; culprit among units 40-59, 70-74, 78-80) needs a rerun without other game launches (each step `pkill`s bb-probe). Build: `build.sh` skips the probe compile when unchanged (`BB_REBUILD=1` forces); a corrupt out/gpu/.ninja_deps (killed builds) made ninja recompile 180 files on every launch (58 s -> 0.7 s after deleting it).
@@ -134,8 +144,8 @@ Supporting pieces:
   - Asad's settings: uncapped frame rate, 2160p output, FSR 4. The log shows the game at ~240 FPS.
   - The renderer drops no draws by distance, and occlusion queries are faked as always visible. Both bugs point at game logic that counts per frame above ~120 FPS, like the wall detector behind "Sprint Fix (High FPS)".
   - Uncapped now defaults to a 120 FPS limit (`run.sh`, launcher). `BB_FPS_LIMIT=0` removes it.
-  - **Camera:** the game's own turn ramp (0.6 s at full stick, 120 to 260°/s) is off, and the 30 FPS chase rates follow the frame time (`src/runtime_camera.c`, `docs/camera_re.md`).
-  - **Messengers:** the notes' and bloodstains' messengers emerge within 5 m and sink beyond it, by design. Static analysis found no frame-rate, Intel-math or renderer cause (`docs/messengers_re.md`). `BB_MESSENGER_RADIUS` tests it in the game.
+  - **Camera:** the game's own turn ramp (0.6 s at full stick, 120 to 260°/s) is off, and the 30 FPS chase rates follow the frame time (`src/runtime_camera.c`, `docs/bbcoop/camera_re.md`).
+  - **Messengers:** the notes' and bloodstains' messengers emerge within 5 m and sink beyond it, by design. Static analysis found no frame-rate, Intel-math or renderer cause (`docs/bbcoop/messengers_re.md`). `BB_MESSENGER_RADIUS` tests it in the game.
 - **Firearm gem slots (Asad, 2026-10-11):**
   - Every firearm already fortifies to +10.
   - The Cannon, Church Cannon, Rosmarinus, Flamesprayer, Fist of Gratia and Hunter's Torch get the same single gun-gem slot from +1 that the pistols have, through `tools/respec_mod.py`. Its shape is Droplet, except Triangle on the Flamesprayer, Rosmarinus and Hunter's Torch and Radial on the Fist of Gratia (2026-10-17).
@@ -144,7 +154,7 @@ Supporting pieces:
   - Instead of a flat +80 per hit, the bonus is 80 × (base at +0 × the attack's multiplier) / 90 + 10% × (base at the current level × multiplier).
   - It keeps the early-game punch and adds a late-game share, and no longer favours fast weapons.
   - Viscerals still get nothing, and stats and gems don't change it.
-  - `src/runtime_papers.c`, `docs/papers_re.md`; `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs each bonus.
+  - `src/runtime_papers.c`, `docs/bbcoop/papers_re.md`; `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs each bonus.
   - Tested with the Shell on Ludwig's Holy Blade +10 and the Threaded Cane +10: the trace matched the formula, the status screen shows the new value, and viscerals got none. Against `BB_PAPERS=vanilla`, the transformed R2 did a little more damage.
 - **Verified in game 2026-10-11** (throwaway profile, `BB_TEST_ENDGAME`, 2160p, FSR 4, 120 FPS cap):
   - **Camera:**

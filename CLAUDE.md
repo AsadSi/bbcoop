@@ -1,109 +1,121 @@
 # bbcoop
 
-A private fork of bbport (Bloodborne running natively on Linux) that adds seamless co-op, co-op
-tuning and respec. Read `docs/brief.md` first. It has the decisions, what's out of scope and
-what's still open.
+A private fork of bbport (deadinside28/bloodborne_pc: Bloodborne's own x86-64 code running natively on
+Linux, with the PS4 system libraries and GPU replaced) that adds seamless co-op, co-op tuning, respec and
+quality-of-life mods, and plays on macOS. Read `docs/bbcoop/brief.md` first: decisions, scope, what's open.
 
-## Remotes
-- Commits stay local for now; don't push (Asad, 2026-10-11).
-- `origin` is AsadSi/bbcoop, private. Friends who get a build get the source (GPL-2.0+).
-- `upstream` is deadinside28/bloodborne_pc, which changes daily. Merge `upstream/master`
-  often.
+## Where bbcoop's code lives
+Everything else in the tree is upstream's. bbcoop's own files sit beside it so merges stay cheap:
 
-## Keep rebases cheap
-- New work goes in new files named `src/runtime_*.c`, which `build.sh` already compiles
-  without any edits: `runtime_seamless.c` (13 byte patches, `BB_SEAMLESS=1`),
-  `runtime_seamless_hooks.c` (shadp2p's 5 functional code hooks, on `runtime_hooks.c`),
-  `runtime_respec.c` (the Doll's respec and the workbench's weapon refund, 7 hooks, on by default;
-  `docs/respec_re.md`), `runtime_camera.c` (the camera at uncapped frame rates, `docs/camera_re.md`),
-  `runtime_ik.c` (the foot-IK height correction at uncapped frame rates, `docs/animation_re.md`),
-  `runtime_saveslots.c` (Duplicate in the Load Game list, Triangle; `docs/saveslots_re.md`; `BB_SAVESLOTS=0` off),
-  `runtime_papers.c` (Fire/Bolt Paper and Empty Phantasm Shell scale with the weapon and the attack; `docs/papers_re.md`;
-  `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` logs the bonuses),
-  `runtime_padmotion.c` (the DualShock's gyro and accelerometer for scePadReadState, called from `runtime_pad.c`;
-  `docs/padmotion_re.md`; `BB_PAD_MOTION=0` off, `BB_PAD_MOTION_TRACE=1` logs the values),
-  and later `runtime_coop.c`. Data mods go in
-  `mods/coop-rebalance/`. The respec talk-script and text mod is generated from the player's own game
-  files by `tools/respec_mod.py` (soulstruct, venv `~/.local/share/bbcoop-re`), which run.sh calls,
-  into `mods/bbcoop-respec/` (git-ignored).
-- Edits to upstream files stay small and marked: `probe.c`, `runtime_services.c`, `build.sh`,
-  `launcher/`.
-- Never reformat upstream code.
+| What | Where |
+|---|---|
+| Our docs (brief, RE notes, Metal plan) | `docs/bbcoop/` (upstream's docs are the rest of `docs/`) |
+| Runtime mods, one file each, compiled by `build.sh` without edits | `src/runtime_*.c` below |
+| Co-op rules on BBSC (upstream's online modules) | `gpu/bbnet/shadps4/core/bbcoop_*.inc` and `gpu/bbnet20/bbsc/core/bbcoop_*.inc`, `include/core/bbcoop_loot.h` in each |
+| Seamless placement and RE constants | `gpu/shim/bbcoop_placement.*`, `gpu/shim/core/bloodborne_re.h` |
+| Respec talk-script/text mod generator | `tools/respec_mod.py` → `mods/bbcoop-respec/` (git-ignored, from the player's own files) |
+| Our shadNet server (optional, standalone) | `server/` |
+| Mac build pieces | `scripts/mac-deps.sh`, `scripts/mac/` (MoltenVK and mimalloc patches) |
+| Docker tests, server image | `scripts/docker-test.sh`, `scripts/docker-shell.nix`, `scripts/build-server.sh`, `scripts/server.Dockerfile` |
+| Tests | `tests/test_*.c`, `tests/test_*.py` |
 
-## Game patches
-- Every co-op write to the game image checks the exact original bytes of every site first, and
-  writes nothing if any of them differ. `src/runtime_seamless.c` shows the pattern, and
-  `tests/test_seamless.c` is its test.
-- Don't add co-op patches to `patches/*.xml`. That loader writes without checking.
-- Addresses are image offsets: an XML `Address` minus 0x400000. That's the same convention as
-  the `*Offset` constants in shadp2p's `src/core/bloodborne_re.cpp`.
-- Everything is for v1.09: CUSA03173 (EU) or CUSA00900 (US). Their eboot.bin images are
-  byte-identical (same `SUPPORTED_IMAGE` hash), so one set of offsets serves both.
-  `scripts/game_check.py` rejects any other build.
+Runtime mods (`src/`):
 
-## Online (M2): parked (2026-10-11)
-- Online and co-op are on hold. Since the merge of upstream 0.51, online play is upstream's own
-  module, `gpu/bbnet` (`libbbnet.so`, `BB_ONLINE=1`; `src/runtime_net.c` is upstream's).
-- Our vendored shadp2p libraries are gone from the tree. Before the merge they were under
-  `gpu/shadps4/core/libraries/{network,np}`, `gpu/shadps4/shadnet` and `gpu/shim/bbcoop_network.cpp`, with
-  `tests/online_client.cpp` and `scripts/test-online.sh`; they are kept at the tag `bbcoop-online-0.4`.
-  What has to be ported into `gpu/bbnet` is listed in `docs/brief.md` (Open).
-- Kept: `server/` (the shadnet-p2p server, standalone), `launcher/bbcoop_online.py` (not loaded by
-  the launcher), and `gpu/shim/bbcoop_placement.*` with `gpu/shim/core/bloodborne_re.h`, which the
-  seamless hooks use.
-- Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17), with bbcoop's scaling numbers (run.sh). `BB_SEAMLESS=1`
-  (bbcoop's 13 byte patches and 5 hooks) is the fallback and is skipped while BBSC is on (same sites).
-  Since upstream 0.6 (2026-10-19) the default module is `gpu/bbnet20` (`libbbnet20.so`, shadPS4 0.20, BBSC ported;
-  `BB_NET_GEN=19` = the older `gpu/bbnet`, the only one on macOS). bbcoop's BBSC changes are in both, kept the same
-  (`bbsc/core/` in bbnet20, `shadps4/core/` in bbnet; the 0x23..0x28 packets in bbnet20's `np/signaling_handler.cpp`).
-  bbcoop's co-op rules on BBSC: `gpu/bbnet/shadps4/core/bbcoop_coop.inc` (a guest's death at the host's lamp,
-  `SHADPS4_BBSC_DEATH_TO_HOST_LAMP=0` off; test cheat `BB_TEST_GUEST_DEATH=<respawn point>`, `docs/coop_respawn_re.md`).
-- Online servers: public ones are allowed (Asad, 2026-10-12, replacing "private only"): upstream's defaults
-  (since 0.6 Seamless Hunt's, BBSC's; srv.shadps4.net refuses non-shadPS4 builds) or a group's own shadNet
-  server (`server/`), in any mix.
-- Respec: `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (stat reset costs no Insight),
-  `BB_RESPEC_TRACE=1` (player state and hook calls in the log), `BB_TEST_ENDGAME=1` (cheat: a
-  level-150 character with upgraded weapons, warped to the Dream with the Doll awake, once per save;
-  only for throwaway profiles: `BB_USER_DIR` under out/, tools/new_game.sh), `BB_TEST_WARP=<lamp>` (cheat: once in
-  game, to a lamp: dream, cathedral-ward, central-yharnam, old-yharnam or a respawn point ID <map><block>29xx;
-  with tools/new_game.sh --continue it starts a test mid-game), `BB_TEST_LOADOUT=<list>` (fills a character
-  named TEST once, on any profile: stats 99, every weapon +10 with Uncanny/Lost, all armor, full stacks of non-key items,
-  test gems; the list is `mods/bbcoop-respec/test-loadout.txt` from `tools/respec_mod.py`; launcher
-  `~/.local/bin/bloodborne-testchar.sh`), `BB_GUN_GEMS=0` (the respec
-  mod leaves out the gem slot it gives every firearm).
-- Camera and frame rate: `BB_CAMERA_ACCEL=1` keeps the game's turn ramp (off by default), `BB_CAMERA_RATES=0`
-  leaves the 30 FPS chase rates per frame, `BB_WALL_CLOCK=1` serves the game's `gettimeofday` from the wall
-  clock instead of the monotonic one (`src/runtime_time.c`), and `BB_FPS_LIMIT` limits frames per second.
-  Uncapped defaults to 120 (`run.sh`; the launcher's 0 keeps that default), `BB_FPS_LIMIT=0` means no limit.
-  Uncap FPS++ is ps4_cheats' version of 2026-10-10 (timestep fixes, Sprint Fix built in); `BB_FPS_PATCH=old` selects
-  the previous one, and `BB_FPS=120` applies 120 FPS++ (`docs/animation_re.md`).
-  A/B switches for it (`scripts/patches.py`, "Foliage speed" in `docs/animation_re.md`): `BB_FPS_SKIP=<group>[,..]`
-  leaves groups of its lines out (`cloth grass sfx fps60 hknp timeobj clip`), `BB_FPS_TRY=<variant>[,..]` picks
-  bbcoop fixes (`step1972 wind30 wind60 clothstep dtfloor`); default `wind60,clothstep,dtfloor` (no flicker on foliage, capes or
-  the Doll's hood, Asad 2026-10-12), `none` for Uncap FPS++ as published. `~/.local/bin/bloodborne-ab.sh ENV=VALUE...` starts the game with them.
-  `BB_CAMERA_TRACE=1` logs the camera's frame time, rates, ramp and yaw. `BB_MESSENGER_RADIUS=<metres>` changes the messengers' 5 m emerge radius (`src/runtime_messenger.c`,
-  `docs/messengers_re.md`).
-  `BB_IK_HEIGHT` (`src/runtime_ik.c`, `docs/animation_re.md`): characters' foot-IK height correction gains
-  follow the frame time by default; `0` or `off` turns the correction off (diagnostic), `vanilla` keeps the per-frame gains.
-- Tests on the Mac: `scripts/docker-test.sh` runs the x86-64 build and C tests.
+| File | Does | Doc | Switches |
+|---|---|---|---|
+| `runtime_seamless.c` | 13 byte patches, seamless co-op fallback | | `BB_SEAMLESS=1` |
+| `runtime_seamless_hooks.c` | shadp2p's 5 code hooks (on `runtime_hooks.c`) | | with `BB_SEAMLESS` |
+| `runtime_respec.c`, `runtime_respec_rules.c` | the Doll's respec, workbench weapon refund (7 hooks, on) | `respec_re.md` | below |
+| `runtime_camera.c` | camera at uncapped frame rates | `camera_re.md` | below |
+| `runtime_ik.c` | foot-IK height correction at uncapped rates | `animation_re.md` | `BB_IK_HEIGHT` |
+| `runtime_saveslots.c` | Duplicate in the Load Game list (Triangle) | `saveslots_re.md` | `BB_SAVESLOTS=0` off |
+| `runtime_papers.c` | Fire/Bolt Paper, Empty Phantasm Shell scale with weapon and attack | `papers_re.md` | `BB_PAPERS=vanilla` off, `BB_PAPERS_TRACE=1` |
+| `runtime_padmotion.c` | DualShock gyro/accelerometer for scePadReadState (from `runtime_pad.c`) | `padmotion_re.md` | `BB_PAD_MOTION=0` off, `BB_PAD_MOTION_TRACE=1` |
+| `runtime_messenger.c` | messengers' 5 m emerge radius (diagnostic) | `messengers_re.md` | `BB_MESSENGER_RADIUS=<m>` |
+| `runtime_context_lock.c` | load-race lock ("PM4 type 0"), from Wooloomooloo2 | `brief.md` | |
 
-## References (siblings, read-only, shallow clones)
-- `../shadp2p-ref` is shadPS4 with Bloodborne co-op. See `src/core/bloodborne_re.cpp`,
-  `src/core/libraries/np/`, `documents/bloodborne-seamless-re.md` and
-  `documents/README-bloodborne-internals.md`.
-- `../shadnet-p2p-ref` is its matchmaking server, in C++.
+## Rules
+- **Remotes:** commits stay local; don't push (Asad, 2026-10-11). `origin` is AsadSi/bbcoop, private; friends
+  who get a build get the source (GPL-2.0+). `upstream` changes daily: merge it often.
+- **Keep rebases cheap:** new work goes in new files (`src/runtime_*.c`, `docs/bbcoop/`). Edits to upstream
+  files stay small and marked `bbcoop` (`probe.c`, `runtime_services.c`, `build.sh`, `run.sh`, `launcher/`).
+  Never reformat or move upstream code.
+- **Game patches:** every write to the game image checks the exact original bytes of every site first and
+  writes nothing if any differ (`src/runtime_seamless.c`, test `tests/test_seamless.c`). No co-op patches in
+  `patches/*.xml`: that loader writes unchecked. Addresses are image offsets (XML `Address` − 0x400000, as
+  shadp2p's `*Offset` constants).
+- **One game build:** v1.09, CUSA03173 (EU) or CUSA00900 (US), byte-identical eboots (same `SUPPORTED_IMAGE`
+  hash). `scripts/game_check.py` rejects anything else. Never commit game files, dumps or saves.
 
-## Running
-- The game runs on x86-64 Linux (and on macOS, below) with Asad's own decrypted v1.09 dump. Use
-  `./build.sh`, then `./run.sh`.
-- `./build.sh --test` runs the C tests. The Python tests are in `tests/test_*.py`.
-- macOS (Apple Silicon): upstream's port (bbport `macos-0.6`: PR 191 on 0.6, MetalFX; its `docs/MACOS.md`),
-  an x86-64 build that Rosetta 2 runs, with MoltenVK. `scripts/mac-deps.sh` builds the x86-64 libraries into
-  `out/mac-deps` (build.sh takes it, or `BB_MACOS_DEPS`). bbcoop's own Mac bits are marked `bbcoop` (hook
-  entry symbol, BSD `stat` in run.sh, Rosetta's Intel CPU in patches.py, tools/new_game.sh without setsid).
-- Never commit game files, dumps or saves.
-- Driving the game (Steam Deck, KDE): `tools/new_game.sh` (clinic profile), `--continue` with
-  `BB_SNAPSHOT=out/<profile>`, `tools/press.sh` for pad input, and `tools/frame.sh` (or `shot.sh`) for
-  a screenshot from the game's own frame dump. That needs `BB_PRESENT_DUMP_TRIGGER=$PWD/out/present_trigger
-  BB_DUMP_DIR=$PWD/out/present` at launch; spectacle cannot capture the game. Run everything inside
-  `distrobox enter bbcoop`.
+## Online and co-op
+- Online is upstream's module: since 0.6 (merged 2026-10-19) `gpu/bbnet20` (`libbbnet20`, shadPS4 0.20, the
+  default), `BB_NET_GEN=19` the older `gpu/bbnet` (the only one on macOS); `BB_ONLINE=1`, `src/runtime_net.c` is
+  upstream's. bbcoop's BBSC changes are in both, kept the same (`bbsc/core/` in bbnet20, `shadps4/core/` in bbnet;
+  packets 0x23..0x28 in bbnet20's `np/signaling_handler.cpp`). BBSC's memory search reads AMD's dma-buf guest
+  memory through `/proc/self/mem` (`bbsc_memscan.cpp`). `BB_GPU_LOG=info` shows BBSC's info lines.
+- Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17) with bbcoop's scaling numbers (`run.sh`).
+  `BB_SEAMLESS=1` is the fallback, skipped while BBSC is on (same sites).
+- bbcoop's rules on BBSC: a guest's death at the host's lamp (`SHADPS4_BBSC_DEATH_TO_HOST_LAMP=0` off, test cheat
+  `BB_TEST_GUEST_DEATH=<respawn point>`, `coop_respawn_re.md`), mirrored loot (`coop_loot_re.md`).
+- Servers: public ones are allowed (Asad, 2026-10-12): upstream's defaults (Seamless Hunt's; srv.shadps4.net refuses
+  non-shadPS4 builds) or a group's own shadNet server (`server/`), in any mix.
+- Old vendored shadp2p networking is at tag `bbcoop-online-0.4`. `launcher/bbcoop_online.py` (Host/Join tab) is not
+  loaded; porting it onto `gpu/bbnet` is open in the brief.
+
+## Switches
+- **Respec:** `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (no Insight cost), `BB_RESPEC_TRACE=1`, `BB_GUN_GEMS=0`
+  (no gem slot added to firearms).
+- **Test cheats** (throwaway profiles only: `BB_USER_DIR` under `out/`, `tools/new_game.sh`):
+  - `BB_TEST_ENDGAME=1`: level-150 character, upgraded weapons, warped to the Dream with the Doll awake, once per save.
+  - `BB_TEST_WARP=<lamp>`: once in game, to `dream`, `cathedral-ward`, `central-yharnam`, `old-yharnam` or a respawn
+    point ID `<map><block>29xx`; with `tools/new_game.sh --continue` it starts a test mid-game.
+  - `BB_TEST_GIVE=<id>,..`: weapons (final ids, `27001000` = Rakuyo +10) the character doesn't hold yet, on any save,
+    saves backed up first.
+  - `BB_TEST_LOADOUT=<list>`: fills a character named TEST once (stats 99, every weapon +10 Uncanny/Lost, all armor,
+    stacks, gems); list `mods/bbcoop-respec/test-loadout.txt`; launcher `~/.local/bin/bloodborne-testchar.sh`.
+- **Frame rate and camera:**
+  - `BB_FPS`: `uncap` (Linux default), `30` (game's own), `60`/`90`/`120` (frame-rate hooks, capped). `BB_FPS_LIMIT`
+    caps uncapped (default 120, `0` = none; the launcher's 0 keeps the default).
+  - Uncap FPS++ is ps4_cheats' 2026-10-10 version; `BB_FPS_PATCH=old` the previous one; `BB_FPS=120` with
+    `BB_FRAME_HOOKS=0` applies 120 FPS++ (`animation_re.md`).
+  - A/B (`scripts/patches.py`, "Foliage speed" in `animation_re.md`): `BB_FPS_SKIP=<group>,..` (`cloth grass sfx fps60
+    hknp timeobj clip`), `BB_FPS_TRY=<variant>,..` (`step1972 wind30 wind60 clothstep dtfloor`; default
+    `wind60,clothstep,dtfloor`, Asad 2026-10-12; `none` = as published). `~/.local/bin/bloodborne-ab.sh ENV=VALUE...`.
+  - `BB_CAMERA_ACCEL=1` keeps the game's turn ramp; `BB_CAMERA_RATES=0` keeps 30 FPS chase rates per frame;
+    `BB_CAMERA_TRACE=1` logs them. `BB_WALL_CLOCK=1` serves `gettimeofday` from the wall clock (`src/runtime_time.c`).
+  - `BB_IK_HEIGHT`: `0`/`off` (diagnostic), `vanilla` (per-frame gains); default follows the frame time.
+
+## macOS (Apple Silicon)
+- Upstream's Mac port (bbport `macos-0.6`: PR 191 on 0.6; its `docs/MACOS.md`): an x86-64 build run by Rosetta 2,
+  Vulkan through our MoltenVK. `scripts/mac-deps.sh` builds the x86-64 libraries into `out/mac-deps` (`build.sh`
+  takes it, or `BB_MACOS_DEPS`). bbcoop's Mac bits are marked `bbcoop` (hook entry symbol, BSD `stat` in run.sh,
+  Rosetta's Intel CPU in patches.py, `tools/new_game.sh` without setsid).
+- Our MoltenVK: repo `../moltenvk-bb` (branch `bbport`), shipped as `scripts/mac/moltenvk-bbport.patch`. Switches:
+  `MVK_BB_HOIST_TESS` (fast path, flickers only the mist: run.sh turns it off with `BB_MIST=1`; off is ~15% slower), `MVK_BB_PASS_MERGE`,
+  `MVK_BB_PASS_STATS=1`, `MVK_BB_UNTRACKED=1`. After a MoltenVK change: commit there, regenerate the patch, rerun
+  `scripts/mac-deps.sh`.
+- The Mac is GPU-bound by the game's effects, not by Rosetta. On an M4 Air the Central Yharnam street (test warp
+  `BB_TEST_WARP=2412951`; `central-yharnam` is the clinic sickroom, indoors) runs ~55 FPS uncapped at 720p with every
+  effect off and ~44 with every effect on. The native arm64 GPU process (branch `mac-gpu-process`) measured 1.05x and
+  is parked.
+- Asad plays locked 30 (Asad, 2026-10-19): 720p native, every effect on but SSR, model_lod 0 (`bbport.ini`).
+  At 30 each frame is timed to the display's refreshes (`gpu/vulkan/swapchain.cpp` present times,
+  `gpu/platform/videoout/display.cpp` vblank phase; `BB_PRESENT_PACE=0`, `BB_VBLANK_LOCK=0` off); `BB_FRAME_STATS=1`
+  prints for how many refreshes frames stay on screen.
+- No mist by default (`BB_MIST=1` keeps it): run.sh skips its two pixel shaders through `BB_SKIP_PS`; `BB_DRAW_LIST=<file>`
+  lists a few frames' draws (pixel shader, primitive, blending) to find others. Lean texture usages (flicker only the mist: off with `BB_MIST=1`; `BB_FULL_IMAGE_USAGE=1` off, `BB_PROMOTE_LOG=1`), pipeline QoS (`BB_PIPELINE_QOS=0` off).
+
+## Running and testing
+- `./build.sh`, then `./run.sh` (or `python3 launcher/bbport_launcher.py --play`), with your own decrypted v1.09 dump.
+- `./build.sh --test`: C tests. Python: `cd tests && ROSETTA_ADVERTISE_AVX=1 python3 -m unittest discover -p "test_*.py"`
+  (the variable only matters on the Mac). On the Mac, `scripts/docker-test.sh` runs the Linux x86-64 build and C tests.
+- Driving the game for tests: `tools/new_game.sh` (clinic profile; `--continue` with `BB_SNAPSHOT=out/<profile>`),
+  `tools/press.sh` or `BB_PAD_FILE` for pad input, `BB_AUDIO=none` to mute, and `tools/frame.sh` / `shot.sh` for a
+  screenshot from the game's frame dump (needs `BB_PRESENT_DUMP_TRIGGER=$PWD/out/present_trigger
+  BB_DUMP_DIR=$PWD/out/present` at launch). On the Steam Deck run everything inside `distrobox enter bbcoop`.
+
+## References (siblings, read-only)
+- `../shadp2p-ref`: shadPS4 with Bloodborne co-op (`src/core/bloodborne_re.cpp`, `src/core/libraries/np/`,
+  `documents/bloodborne-seamless-re.md`, `documents/README-bloodborne-internals.md`).
+- `../shadnet-p2p-ref`: its matchmaking server (C++).
+- `../bloodborne_mac_port-ref`: Wooloomooloo2's Mac port (GPL-2.0; credit him in files taken from it).

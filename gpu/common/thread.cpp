@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <thread>
 
 #include <pthread.h>
+#ifdef __APPLE__
+#include <pthread/qos.h> // bbcoop
+#endif
 #include <sched.h>
 
 #include "common/logging/log.h"
@@ -14,6 +18,25 @@ namespace Common {
 
 void SetCurrentThreadName(const char* name) {
     SetThreadName(reinterpret_cast<void*>(pthread_self()), name);
+#ifdef __APPLE__
+    // bbcoop: the threads a frame passes through at user-interactive QoS, which macOS keeps on the
+    // performance cores first; at the default class they lose cores to the game's threads in
+    // heavy frames (Huax-1839/bloodborne-macos b0a3d62: missed 30-FPS slots 1.24 vs 1.99%, p99
+    // 13.6-13.9 vs 17.8-19.3 ms). BB_PIPELINE_QOS=0: off.
+    static const bool pipeline_qos = [] {
+        const char* env = std::getenv("BB_PIPELINE_QOS");
+        return !(env && env[0] == '0');
+    }();
+    static constexpr const char* pipeline[] = {"bb:GpuComm", "bb:DrawRec", "bb:DrawScan",
+                                               "bb:DrawPrep", "bb:TexBind", "bb:GpuSignals",
+                                               "bb:VkRecorder", "bb:Present"};
+    for (const char* prefix : pipeline) {
+        if (pipeline_qos && std::strncmp(name, prefix, std::strlen(prefix)) == 0) {
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+            break;
+        }
+    }
+#endif
 }
 
 void SetThreadName(void* thread, const char* name) {

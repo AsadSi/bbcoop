@@ -1,4 +1,4 @@
-/* bbcoop: respec at the Doll (runtime_respec.c, runtime_respec_rules.c). docs/respec_re.md has
+/* bbcoop: respec at the Doll (runtime_respec.c, runtime_respec_rules.c). docs/bbcoop/respec_re.md has
  * the reverse-engineering behind every offset and value. */
 #ifndef BB_RESPEC_H
 #define BB_RESPEC_H

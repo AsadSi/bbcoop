@@ -2,7 +2,7 @@
  * on a profile asks "Duplicate selected profile?"; Yes copies the character, name and all, into the first
  * free profile slot, which then shows in the list as a character of its own: loading it
  * goes on from there and autosaves into its own slot, the original keeps its own. Every copy is kept
- * until deleted in the same list (10 slots in all). docs/saveslots_re.md has the reverse engineering.
+ * until deleted in the same list (10 slots in all). docs/bbcoop/saveslots_re.md has the reverse engineering.
  *
  * The game's Delete does: a Yes/No box (204/406013), then job A (0x1b45de0: exists[slot] = 0), then the
  * list refresh and the system-data save (userdata0010: the profile summaries and their exists flags).

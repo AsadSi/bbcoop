@@ -1,5 +1,5 @@
 /* bbcoop: Fire Paper, Bolt Paper and Empty Phantasm Shell scale with the attack (runtime_papers.c,
- * docs/papers_re.md). */
+ * docs/bbcoop/papers_re.md). */
 #ifndef BB_RUNTIME_PAPERS_H
 #define BB_RUNTIME_PAPERS_H
 #include <stdint.h>

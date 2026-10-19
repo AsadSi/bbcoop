@@ -32,7 +32,7 @@ Environment: `BB_ONLINE=1 BB_BBSC=1` (what the launcher sets). BBSC's own switch
 in BBSC: most features are on by default, `=0` turns one off.
 bbcoop adds `SHADPS4_BBSC_DEATH_TO_HOST_LAMP` (on; `=0` off): a guest who dies outside a boss fight
 loads to the host's last lamp when that lamp is in a map not loaded on the guest's side (BBSC alone
-respawns it beside the host or at the nearest lamp of its own map). See `docs/coop_respawn_re.md`.
+respawns it beside the host or at the nearest lamp of its own map). See `docs/bbcoop/coop_respawn_re.md`.
 
 ## Where it lives
 

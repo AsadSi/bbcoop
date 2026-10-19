@@ -20,6 +20,16 @@ if [[ $(uname -s) == Darwin ]]; then
     # Labels the GPU writes itself need VK_AMD_buffer_marker; without it each one ends the render
     # pass for a copy, and on a tile-based GPU every restart stores and reloads its targets.
     export BB_GPU_LABELS=${BB_GPU_LABELS:-0}
+    # bbcoop: no mist (Asad, 2026-10-19): the two tessellated blended pixel shaders that draw it
+    # (BB_DRAW_LIST found them; Dream and Central Yharnam), ~5% faster in the city. BB_MIST=1 keeps it.
+    # Only the mist flickers with our MoltenVK's tessellation hoist or the lean texture usages
+    # (gpu/textures/image.cpp), so with it they stay off: each costs FPS (city 36 -> 42-50 with both).
+    # MVK_BB_HOIST_TESS, BB_FULL_IMAGE_USAGE override.
+    if [[ ${BB_MIST:-0} != 1 ]]; then
+        export BB_SKIP_PS=${BB_SKIP_PS:+$BB_SKIP_PS,}71c96598,2e86d610
+    else
+        export MVK_BB_HOIST_TESS=${MVK_BB_HOIST_TESS:-0} BB_FULL_IMAGE_USAGE=${BB_FULL_IMAGE_USAGE:-1}
+    fi
 fi
 if [[ ${1:-} == --software ]]; then
     shift
@@ -142,7 +152,7 @@ export BB_FPS=$fps
 # previous Uncap FPS++ (2026-08-28) with the separate sprint fix (scripts/patches.py reads it).
 # bbcoop A/B for those patches: BB_FPS_SKIP=<group>[,..] leaves groups of Uncap FPS++ lines out (cloth grass sfx
 # fps60 hknp timeobj clip), BB_FPS_TRY=<variant>[,..] picks bbcoop fixes (step1972 wind30 wind60 clothstep dtfloor; default wind60,clothstep,dtfloor,
-# none for none); docs/animation_re.md.
+# none for none); docs/bbcoop/animation_re.md.
 # bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.
@@ -306,7 +316,7 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     # BBSC: its game server on this PC when the server's own does not answer (online.py
     # bbsc-local). It lives as long as the game: a watcher stops it when this process (exec'd into
     # the game below) is gone. Messages and bloodstains are then this PC's only.
-    # bbcoop: BBSC's co-op scaling with Asad's numbers (docs/brief.md: +50% HP and +10% damage per
+    # bbcoop: BBSC's co-op scaling with Asad's numbers (docs/bbcoop/brief.md: +50% HP and +10% damage per
     # extra player; bosses scale through HP too); BBSC's own stagger numbers. Each is overridable.
     if [[ ${BB_BBSC:-0} == 1 ]]; then
         export BBSC_SCALE_ENEMY_HP=${BBSC_SCALE_ENEMY_HP:-50} BBSC_SCALE_BOSS_HP=${BBSC_SCALE_BOSS_HP:-50}

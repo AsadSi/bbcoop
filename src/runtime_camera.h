@@ -1,4 +1,4 @@
-/* bbcoop: the third-person camera at uncapped frame rates (runtime_camera.c, docs/camera_re.md). */
+/* bbcoop: the third-person camera at uncapped frame rates (runtime_camera.c, docs/bbcoop/camera_re.md). */
 #ifndef BB_RUNTIME_CAMERA_H
 #define BB_RUNTIME_CAMERA_H
 #include <stdint.h>
