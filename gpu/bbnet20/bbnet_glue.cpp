@@ -512,12 +512,19 @@ BBNET_EXPORT void bbnet_image_ready(uint64_t base, uint64_t size) {
     if (!std::getenv("BBSC_SAVE_DIR")) {
         const char* user = std::getenv("BB_GPU_USER_DIR");
         std::error_code error;
+        // bbcoop: the US release saves under CUSA00900 (no save folder: no backup, so BBSC gave
+        // no kit - Kin Bell and the rest - and kept no journal).
         for (const auto& id : std::filesystem::directory_iterator(
                  std::filesystem::path(user ? user : "user") / "savedata", error)) {
-            const auto folder = id.path() / "CUSA00207" / "SPRJ0005";
-            if (std::filesystem::is_directory(folder, error)) {
-                setenv("BBSC_SAVE_DIR", folder.c_str(), 0);
-                std::printf("BBSC: save folder %s\n", folder.c_str());
+            for (const char* title : {"CUSA00207", "CUSA00900", "CUSA03173"}) {
+                const auto folder = id.path() / title / "SPRJ0005";
+                if (std::filesystem::is_directory(folder, error)) {
+                    setenv("BBSC_SAVE_DIR", folder.c_str(), 0);
+                    std::printf("BBSC: save folder %s\n", folder.c_str());
+                    break;
+                }
+            }
+            if (std::getenv("BBSC_SAVE_DIR")) {
                 break;
             }
         }
