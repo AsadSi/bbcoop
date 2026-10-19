@@ -89,11 +89,21 @@ Supporting pieces:
     frames), `MVK_BB_UNTRACKED=1` (0 late frames once, 240 the next run: noise).
   - 60 FPS is CPU-bound on the Air: uncapped ~43 FPS at Quality and at Performance alike, the GPU thread idle
     57–69%. Wooloomooloo2/bloodborne_mac_port reaches 60+ with a native arm64 GPU process; not done here.
-  - At 30 FPS some frames show 50 ms then 17 ms (judder). `BB_SWAPCHAIN_IMAGES=3` may help; inconclusive.
+  - At 30 FPS some frames showed 50 ms then 17 ms (judder): the 60 Hz vblank was a free-running timer.
+    Fixed 2026-10-19 (0370330): present times and vblank phase follow the display (VK_GOOGLE_display_timing);
+    frames off the 2-refresh grid 16.7% -> 4.8% at the Central Yharnam street, most of it one hitch.
+  - 2026-10-19: Asad plays locked 30 at 720p with every effect on (but SSR) and model_lod 0: the street runs ~44 FPS
+    uncapped there (900p: ~37, worst frames over 33 ms). 60 is out of reach in the streets (~55 with every effect
+    off; GPU-bound, 1127 draws/frame). Lean texture usages (8ddcac0, Huax P10.1) +5 FPS; their mist flicker in
+    1 of 2 sessions fixed by remembering promoted images. Immediate present had the steadiest pacing uncapped
+    (p99 19.8 vs 23.1 ms FIFO); not made the default.
+  - Asad still saw flicker at the Dream's graves during test runs (30 FPS, before the pacing fix); dumped frames
+    were clean (whole-frame tile check), so it was on-screen pacing. Recheck with the fix.
   - The intermittent "PM4 type 0" crash on loads (2 of ~14 loads today) is a game race between the main
     thread's GPU setup (0xebb960) and GXRenderThread's frame job (0x2199af0) on one immediate context;
     Wooloomooloo2/bloodborne_mac_port 12a0ac5 serialises them with one lock; ported 2026-10-18
-    (`src/runtime_context_lock.c`, `BB_CONTEXT_LOCK=0` off). Installed and played at the Dream; loads with
+    (`src/runtime_context_lock.c`, `BB_CONTEXT_LOCK=0` off). It still happened in 4 of 84 test launches; since
+    ad3c5ce a bad packet skips the rest of its buffer instead of ending the game. Installed and played at the Dream; loads with
     the lock not yet counted.
 - **Mirrored loot on BBSC (2026-10-17, merged):** every pickup, enemy drop and boss drop goes to every hunter
   (`gpu/bbnet/shadps4/core/bbcoop_loot.inc`, relay "SHAD" 0x28, `SHADPS4_BBSC_MIRROR_LOOT=0` off,

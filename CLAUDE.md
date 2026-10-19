@@ -89,9 +89,15 @@ Runtime mods (`src/`):
   `MVK_BB_HOIST_TESS` (fast path, can flicker mist for a frame; `0` off, ~15% slower), `MVK_BB_PASS_MERGE`,
   `MVK_BB_PASS_STATS=1`, `MVK_BB_UNTRACKED=1`. After a MoltenVK change: commit there, regenerate the patch, rerun
   `scripts/mac-deps.sh`.
-- The Mac is GPU-bound by the game's effects, not by Rosetta: native 720p with effects off holds ~56-60 FPS on an
-  M4 Air; full effects ~44 uncapped. The native arm64 GPU process (branch `mac-gpu-process`) measured 1.05x and is
-  parked.
+- The Mac is GPU-bound by the game's effects, not by Rosetta. On an M4 Air the Central Yharnam street (test warp
+  `BB_TEST_WARP=2412951`; `central-yharnam` is the clinic sickroom, indoors) runs ~55 FPS uncapped at 720p with every
+  effect off and ~44 with every effect on. The native arm64 GPU process (branch `mac-gpu-process`) measured 1.05x and
+  is parked.
+- Asad plays locked 30 (Asad, 2026-10-19): 720p native, every effect on but SSR, model_lod 0 (`bbport.ini`).
+  At 30 each frame is timed to the display's refreshes (`gpu/vulkan/swapchain.cpp` present times,
+  `gpu/platform/videoout/display.cpp` vblank phase; `BB_PRESENT_PACE=0`, `BB_VBLANK_LOCK=0` off); `BB_FRAME_STATS=1`
+  prints for how many refreshes frames stay on screen.
+- Lean texture usages (`BB_FULL_IMAGE_USAGE=1` off, `BB_PROMOTE_LOG=1`), pipeline QoS (`BB_PIPELINE_QOS=0` off).
 
 ## Running and testing
 - `./build.sh`, then `./run.sh` (or `python3 launcher/bbport_launcher.py --play`), with your own decrypted v1.09 dump.
