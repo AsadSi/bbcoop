@@ -29,6 +29,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/signal_context.h"
+#include "bbport_ucontext.h" // bbcoop: the Mac's register names
 #include "core/emulator_settings.h"
 #include "core/signals.h"
 #include "shader/ir/ir_emitter.h"
@@ -76,7 +77,7 @@ bool HandleFaultingWalkerLoad(void* context, void* fault_address) {
         operands[1].type != ZYDIS_OPERAND_TYPE_MEMORY) {
         return false;
     }
-    auto& registers = static_cast<ucontext_t*>(context)->uc_mcontext.gregs;
+    greg_t* registers = BB_GREGS(static_cast<ucontext_t*>(context)); // bbcoop: Linux and macOS
     switch (operands[0].reg.value) {
     case ZYDIS_REGISTER_RDI:
         registers[REG_RDI] = 0;
