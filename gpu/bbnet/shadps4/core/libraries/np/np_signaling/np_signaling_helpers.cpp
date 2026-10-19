@@ -358,8 +358,12 @@ static void ReceiveThreadMain() {
         }
 
         if (!HasSignalingMagic(buf, nbytes)) {
-            LOG_WARNING(Lib_NpSignaling, "ReceiveThread: dropping non-SHAD packet (size={})",
-                        nbytes);
+            // bbcoop: the first bytes and the sender, to see what a peer sent (Mac co-op, 2026-10-19).
+            LOG_WARNING(Lib_NpSignaling,
+                        "ReceiveThread: dropping non-SHAD packet (size={}) from {:#x}:{} "
+                        "{:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                        nbytes, from_addr, sceNetNtohs(from_port), buf[0], buf[1], buf[2], buf[3],
+                        buf[4], buf[5], buf[6], buf[7]);
             continue;
         }
         const u8 type = buf[4];
