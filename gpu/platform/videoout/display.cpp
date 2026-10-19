@@ -18,6 +18,7 @@
 #include "render/vk_frame_capture.h"
 #include "cp/command_processor.h"
 #include "render/presenter.h"
+#include "vulkan/swapchain.h" // bbcoop: DisplayClock
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 extern std::unique_ptr<BbCp::CommandProcessor> liverpool;
@@ -374,6 +375,35 @@ void Display::VblankThread(std::stop_token stop) {
     // With a frame limit or the uncapped presets a flip is shown as soon as it arrives (and its
     // slot allows), between vblanks, instead of at the next vblank.
     const bool immediate_flips = frame_limit != 0 || EmulatorSettings.IsUncappedVblank();
+    // bbcoop: with the vblank at the display's rate (the 30 and 60 FPS modes) its ticks keep a
+    // fixed phase to the display's refreshes (Vulkan::DisplayClock, from VK_GOOGLE_display_timing):
+    // a free-running timer drifts across them, so flips land just before or just after a refresh
+    // and frames stay 3 then 1 refreshes. Steps of at most 0.25 ms a tick follow the display without
+    // jumps; the tick comes 2 ms after a refresh. BB_VBLANK_LOCK=0: off.
+    static const bool lock_phase = [] {
+        const char* env = std::getenv("BB_VBLANK_LOCK");
+        return !(env && env[0] == '0');
+    }();
+    const auto keep_phase = [&] {
+        const s64 period = s64(Vulkan::display_clock.period_ns.load(std::memory_order_relaxed));
+        const s64 shown = s64(Vulkan::display_clock.shown_ns.load(std::memory_order_relaxed));
+        const bool display_rate =
+            period && std::llabs(period - s64(vblank_period.count())) < period / 100;
+        Vulkan::display_clock.refreshes_per_flip.store(
+            display_rate && !immediate_flips ? u32(main_port.flip_rate + 1) : 0,
+            std::memory_order_relaxed);
+        if (!lock_phase || !display_rate || !shown) {
+            return;
+        }
+        constexpr s64 lead = 2'000'000;
+        const s64 deadline = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 timer.GetDeadline().time_since_epoch())
+                                 .count();
+        s64 error = (deadline - shown - lead) % period;
+        error += error < 0 ? period : 0;
+        error -= error > period / 2 ? period : 0;
+        timer.Shift(std::chrono::nanoseconds(-std::clamp<s64>(error, -250'000, 250'000)));
+    };
     const auto flip = [&](const Request& request, std::chrono::steady_clock::time_point now) {
         if (frame_limit) {
             next_flip = std::max(next_flip + frame_period, now - frame_period);
@@ -406,6 +436,7 @@ void Display::VblankThread(std::stop_token stop) {
         }
         if (!immediate_flips || port.flip_rate != 0) {
             timer.End();
+            keep_phase(); // bbcoop
             continue;
         }
         // Until the next vblank: flips as they come.

@@ -4,6 +4,7 @@
 // minimised (0x0) window keeps the old one until it is back.
 #pragma once
 
+#include <atomic>
 #include <vector>
 
 #include "common/types.h"
@@ -17,6 +18,16 @@ class WindowSDL;
 namespace Vulkan {
 
 class Instance;
+
+/// bbcoop: the display's refresh as seen through VK_GOOGLE_display_timing (steady-clock ns; 0 until
+/// a frame has been shown), for VideoOut's vblank to keep its phase (BbVideoOut::Display).
+struct DisplayClock {
+    std::atomic<u64> shown_ns{0};  ///< a refresh at which a frame appeared
+    std::atomic<u64> period_ns{0}; ///< the refresh period
+    /// Refreshes each flip should stay on screen (2 at 30 FPS on 60 Hz); 0: shown when ready.
+    std::atomic<u32> refreshes_per_flip{0};
+};
+inline DisplayClock display_clock;
 
 class Swapchain {
 public:
@@ -86,6 +97,19 @@ private:
     void Create(u32 width, u32 height);
     /// The views and semaphores (and the swapchain unless it is being retired).
     void DestroyResources();
+    /// bbcoop: reads back when earlier frames reached the screen (DisplayClock) and, with
+    /// BB_FRAME_STATS, prints every 5 s for how many refreshes each frame stayed.
+    void ReadDisplayTimes();
+
+    struct DisplayStats {
+        u64 last_ns = 0;  ///< when the latest shown frame appeared (steady clock)
+        u64 last_raw = 0; ///< the same in the display's clock (desiredPresentTime's)
+        u32 last_id = 0;  ///< its present id
+        u32 next_id = 1;  ///< the id of the next present
+        u64 shown[4]{};   ///< frames that stayed 1, 2, 3, 4 or more refreshes
+        u64 not_shown = 0; ///< replaced before the display took them
+        u64 report_ns = 0; ///< the next report
+    } display_stats; // bbcoop
 
     const Instance& instance;
     vk::SurfaceKHR surface;
