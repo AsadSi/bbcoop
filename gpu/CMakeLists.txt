@@ -374,11 +374,7 @@ if (BB_NET)
     if (Protobuf_FOUND AND nlohmann_json_FOUND AND OpenSSL_FOUND AND ZLIB_FOUND AND
         MINIUPNPC_INCLUDE AND MINIUPNPC_LIBRARY AND epoll-shim_FOUND)
         add_subdirectory(bbnet)
-        # bbcoop: the 0.20 module has no Mac port yet (GNU ld options, /proc); macOS plays the
-        # shadp2p module, which run.sh picks there.
-        if (NOT APPLE)
-            add_subdirectory(bbnet20)
-        endif()
+        add_subdirectory(bbnet20)
         message(STATUS "Online module: on (libbbnet${CMAKE_SHARED_LIBRARY_SUFFIX}, libbbnet20${CMAKE_SHARED_LIBRARY_SUFFIX})")
     else()
         # Named one by one (#145: "the build has no online module" with no hint why).

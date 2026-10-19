@@ -35,8 +35,15 @@ target_compile_definitions(bbnet20 PRIVATE BOOST_ASIO_STANDALONE NDEBUG
     CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT BBNET_PORT_VERSION="${BBPORT_VERSION}")
 target_compile_options(bbnet20 PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
     -Wno-deprecated-declarations -Wno-missing-field-initializers)
-target_link_options(bbnet20 PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
-set_target_properties(bbnet20 PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN"
+if (APPLE)
+    # bbcoop: as gpu/bbnet on macOS: only bbnet.h's calls exported, runtime symbols from bb-probe.
+    target_link_options(bbnet20 PRIVATE -Wl,-undefined,dynamic_lookup "-Wl,-exported_symbol,_bbnet_*")
+    set(BBNET20_RPATH "@loader_path")
+else()
+    target_link_options(bbnet20 PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
+    set(BBNET20_RPATH "\$ORIGIN")
+endif()
+set_target_properties(bbnet20 PROPERTIES BUILD_RPATH "${BBNET20_RPATH}" INSTALL_RPATH "${BBNET20_RPATH}"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(bbnet20 PRIVATE bbgpu nlohmann_json::nlohmann_json protobuf::libprotobuf
     OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}" Vulkan::Headers fmt::fmt
