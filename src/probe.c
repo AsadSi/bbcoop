@@ -118,7 +118,14 @@ static void *allocate(size_t size) {
 static void patch_tls_loads(const Segment *segments, uint64_t ns) {
     uint64_t patched=0;
     for (uint64_t i=0;i<ns;++i)
-        if (segments[i].flags&1) patched+=runtime_darwin_patch_tls_loads(image+segments[i].address,segments[i].size);
+        if (segments[i].flags&1) {
+            /* bbcoop: the GPU library's guest code hooks (0.6) leave their pages read and execute;
+             * protect() sets every segment's protection afterwards. */
+            uintptr_t first=(uintptr_t)(image+segments[i].address)&~(uintptr_t)(page_size-1);
+            if (mprotect((void *)first,(uintptr_t)(image+segments[i].address+segments[i].size)-first,PROT_READ|PROT_WRITE|PROT_EXEC))
+                fail("the game's code is not writable for the thread pointer loads");
+            patched+=runtime_darwin_patch_tls_loads(image+segments[i].address,segments[i].size);
+        }
     printf("Thread pointer loads: %" PRIu64 " pointed at TSD slot %u\n",patched,runtime_darwin_tls_slot());
 }
 #endif
