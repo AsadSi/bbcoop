@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "core/bloodborne_re.h"
+#include "core/bbcoop_loot.h" // bbcoop: mirrored loot (bbcoop_loot.inc)
 
 #include <algorithm>
 #include <array>
@@ -6600,7 +6601,9 @@ void TickBbscLoadCover() {
     // map, so no follow load ran - and only the follow's arrival ended the cover. The loading screen
     // stayed up 75 s ("infinite loading screen unless you teleport"). A wipe cover ends once its
     // load is over and the respawn after it is done (curtain closed, alive), or 20 s after the load.
-    if (bbsc_load_cover.why == "wipe" && bbsc_load_cover.game_screen_seen) {
+    // bbcoop: the load to the host's lamp ("host lamp", bbcoop_coop.inc) ends the same way.
+    if ((bbsc_load_cover.why == "wipe" || bbsc_load_cover.why == "host lamp") &&
+        bbsc_load_cover.game_screen_seen) {
         const u64 global = GetGlobalState();
         const u64 menu = ReadValue<u64>(image_base + MenuManPointerOffset, 0);
         const bool loading = (ReadablePointer(global, 0x10) && ReadValue<u8>(global, 0x08) != 0) ||
@@ -6764,6 +6767,8 @@ void TickBbscDeathCurtain() {
     }
 }
 
+#include "bbcoop_coop.inc" // bbcoop: a guest's death at the host's last lamp, in any map
+
 // Revive the local player and teleport it, without any load.
 bool BbscRespawnInPlace(std::string_view why) {
     // Replicates the local-player branch of the game's event revive 0x013CBAD0(10000, ...)
@@ -6807,7 +6812,8 @@ bool BbscRespawnInPlace(std::string_view why) {
     // host's lamp is not in the loaded map, the guest respawns beside the host - warping together
     // would pull a guest in another map straight back to the host anyway.
     const u64 global = GetGlobalState();
-    const bool guest = ReadablePointer(global, 0x1593) && ReadValue<u8>(global, 0x1592) == 0;
+    const bool guest = (ReadablePointer(global, 0x1593) && ReadValue<u8>(global, 0x1592) == 0) ||
+                       BbcoopTestGuestDeathActive(); // bbcoop: BB_TEST_GUEST_DEATH
     std::optional<BbscTransform> target;
     std::string_view where = "last lamp";
     // Testers 2026-10-07: "when the host is in a different area when the guest respawns, the area
@@ -7709,6 +7715,9 @@ void PS4_SYSV_ABI BbscSpectateDeathHook(u64 tag, const GuestRegisterSnapshot* re
         // Solo play. The step's reload call is retargeted to a no-op whether or not a session
         // exists, so without asking for it here the player would stay dead with camera control
         // only (reported 2026-09-20: "in solo mode, after you die you can't respawn at all").
+        if (BbcoopTestGuestDeath(name)) {
+            return; // bbcoop: BB_TEST_GUEST_DEATH, this death is handled as a guest's
+        }
         bbsc_spectate_active = false;
         bbsc_request_death_reload = true;
         return;
@@ -7775,6 +7784,9 @@ void TickBbscSpectate() {
         RequestBbscDeathReload("no living partner at the death step");
         return;
     }
+    if (TickBbcoopHostLampRespawn() || TickBbcoopTestGuestDeath()) {
+        return; // bbcoop: a guest's load to the host's lamp (bbcoop_coop.inc)
+    }
     if (!bbsc_spectate_active || bbsc_spectate_releasing) {
         return;
     }
@@ -7835,6 +7847,9 @@ void TickBbscSpectate() {
         }
         if (!respawn_why.empty()) {
             BbscApplyDeathPenalty(respawn_why);
+            if (bbsc_death_mode == BbscDeathMode::RespawnNow && BbcoopRespawnAtHostLamp()) {
+                return; // bbcoop: the host's lamp is in another map - loading there
+            }
             if (StartBbscDeathCurtain(respawn_why) || BbscRespawnInPlace(respawn_why)) {
                 bbsc_spectate_active = false;
                 return;
@@ -9482,6 +9497,9 @@ std::vector<std::pair<s32, u32>> bbsc_guest_drop_queue; // (item lot, NpcParam r
 
 void NoteBbscGuestEnemyDeath(u64 dead) {
     static const bool enabled = EnvFlagEnabled("SHADPS4_BBSC_GUEST_ITEMS");
+    if (BbcoopLootMirroring()) {
+        return; // bbcoop: the drop a hunter picks up is mirrored to the guest instead (bbcoop_loot.inc)
+    }
     if (!enabled || image_base == 0 || !BbscGuestInHostWorld() || GetLocalPlayerType() != 1 ||
         !ReadablePointer(dead, 0x1E8) || dead == GetLocalPlayerCharacter() ||
         (ReadValue<u32>(dead, 0x1E1) & 0x240000) != 0) {
@@ -13641,6 +13659,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbscRelayHostLock();
         TickBbscBossRewards();
         TickBbscGuestDrops();
+        TickBbcoopLoot(); // bbcoop: mirrored loot
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();
@@ -14331,6 +14350,8 @@ bool BbscConnectFirstPlacementFresh() {
 }
 
 } // namespace
+
+#include "bbcoop_loot.inc" // bbcoop: mirrored loot
 
 void OnBbscHostBossPacket(std::int32_t boss) {
     bbsc_host_boss_id = boss;
@@ -15314,6 +15335,8 @@ void InstallReverseEngineeringTrace() {
     InstallBbscQuitHook();
     InstallBbscDeathTraceHooks();
     InstallBbscBannerHook();
+    InstallBbcoopLoot(); // bbcoop: mirrored loot
+    InstallBbcoopSsInfoFormat(); // bbcoop: the US release reads the servers' ss.info (bbcoop_coop.inc)
 }
 
 BbscPresence GetBbscPresence() {

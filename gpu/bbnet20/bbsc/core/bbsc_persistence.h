@@ -14,7 +14,7 @@ namespace Core::Bbsc {
 // any environment variable, so the build runs straight from a launcher. Everything still only
 // applies to CUSA03173 01.09 (checked where each feature installs). Experimental switches stay
 // off, and so is the boot intro (SHADPS4_BBSC_INTRO=1 brings it back). Setting a variable always wins: "0" turns a default off, any other value turns it on.
-inline constexpr std::array<std::string_view, 31> DefaultOnSwitches{
+inline constexpr std::array<std::string_view, 34> DefaultOnSwitches{ // bbcoop: 31 + 3
     "SHADPS4_BBSC_SHARED_PROGRESS",     // merge the host's progress into the guest's world (adds only)
     "SHADPS4_BBSC_WARP_TOGETHER",        // the guest follows the host through a lamp warp
     "SHADPS4_BBSC_WORLD_SYNC",           // ...and loads the host's map with the host's world flags
@@ -41,11 +41,14 @@ inline constexpr std::array<std::string_view, 31> DefaultOnSwitches{
     "SHADPS4_BBSC_PERSIST_TASKS",        // keep member tasks across a kept load
     "SHADPS4_BBSC_PERSIST_HOSTDEAD",     // the guest stays when the host dies
     "SHADPS4_BBSC_SPECTATE",             // respawn in place / spectate, join teleport
+    "SHADPS4_BBSC_DEATH_TO_HOST_LAMP",   // bbcoop: a dead guest loads to the host's lamp in another map
     "SHADPS4_BBSC_FREE_BELL",            // the Beckoning Bell costs no Insight
     "SHADPS4_BBSC_FIVE_HUNTERS",         // the host may summon up to 4 guests (5 hunters)
     "SHADPS4_BBSC_CINEMATIC",            // F1: free camera for filming (keyboard + mouse)
     "SHADPS4_BBSC_SCALING",              // enemy/boss HP, damage, stagger per guest (like ERSC)
     "SHADPS4_BBSC_INVADE_ANYWHERE",      // every world open to invaders (Bell Maiden SpEffect 9020)
+    "SHADPS4_BBSC_MIRROR_LOOT",          // bbcoop: every pickup and drop goes to every hunter (bbcoop_loot.inc)
+    "SHADPS4_BBSC_SS_FORMAT",            // bbcoop: the US release reads the servers' ss.info (bbcoop_coop.inc)
 };
 
 // False in the vanilla build (CMake BBSC_VANILLA): the emulator carries no BBSC of its own and

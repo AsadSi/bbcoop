@@ -23,6 +23,7 @@
 #include "core/libraries/np/np_matching2/np_matching2_signaling.h"
 #include "core/libraries/np/np_signaling/np_signaling_state.h"
 #include "core/bloodborne_re.h"
+#include "core/bbcoop_loot.h" // bbcoop: mirrored loot
 #include "core/net/p2p_relay.h"
 #include "core/libraries/np/np_signaling/np_signaling_transport.h"
 
@@ -161,6 +162,42 @@ void ProcessSignalingPacket(const void* data, u32 len, u32 from_addr, u16 from_p
         return;
     }
 
+    if (type == Core::Bloodborne::kBbcoopLootPacketType) { // bbcoop: mirrored loot
+        Core::Bloodborne::OnBbcoopLootPacket(buf, static_cast<u32>(nbytes));
+        return;
+    }
+    // bbcoop: BBSC sends these (bloodborne_re.cpp) but nothing handed them on, so a guest never
+    // learned the others' life, the host's scaling, PvP state, progress or boss bar.
+    if (type == 0x23 && nbytes == 14) { // life: u32 player, u8 dead, u32 sequence
+        u32 player = 0;
+        u32 sequence = 0;
+        std::memcpy(&player, buf + 5, 4);
+        std::memcpy(&sequence, buf + 10, 4);
+        Core::Bloodborne::OnBbscLifePacket(player, buf[9], sequence);
+        return;
+    }
+    if (type == 0x24 && nbytes == 15) { // scaling: five u16 percents
+        std::uint16_t percent[5]{};
+        std::memcpy(percent, buf + 5, sizeof(percent));
+        Core::Bloodborne::OnBbscScalePacket(percent);
+        return;
+    }
+    if (type == 0x25 && nbytes == 11) { // PvP: u8 kind, u8 on, u32 sequence
+        Core::Bloodborne::OnBbscPvpPacket(buf[5], buf[6]);
+        return;
+    }
+    if (type == 0x26 && nbytes >= 6 && nbytes == 6 + 4 * size_t{buf[5]}) {
+        std::vector<u32> flags(buf[5]); // shared progress: u8 count, then the u32 flags
+        std::memcpy(flags.data(), buf + 6, flags.size() * 4);
+        Core::Bloodborne::OnBbscProgressPacket(flags.data(), flags.size());
+        return;
+    }
+    if (type == 0x27 && nbytes == 9) { // boss bar: s32 boss
+        s32 boss = -1;
+        std::memcpy(&boss, buf + 5, 4);
+        Core::Bloodborne::OnBbscHostBossPacket(boss);
+        return;
+    }
     if (nbytes == sizeof(NpSignaling::SignalingBbscWorldFlags) &&
         type == static_cast<u8>(NpSignaling::SignalingPacketType::BbscWorldFlags)) {
         Core::Bloodborne::OnBbscWorldFlagsPacket(buf, static_cast<u32>(nbytes));

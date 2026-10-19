@@ -503,6 +503,10 @@ BBNET_EXPORT void bbnet_image_ready(uint64_t base, uint64_t size) {
         return;
     }
     MemoryPatcher::g_game_serial = "CUSA03173";
+    // bbcoop: the executable is 1.09 whatever param.sfo's APP_VER says (prepare.py ran only the
+    // supported image, by its hash); some 1.09 dumps keep APP_VER 01.00 there (the US CUSA00900
+    // one), and BBSC's persistence declined them.
+    Common::Singleton<PSF>::Instance()->app_ver = "01.09";
     // BBSC finds the save it backs up and journals in shadPS4's folders; the port's are
     // <user>/savedata/<user id>/CUSA00207/SPRJ0005 (BBSC_SAVE_DIR: the folder of userdata0000..).
     if (!std::getenv("BBSC_SAVE_DIR")) {
@@ -590,6 +594,14 @@ BBNET_EXPORT int bbnet_init(const BbNetHost* host) {
         return -1;
     }
     g_host = *host;
+    // bbcoop: with BBSC every retail 1.09 is CUSA03173 to the server too, not only to BBSC's own
+    // checks (bbnet_image_ready): Seamless Hunt serves only that title id, and the shadNet login
+    // reports it (worlds, rooms and summons are keyed by it). The US CUSA00900 got through
+    // sign-in and ss.info, then stayed offline ("Failed to resolve Bloodborne server status").
+    if (const char* bbsc = std::getenv("BB_BBSC"); bbsc && bbsc[0] == '1') {
+        g_host.serial = "CUSA03173";
+        host = &g_host;
+    }
     Core::Emulator::SetGame(host->app0, host->serial, host->title, host->app_ver);
     // What BBSC reads of the game (param.sfo, the serial: shadPS4's PSF and memory patcher).
     {
