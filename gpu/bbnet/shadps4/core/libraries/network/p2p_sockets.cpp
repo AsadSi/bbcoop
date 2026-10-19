@@ -853,6 +853,14 @@ private:
         if (data[4] != 0x04 || size < 5 + kRelayIdSize + kRelayEpSize) {
             return;
         }
+        if (static int dumped = 0; dumped < 4) { // bbcoop: relay frame layout (Mac co-op, 2026-10-19)
+            ++dumped;
+            std::string hex;
+            for (size_t i = 5 + kRelayIdSize; i < size && i < 5 + kRelayIdSize + 20; ++i) {
+                hex += fmt::format(" {:02x}", data[i]);
+            }
+            LOG_WARNING(Lib_Net, "P2P relay frame size={} after the id:{}", size, hex);
+        }
         const std::string id(reinterpret_cast<const char*>(data + 5), kRelayIdSize);
         u32 ep_addr = 0;
         u16 ep_port = 0;
