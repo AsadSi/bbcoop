@@ -303,14 +303,14 @@ static void dump_frames(ucontext_t *uc) {
             char r[]="  tid=0000000000000000 NNN=0000000000000000\n";
             write_hex(r+6,tid);
             r[23]=regs[i].name[0]; r[24]=regs[i].name[1]; r[25]=regs[i].name[2] ? regs[i].name[2] : ' ';
-            write_hex(r+27,(uint64_t)uc->uc_mcontext.gregs[regs[i].reg]);
+            write_hex(r+27,(uint64_t)BB_GREGS(uc)[regs[i].reg]);
             { ssize_t written_=write(2,r,sizeof(r)-1); (void)written_; }
         }
         /* What the pointer registers point at (guest addresses only): the 8 qwords there, so the
          * object a thread waits on can be read from the log. */
         static const int pointer_regs[]={REG_RDI,REG_RSI,REG_RBX,REG_R12,REG_R13,REG_R14,REG_R15,REG_RCX,REG_RDX};
         for (size_t i=0;i<sizeof(pointer_regs)/sizeof(*pointer_regs);++i) {
-            const uintptr_t p=(uintptr_t)uc->uc_mcontext.gregs[pointer_regs[i]];
+            const uintptr_t p=(uintptr_t)BB_GREGS(uc)[pointer_regs[i]];
             if (p<0x800000000ull || p>=0x1200000000ull) continue;
             uint64_t words[8];
             struct iovec local={words,sizeof(words)}, remote={(void *)p,sizeof(words)};
@@ -323,7 +323,7 @@ static void dump_frames(ucontext_t *uc) {
                 { ssize_t written_=write(2,m,sizeof(m)-1); (void)written_; }
             }
         }
-        uintptr_t sp=(uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+        uintptr_t sp=(uintptr_t)BB_GREGS(uc)[REG_RSP];
         for (int i=0;i<24;++i) {
             uint64_t word=0;
             struct iovec local={&word,sizeof(word)}, remote={(void *)(sp+8*(uintptr_t)i),sizeof(word)};

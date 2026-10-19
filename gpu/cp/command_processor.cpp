@@ -393,7 +393,7 @@ void CommandProcessor::ReportStall(const char* why) {
 #endif
     }
 #endif
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__) // bbcoop: macOS has no /proc or tgkill
     // Every thread of the process prints its frames and registers (the runtime's SIGUSR2 handler):
     // when the guest itself stops (its job system, a lock), they say what each one waits for.
     // BB_STALL_THREADS=0: the command thread only.
