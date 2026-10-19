@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbcoop: co-op rules on top of BBSC. Included into bloodborne_re.cpp's anonymous namespace (right
 // before BbscRespawnInPlace), so it uses BBSC's own helpers and state; the BBSC side has only small
-// `// bbcoop:` calls into it. RE notes: docs/coop_respawn_re.md.
+// `// bbcoop:` calls into it. RE notes: docs/bbcoop/coop_respawn_re.md.
 //
 // ---- A guest's death: respawn at the host's last lamp, in any map --------------------------------
-// Asad's rule (docs/brief.md, "Guest death"): a dead guest respawns at the HOST's last lamp and stays
+// Asad's rule (docs/bbcoop/brief.md, "Guest death"): a dead guest respawns at the HOST's last lamp and stays
 // in the session. BBSC already does that without a load when the host's lamp is in a map loaded on
 // the guest's side (BbscRespawnInPlace, the host sends its lamp with every follow packet); when it is
 // not, BBSC puts the guest beside the host or at the nearest lamp of its own map. This adds the
@@ -14,7 +14,7 @@
 // respawn after the kill stays beside the host / at a loaded lamp, next to the arena, where the
 // party is. Anything unknown or failing falls back to BBSC's own respawn.
 //
-// The load (CONFIRMED statically, docs/coop_respawn_re.md):
+// The load (CONFIRMED statically, docs/bbcoop/coop_respawn_re.md):
 //   * the stage flow's placement choice 0x01943F10 takes, before the lamp (+0x1524) and the forced
 //     warp (+0x1520), the respawn-point warp of event 2003[49] (WarpToRespawnPoint 0x013CDF30):
 //     global+0x1538 = mode (1 lamp travel: also makes it the last lamp; 2 plain), +0x153C = respawn
@@ -29,7 +29,7 @@
 // Switch: SHADPS4_BBSC_DEATH_TO_HOST_LAMP (on by default with BBSC, =0 off: BBSC's own respawn).
 // Test seam: BB_TEST_GUEST_DEATH=<respawn point id> (throwaway profiles only): once in game, the local
 // player is killed once after 10 s, and that death - solo, in its own world - is handled as a guest
-// death whose host's last lamp is that point. See docs/coop_respawn_re.md "Testing".
+// death whose host's last lamp is that point. See docs/bbcoop/coop_respawn_re.md "Testing".
 
 constexpr std::string_view BbcoopHostLampWhy = "loaded at the host's lamp";
 constexpr std::string_view BbcoopHostLampCover = "host lamp"; // the load cover's name
@@ -129,7 +129,7 @@ bool BbcoopRespawnAtHostLamp() {
     WriteValue<u8>(global, 0x1523, 0);
     // The warp row's second value (+0x1540, the arrival setting; the last lamp is the pair
     // +0x1528/+0x152C) is not sent by the host: the guest's own stands in (HYPOTHESIS that any
-    // value places the player; 0 did in the test, docs/coop_respawn_re.md).
+    // value places the player; 0 did in the test, docs/bbcoop/coop_respawn_re.md).
     const s32 own_lamp = ReadValue<s32>(global, 0x1528);
     const s32 second = own_lamp != -1 ? ReadValue<s32>(global, 0x152C) : -1;
     WriteValue<u32>(global, 0x0C, map);

@@ -4,6 +4,8 @@
 // it (dirty flags, the pages watched, when it was used).
 #pragma once
 
+#include <atomic> // bbcoop
+
 #include <deque>
 #include <optional>
 #include <vector>
@@ -106,6 +108,13 @@ struct Image {
     /// The view with `view_info` (created on first use). `ensure_guest_samples`: switches to the
     /// backing of the guest's sample count first.
     ImageView& FindView(const ImageViewInfo& view_info, bool ensure_guest_samples = true);
+    /// bbcoop: whether the view needs the storage usage or another format that a lean backing
+    /// (macOS: no eStorage, no eMutableFormat, so Metal keeps its lossless compression) lacks.
+    bool NeedsFullUsage(const ImageViewInfo& view_info) const;
+    /// bbcoop: images made later with `info`'s address, size and format start with the full usage.
+    static void RememberFullUsage(const ImageInfo& info);
+    /// bbcoop: bumped when a backing is promoted (memos that hold views of the old one miss).
+    static inline std::atomic<u64> backing_generation{0};
 
     using Barriers = boost::container::small_vector<vk::ImageMemoryBarrier2, 32>;
     /// The barriers that bring `range` (else the whole image) to `dst_layout`, `dst_mask` at
@@ -183,6 +192,7 @@ struct Image {
         boost::container::small_vector<ImageViewId, 4> image_view_ids;
         u32 last_view = 0; ///< index of the view FindView returned last
         u32 num_samples;
+        bool retired = false; ///< bbcoop: replaced by a promoted backing (Runtime::PromoteUsage)
     };
     std::deque<BackingImage> backing_images;
     boost::container::static_vector<u64, 16> mip_hashes{};

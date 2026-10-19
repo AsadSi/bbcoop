@@ -1,4 +1,4 @@
-/* bbcoop: the DualShock's motion sensors for scePadReadState (runtime_padmotion.c, docs/padmotion_re.md). */
+/* bbcoop: the DualShock's motion sensors for scePadReadState (runtime_padmotion.c, docs/bbcoop/padmotion_re.md). */
 #ifndef BB_RUNTIME_PADMOTION_H
 #define BB_RUNTIME_PADMOTION_H
 #include <stdint.h>

@@ -273,6 +273,8 @@ void Instance::CreateDevice() {
     view_2d_of_3d = views.image2DViewOf3D && views.sampler2DViewOf3D;
     ext.image_view_min_lod = enable(VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME);
     ext.memory_budget = enable(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+    // bbcoop: when each presented frame reached the screen (Swapchain::Present, DisplayClock).
+    ext.display_timing = enable(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
     // Guest direct memory allocated here and mapped by the runtime (BbGuestMemory), or host
     // memory imported where dma-bufs do not fit (NVIDIA).
     ext.memory_fd = enable(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);

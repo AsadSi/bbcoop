@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbcoop: mirrored loot. Every pickup, enemy drop and boss drop a hunter gets is given to every
-// other hunter in the session (docs/brief.md, Loot). Code: shadps4/core/bbcoop_loot.inc, included
-// by bloodborne_re.cpp. Reverse engineering: docs/coop_loot_re.md.
+// other hunter in the session (docs/bbcoop/brief.md, Loot). Code: shadps4/core/bbcoop_loot.inc, included
+// by bloodborne_re.cpp. Reverse engineering: docs/bbcoop/coop_loot_re.md.
 #pragma once
 
 #include <cstdint>

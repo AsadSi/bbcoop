@@ -3,7 +3,7 @@
  * Attributes" and 72100901 while the workbench's "Refund Weapon Upgrades" has the weapon list open; this file does the rest on the game thread,
  * from hooks on SetEventFlag (the talk script's c1_11 runs on the game thread) and on the per-update
  * SOS status (the session state, which also runs offline). Offsets are image offsets; every hook site and
- * every game function called is checked byte for byte first (docs/respec_re.md has the RE).
+ * every game function called is checked byte for byte first (docs/bbcoop/respec_re.md has the RE).
  *   BB_RESPEC=0        no respec hooks
  *   BB_RESPEC_FREE=1   the stat reset costs no Insight (testing)
  *   BB_RESPEC_TRACE=1  logs the player state the hooks see, every 5 s of frames
@@ -12,7 +12,9 @@
  *   BB_TEST_WARP=<lamp> test cheat (bbcoop): once in game, to a lamp's arrival point: an area name
  *                      (warp_points below) or a respawn point ID, <map><block>29xx, as the map files
  *                      hold them (2412950: the first of m24_01). With BB_TEST_ENDGAME, instead of the
- *                      Dream. For testing an area (its frame rate) without playing to it. */
+ *                      Dream. For testing an area (its frame rate) without playing to it.
+ *   BB_TEST_GIVE=<id>,.. (bbcoop) once in game, the weapons (final ids, e.g. 27001000 Rakuyo +10) the
+ *                      character doesn't hold yet, on any character. */
 #define _GNU_SOURCE
 #include "hooks.h"
 #include "runtime.h"
@@ -122,6 +124,7 @@ static const struct { const char *name; int32_t point; } warp_points[] = {
 static int text_hook_installed; /* the menu text hook, which runtime_saveslots.c shares */
 int respec_text_hook_installed(void) { return text_hook_installed; }
 static const char *test_loadout; /* BB_TEST_LOADOUT: the item list for a character named TEST */
+static const char *test_give;    /* BB_TEST_GIVE: weapon ids */
 /* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
@@ -509,6 +512,26 @@ static void give_workshop_tools(void) {
     printf("Respec: BB_TEST_LOADOUT: Workshop tools given (Haze Extractor, Blood Gem Workshop Tool, Rune Workshop Tool)\n");
 }
 
+/* BB_TEST_GIVE: each weapon not held yet, given at +0 and upgraded as in the loadout. */
+static void give_weapons(uint64_t pgd, const char *ids) {
+    for (const char *p = ids; *p;) {
+        char *end;
+        int32_t id = (int32_t)strtol(p, &end, 10), give = respec_weapon_base(id);
+        if (end == p) break;
+        p = *end == ',' ? end + 1 : end;
+        if (give < 0) printf("Respec: BB_TEST_GIVE: %d is no weapon\n", id);
+        else if (find_weapon(pgd, id) >= 0) printf("Respec: BB_TEST_GIVE: weapon %d held already\n", id);
+        else {
+            char where[1200];
+            printf("Respec: BB_TEST_GIVE: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
+            NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, CATEGORY_WEAPON, give, 1);
+            int32_t index = give != id ? find_weapon(pgd, give) : -1;
+            if (index >= 0) NATIVE(ChangeItemId, CHANGE_ITEM_ID)(pgd + PGD_EQUIPMENT, (uint32_t)index, id);
+            printf("Respec: BB_TEST_GIVE: weapon %d %s\n", id, find_weapon(pgd, id) >= 0 ? "given" : "NOT given");
+        }
+    }
+}
+
 static void make_test_loadout(uint64_t pgd, const char *path) {
     FILE *list = fopen(path, "r");
     if (!list) {
@@ -737,14 +760,14 @@ static void frame_update(HookRegs *regs) {
     /* A new load (the Lua event manager is recreated): the flags are saved, so a game quit with the
      * workbench's refund menu open would leave refund mode on for its own Fortify Weapon. */
     static uint64_t loaded;
-    static int loadout_checked;
+    static int loadout_checked, give_checked;
     uint64_t lua = image_pointer(LUA_EVENT_MAN);
     if (lua >= 0x10000 && lua != loaded && player_data() >= 0x10000) {
         loaded = lua;
         refund_requested = 0;
         if (get_flag(FLAG_REFUND)) set_flag(FLAG_REFUND, 0); /* saved by builds before it was never stored */
         if (get_flag(FLAG_RESPEC)) set_flag(FLAG_RESPEC, 0);
-        loadout_checked = 0;
+        loadout_checked = give_checked = 0;
     }
     /* BB_TEST_LOADOUT: checked once per load, when the character is in the world. */
     if (test_loadout && !loadout_checked && in_game(&pgd)) {
@@ -753,6 +776,10 @@ static void frame_update(HookRegs *regs) {
         else if (!get_flag(FLAG_LOADOUT_GIVEN)) make_test_loadout(pgd, test_loadout);
         else if (!get_flag(FLAG_TOOLS_GIVEN)) give_workshop_tools(); /* filled before the tools were added */
         else printf("Respec: BB_TEST_LOADOUT: TEST was filled before: left alone\n");
+    }
+    if (test_give && !give_checked && in_game(&pgd)) {
+        give_checked = 1;
+        give_weapons(pgd, test_give);
     }
     if (!(test_endgame || test_warp) || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
@@ -874,6 +901,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
         }
     }
     test_loadout = (env = getenv("BB_TEST_LOADOUT")) && *env ? env : NULL;
+    test_give = (env = getenv("BB_TEST_GIVE")) && *env ? env : NULL;
     trace = (env = getenv("BB_RESPEC_TRACE")) && !strcmp(env, "1");
     const char *failure = hooks_init(image, size);
     for (size_t i = 0; !failure && i < count; ++i)

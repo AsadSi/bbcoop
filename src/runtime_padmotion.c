@@ -1,4 +1,4 @@
-/* bbcoop: the DualShock's motion sensors for the game (docs/padmotion_re.md). The port's scePadReadState
+/* bbcoop: the DualShock's motion sensors for the game (docs/bbcoop/padmotion_re.md). The port's scePadReadState
  * always said "at rest" (no acceleration, no rotation, identity orientation); this fills the three
  * fields from SDL's gamepad sensors, as a PS4 pad does:
  *   acceleration      in g (SDL gives m/s^2): the game clamps it to +-3 and scales it to +-1 (0x2690444)

@@ -1,6 +1,6 @@
 # Camera at uncapped frame rates: reverse-engineering notes (v1.09)
 
-Image offsets, as in `docs/respec_re.md`. The work was done on 2026-10-11 by static analysis only; the
+Image offsets, as in `docs/bbcoop/respec_re.md`. The work was done on 2026-10-11 by static analysis only; the
 game was not run. The symptom: the camera "suddenly speeds up" (Asad, 2026-10-10). Asad runs uncapped,
 which the log shows at ~240 FPS.
 

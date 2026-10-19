@@ -349,6 +349,7 @@ private:
         bool raster_scaling = false;
         u64 upscaler_state = 0;
         u64 generation = 0;
+        u64 backings = 0; ///< bbcoop: VideoCore::Image::backing_generation
         u32 depth_control = 0;
         bool depth_valid = false;
         bool stencil_valid = false;

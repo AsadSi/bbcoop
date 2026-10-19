@@ -1,7 +1,7 @@
 /* bbcoop: Fire Paper, Bolt Paper and Empty Phantasm Shell scale with the attack (1.09, EU/US, one image).
  * In vanilla each adds a flat +80 fire, bolt or arcane to every hit of the right-hand weapon, after the
  * attack's multiplier (motion value), so fast weapons with light hits gain the most. Asad's rule
- * (2026-10-18; docs/papers_re.md has the reverse engineering):
+ * (2026-10-18; docs/bbcoop/papers_re.md has the reverse engineering):
  *   bonus = 80 x (base at +0 x multiplier) / 90  +  10% x (base at the current level x multiplier)
  * base = the weapon's EquipParamWeapon attackBasePhysics, multiplier = the attack's atkPhysCorrection / 100, or the
  * item's own element's correction for attacks with none (Holy Moonlight Sword beams); an attack with no multiplier at

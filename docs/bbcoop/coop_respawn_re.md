@@ -1,6 +1,6 @@
 # A guest's death: respawn at the host's last lamp
 
-Asad's rule (`docs/brief.md`, "Guest death"): a dead guest respawns at the host's last lamp and stays in the
+Asad's rule (`docs/bbcoop/brief.md`, "Guest death"): a dead guest respawns at the host's last lamp and stays in the
 session. The host's own death is unchanged (BBSC: the host respawns at its lamp and the guests stay).
 
 Code: `gpu/bbnet/shadps4/core/bbcoop_coop.inc`, included into `bloodborne_re.cpp`'s anonymous namespace

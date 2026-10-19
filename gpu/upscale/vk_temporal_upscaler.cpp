@@ -1118,6 +1118,7 @@ void TemporalUpscaler::OnSceneComposite() {
         mask_ready = RecordReactive(proxy.view);
         return;
     }
+    runtime.PromoteUsage(&color); // bbcoop: viewed in another format below
     const auto device = instance.GetDevice();
     const auto color_view = Check(device.createImageView({
         .image = vk::Image(color.backing->image),

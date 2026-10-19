@@ -23,6 +23,12 @@ pkill -f "$own"; sleep 2; pkill -9 -f "$own"; sleep 1
 rm -rf -- "$user"
 [[ $mode == continue ]] && cp -a "$snapshot" "$user"
 : > out/pad
+# bbcoop: test runs skip the startup logos (the skip_intro setting), in a copy of the player's
+# settings: menu changes made in a test stay out of the real bbport.ini. BB_CONFIG overrides.
+if [[ -z ${BB_CONFIG:-} ]]; then
+    { [[ -f bbport.ini ]] && cat bbport.ini; echo skip_intro=1; } > out/test-bbport.ini
+    export BB_CONFIG=$PWD/out/test-bbport.ini
+fi
 # The scripted input below expects the online/offline choice (upstream 0.5 skips it by default).
 # bbcoop: macOS has neither setsid nor stdbuf; bb-probe writes its output unbuffered anyway.
 detach=(setsid stdbuf -oL -eL)
@@ -41,7 +47,7 @@ alive() { pgrep -f "$own" > /dev/null || { echo "The game exited; see out/sessio
 
 # Title screen: the pad is open and the logos have played.
 for i in $(seq 1 180); do sleep 1; grep -q 'pad opened' out/session.log && break; done
-sleep "${TITLE_WAIT:-25}"; alive
+sleep "${TITLE_WAIT:-5}"; alive  # bbcoop: with skip_intro the title takes input ~2 s after the pad opens
 mounts() { grep -c "save data 'SPRJ0005' mounted" out/session.log; }
 before=$(mounts)
 press down; press cross 1          # Play Offline: the save is read before the notice shows
