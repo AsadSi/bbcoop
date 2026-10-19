@@ -418,7 +418,7 @@ index 85f6d38..325a960 100644
  public:
  	void encode(MVKCommandEncoder* cmdEncoder) override;
 diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm b/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
-index 664276b..8f14b59 100644
+index 664276b..67661d9 100644
 --- a/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
 +++ b/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
 @@ -173,9 +173,17 @@
@@ -479,6 +479,37 @@ index 664276b..8f14b59 100644
                  // Running this stage prematurely ended the render pass, so we have to start it up again.
                  // TODO: On iOS, maybe we could use a tile shader to avoid this.
                  cmdEncoder->beginMetalRenderPass(kMVKCommandUseRestartSubpass);
+@@ -295,19 +318,21 @@
+ 			}
+             case kMVKGraphicsStageRasterization:
+                 if (pipeline->isTessellationPipeline()) {
++                    // bbport: bound through the encoder state, which otherwise still records the vertex buffers
++                    // of earlier draws at these indices. Without the render pass restart (tessellation hoist,
++                    // pass merge), a later draw with the same buffer skipped its bind and read these outputs.
++                    auto& mtlGraphics = cmdEncoder->getMtlGraphics();
++                    id<MTLRenderCommandEncoder> mtlRenderEncoder = cmdEncoder->_mtlRenderEncoder;
+                     if (pipeline->needsTessCtlOutputBuffer()) {
+-                        [cmdEncoder->_mtlRenderEncoder setVertexBuffer: tcOutBuff->_mtlBuffer
+-                                                                offset: tcOutBuff->_offset
+-                                                               atIndex: cmdEncoder->getDevice()->getMetalBufferIndexForVertexAttributeBinding(kMVKTessEvalInputBufferBinding)];
++                        mtlGraphics.bindVertexBuffer(mtlRenderEncoder, tcOutBuff->_mtlBuffer, tcOutBuff->_offset,
++                                                     cmdEncoder->getDevice()->getMetalBufferIndexForVertexAttributeBinding(kMVKTessEvalInputBufferBinding));
+                     }
+                     if (pipeline->needsTessCtlPatchOutputBuffer()) {
+-                        [cmdEncoder->_mtlRenderEncoder setVertexBuffer: tcPatchOutBuff->_mtlBuffer
+-                                                                offset: tcPatchOutBuff->_offset
+-                                                               atIndex: cmdEncoder->getDevice()->getMetalBufferIndexForVertexAttributeBinding(kMVKTessEvalPatchInputBufferBinding)];
++                        mtlGraphics.bindVertexBuffer(mtlRenderEncoder, tcPatchOutBuff->_mtlBuffer, tcPatchOutBuff->_offset,
++                                                     cmdEncoder->getDevice()->getMetalBufferIndexForVertexAttributeBinding(kMVKTessEvalPatchInputBufferBinding));
+                     }
+-                    [cmdEncoder->_mtlRenderEncoder setVertexBuffer: tcLevelBuff->_mtlBuffer
+-                                                            offset: tcLevelBuff->_offset
+-                                                           atIndex: cmdEncoder->getDevice()->getMetalBufferIndexForVertexAttributeBinding(kMVKTessEvalLevelBufferBinding)];
++                    mtlGraphics.bindVertexBuffer(mtlRenderEncoder, tcLevelBuff->_mtlBuffer, tcLevelBuff->_offset,
++                                                 cmdEncoder->getDevice()->getMetalBufferIndexForVertexAttributeBinding(kMVKTessEvalLevelBufferBinding));
+                     [cmdEncoder->_mtlRenderEncoder setTessellationFactorBuffer: tcLevelBuff->_mtlBuffer
+                                                                         offset: tcLevelBuff->_offset
+                                                                 instanceStride: 0];
 diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h b/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h
 index 5119f85..1dbd0a2 100644
 --- a/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.h
@@ -604,7 +635,7 @@ index 76ca788..be1093f 100644
  
  
 diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
-index 8c24deb..11bc770 100644
+index 8c24deb..87668cf 100644
 --- a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
 +++ b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
 @@ -25,7 +25,9 @@
@@ -752,7 +783,7 @@ index 8c24deb..11bc770 100644
          // Must happen before switching encoders.
          encodeStoreActions(true);
      }
-@@ -1023,7 +1052,180 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+@@ -1023,7 +1052,183 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
  }
  
  void MVKCommandEncoder::endRendering() {
@@ -835,11 +866,14 @@ index 8c24deb..11bc770 100644
 +		for ( ; end && !dynamic_cast<MVKCmdEndRendering*>(end); end = end->_next) {
 +			if (auto* bind = dynamic_cast<MVKCmdBindGraphicsPipeline*>(end)) {
 +				pipeline = static_cast<MVKGraphicsPipeline*>(bind->getPipeline());
-+			} else if (dynamic_cast<MVKCmdDraw*>(end)) {
-+				tessellated |= pipeline && pipeline->isTessellationPipeline();
-+			} else if (dynamic_cast<MVKCmdDrawIndexed*>(end) || dynamic_cast<MVKCmdDrawIndirect*>(end) ||
-+					   dynamic_cast<MVKCmdDrawIndexedIndirect*>(end)) {
-+				tessBlocked |= pipeline && pipeline->isTessellationPipeline();
++			} else if (dynamic_cast<MVKCmdDraw*>(end) && pipeline && pipeline->isTessellationPipeline()) {
++				tessellated = true;
++			} else if (dynamic_cast<MVKCmdDraw*>(end) || dynamic_cast<MVKCmdDrawIndexed*>(end) ||
++					   dynamic_cast<MVKCmdDrawIndirect*>(end) || dynamic_cast<MVKCmdDrawIndexedIndirect*>(end)) {
++				// Other tessellated draws are not hoisted. Neither is a rendering in which an untessellated
++				// draw follows a tessellated one: hoisted there, the game's mist dropped out for a frame
++				// in 2-6% of frames (bbcoop, out/flicker-harness/fogab.sh), cause not found.
++				tessBlocked |= (pipeline && pipeline->isTessellationPipeline()) || tessellated;
 +			} else if (bbNamed(end, "MVKCmdExecuteCommands")) {
 +				return;
 +			} else if (bbNamed(end, "MVKCmdBeginQuery") || bbNamed(end, "MVKCmdEndQuery") ||
@@ -933,7 +967,7 @@ index 8c24deb..11bc770 100644
  }
  
  void MVKCommandEncoder::endRenderpass() {
-@@ -1045,6 +1247,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
+@@ -1045,6 +1250,7 @@ static MVKBarrierStage commandUseToBarrierStage(MVKCommandUse use) {
  
  void MVKCommandEncoder::endMetalRenderEncoding() {
      if (_mtlRenderEncoder == nil) { return; }
@@ -941,7 +975,7 @@ index 8c24deb..11bc770 100644
  
  	if (_cmdBuffer->_hasStageCounterTimestampCommand) { [_mtlRenderEncoder updateFence: getStageCountersMTLFence() afterStages: MTLRenderStageFragment]; }
  	encodeBarrierUpdates();
-@@ -1102,6 +1305,7 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
+@@ -1102,6 +1308,7 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
  	if (!_mtlComputeEncoder || shouldStartNewEncoder(_mtlComputeEncoderUse, cmdUse)) {
  		needWaits = true;
  		endCurrentMetalEncoding();
@@ -949,7 +983,7 @@ index 8c24deb..11bc770 100644
  		_mtlComputeEncoder = [_mtlCmdBuffer computeCommandEncoderWithDispatchType:getDispatchType(cmdUse)];
  		retainIfImmediatelyEncoding(_mtlComputeEncoder);
  		beginMetalComputeEncoding(cmdUse);
-@@ -1122,6 +1326,7 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
+@@ -1122,6 +1329,7 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
  	if ( !_mtlBlitEncoder ) {
  		needWaits = true;
  		endCurrentMetalEncoding();
