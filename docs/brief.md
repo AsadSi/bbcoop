@@ -95,6 +95,11 @@ Supporting pieces:
     Wooloomooloo2/bloodborne_mac_port 12a0ac5 serialises them with one lock; ported 2026-10-18
     (`src/runtime_context_lock.c`, `BB_CONTEXT_LOCK=0` off). Installed and played at the Dream; loads with
     the lock not yet counted.
+- **Upstream 0.6 merged (2026-10-19):** online on shadPS4 0.20 (`gpu/bbnet20`, `libbbnet20.so`, now the default;
+  `BB_NET_GEN=19` = the older `gpu/bbnet`), The Hunter's Dream pool (Discord sign-in, without BBSC), Laurence above 30 FPS,
+  flicker and load-crash fixes. bbcoop's BBSC changes below (loot, packets 0x23..0x27, host-lamp death, ss.info format,
+  CUSA03173 serial, APP_VER 01.09, image reads) are ported into bbnet20 too; macOS stays on bbnet (bbnet20 has no Mac port).
+  Built and the C/Python tests pass; not yet run in the game.
 - **Mirrored loot on BBSC (2026-10-17, merged):** every pickup, enemy drop and boss drop goes to every hunter
   (`gpu/bbnet/shadps4/core/bbcoop_loot.inc`, relay "SHAD" 0x28, `SHADPS4_BBSC_MIRROR_LOOT=0` off,
   `docs/coop_loot_re.md`). Verified alone with its test seam (receive side); a real pickup's send side and a

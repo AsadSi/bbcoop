@@ -53,6 +53,9 @@ what's still open.
   seamless hooks use.
 - Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17), with bbcoop's scaling numbers (run.sh). `BB_SEAMLESS=1`
   (bbcoop's 13 byte patches and 5 hooks) is the fallback and is skipped while BBSC is on (same sites).
+  Since upstream 0.6 (2026-10-19) the default module is `gpu/bbnet20` (`libbbnet20.so`, shadPS4 0.20, BBSC ported;
+  `BB_NET_GEN=19` = the older `gpu/bbnet`, the only one on macOS). bbcoop's BBSC changes are in both, kept the same
+  (`bbsc/core/` in bbnet20, `shadps4/core/` in bbnet; the 0x23..0x28 packets in bbnet20's `np/signaling_handler.cpp`).
   bbcoop's co-op rules on BBSC: `gpu/bbnet/shadps4/core/bbcoop_coop.inc` (a guest's death at the host's lamp,
   `SHADPS4_BBSC_DEATH_TO_HOST_LAMP=0` off; test cheat `BB_TEST_GUEST_DEATH=<respawn point>`, `docs/coop_respawn_re.md`).
 - Online servers: public ones are allowed (Asad, 2026-10-12, replacing "private only"): upstream's defaults
