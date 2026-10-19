@@ -14,7 +14,8 @@
  *                      hold them (2412950: the first of m24_01). With BB_TEST_ENDGAME, instead of the
  *                      Dream. For testing an area (its frame rate) without playing to it.
  *   BB_TEST_GIVE=<id>,.. (bbcoop) once in game, the weapons (final ids, e.g. 27001000 Rakuyo +10) the
- *                      character doesn't hold yet, on any character. */
+ *                      character doesn't hold yet, on any character; goods:<id>:<count> tops goods up
+ *                      to count (goods:1400:99, Bold Hunter's Mark). */
 #define _GNU_SOURCE
 #include "hooks.h"
 #include "runtime.h"
@@ -512,10 +513,34 @@ static void give_workshop_tools(void) {
     printf("Respec: BB_TEST_LOADOUT: Workshop tools given (Haze Extractor, Blood Gem Workshop Tool, Rune Workshop Tool)\n");
 }
 
-/* BB_TEST_GIVE: each weapon not held yet, given at +0 and upgraded as in the loadout. */
+/* The count of a goods row held (inventory entry +8). */
+static int32_t goods_held(uint64_t pgd, int32_t id) {
+    uint64_t inventory = pgd + PGD_INVENTORY;
+    uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14);
+    int32_t held = 0;
+    for (uint32_t i = 0; i < total && i < 4096; ++i) {
+        uint64_t entry = inventory_entry(inventory, i);
+        if (read_u32(entry, 0) && read_u32(entry, 4) == (CATEGORY_GOODS | (uint32_t)id)) held += read_s32(entry, 8);
+    }
+    return held;
+}
+
+/* BB_TEST_GIVE: each weapon not held yet, given at +0 and upgraded as in the loadout; goods topped up. */
 static void give_weapons(uint64_t pgd, const char *ids) {
     for (const char *p = ids; *p;) {
         char *end;
+        if (!strncmp(p, "goods:", 6)) {
+            int32_t id = (int32_t)strtol(p + 6, &end, 10), count = *end == ':' ? (int32_t)strtol(end + 1, &end, 10) : 0;
+            p = *end == ',' ? end + 1 : end;
+            int32_t held = goods_held(pgd, id);
+            if (count > held) {
+                char where[1200];
+                printf("Respec: BB_TEST_GIVE: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
+                NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, CATEGORY_GOODS, id, count - held);
+            }
+            printf("Respec: BB_TEST_GIVE: goods %d: %d held, now %d\n", id, held, goods_held(pgd, id));
+            continue;
+        }
         int32_t id = (int32_t)strtol(p, &end, 10), give = respec_weapon_base(id);
         if (end == p) break;
         p = *end == ',' ? end + 1 : end;
