@@ -219,7 +219,11 @@ CommandProcessor::Status CommandProcessor::RunGraphics(Work& work) {
             Diagnostics::ReportBadPacket(reinterpret_cast<uintptr_t>(level.begin),
                                          size_t(level.end - level.begin), level.at, work.seq,
                                          level.depth);
-            UNREACHABLE_MSG("PM4 type {} packet ({:#x})", type, header);
+            // bbcoop: the rest of the buffer is skipped, not the game ended: the load race the
+            // context lock does not always prevent (Wooloomooloo2/bloodborne_mac_port skips too).
+            LOG_ERROR(Render, "PM4 type {} packet ({:#x}): rest of the buffer skipped", type, header);
+            level.at = level.end;
+            continue;
         }
         const u32 body_words = Header{header}.BodyWords();
         if (level.at + 1 + body_words > level.end) {
