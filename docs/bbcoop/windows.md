@@ -52,9 +52,19 @@ The fix is on only on Windows (`BB_RED_ZONE=0/1` overrides). Checked on the Mac 
 
 ## Build (on the Windows PC)
 Install [MSYS2](https://www.msys2.org) (`winget install MSYS2.MSYS2`) and a python.org Python 3.12+ for
-the package. Then, in the **MSYS2 CLANG64** shell:
+the package. The repo is private: clone it from PowerShell with Git for Windows (`winget install Git.Git`),
+which signs in through the browser:
+
+```powershell
+git config --global core.longpaths true
+git config --global core.autocrlf false   # LF endings: bash scripts and the FSR-Vulkan patches need them
+git clone --recursive -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop
+```
+
+Then, in the **MSYS2 CLANG64** shell:
 
 ```bash
+pacman -Syu   # once; if the window closes, open MSYS2 CLANG64 again and repeat
 pacman -S --needed git patch \
   mingw-w64-clang-x86_64-{toolchain,cmake,ninja,pkgconf,python} \
   mingw-w64-clang-x86_64-{vulkan-headers,vulkan-loader,vulkan-memory-allocator,glslang} \
@@ -62,22 +72,49 @@ pacman -S --needed git patch \
   mingw-w64-clang-x86_64-{spirv-tools,spirv-headers,spirv-cross} \
   mingw-w64-clang-x86_64-{protobuf,openssl,zlib,miniupnpc,nlohmann-json}
 # magic_enum and miniz come through CMake FetchContent when MSYS2 has no package (gpu/CMakeLists.txt).
-git clone --recursive -b windows git@github.com:AsadSi/bbcoop.git && cd bbcoop
+cd /c/bbcoop   # cloned from PowerShell above: it signs in to GitHub in the browser
 bash build.sh                       # out/bb-probe.exe, bb-gpu-capabilities.exe, bb-play.exe
-BB_GAME_DIR='D:/path/to/CUSA03173' python run.py
-python launcher/bbport_launcher_win.py
-bash packaging/windows/package.sh   # dist/bbcoop-windows.zip
+bash packaging/windows/package.sh   # dist/bbcoop-windows.zip (after the game runs)
+```
+
+To play from source, use the Windows Python in PowerShell. `run.py` adds `C:\msys64\clang64\bin` to `PATH`
+for the DLLs:
+
+```powershell
+cd C:\bbcoop
+py -3.12 -m pip install soulstruct==2.6.0      # the respec mod
+py -3.12 launcher\bbport_launcher_win.py       # or: $env:BB_GAME_DIR="D:/Games/CUSA00900"; py -3.12 run.py
 ```
 
 The package freezes the launcher with PyInstaller into `Bloodborne.exe`, with soulstruct for the respec
 mod. Players need no Python. `run.py` takes the same variables as `run.sh`. From source, the respec mod
 needs soulstruct in the Python that runs `run.py`, or in `BB_RE_PYTHON`.
 
+## Checking from the Mac
+`bash scripts/windows/cross-build.sh` builds `bb-probe.exe`, `bb-gpu-capabilities.exe` and `bb-play.exe` with
+llvm-mingw against the MSYS2 CLANG64 packages, which it unpacks into `out/windows-cross/`. It takes about
+1.5 minutes after the first download (1.4 GB). Run it after Windows-relevant changes or upstream merges. The
+executables are for checking, not for players.
+
+Fixed through it on 2026-10-21. Each fix is behind `_WIN32`/`WIN32` and marked `bbcoop`, and the Mac build,
+tests and game are unchanged:
+- xbyak: MSYS2 has no package, so it is fetched (v7.43, as `scripts/mac-deps.sh`).
+- `bb_win_compat.h` duplicated the Win32 layer's `gettid`, so it is no longer force-included.
+- wepoll's `sigset_t` clashed with `bbport_signal.h`'s.
+- BBSC's memory search used SEH `__try`, which clang for MinGW lacks: now `ReadProcessMemory` in pieces.
+- `setenv` became `_putenv_s`, with a narrow path string.
+- Statically linked, names that each module keeps private on Linux (`-Bsymbolic`) collided:
+  - bbnet20's `runtime_thread_spawn` forwarder is left out, so the runtime's own is used;
+  - bbnet20's `SymbolsResolver` is renamed;
+  - the GPU library's `Core::Bloodborne` placement functions, which only the online modules call, are left out.
+- `src/runtime_hooks.c` (the hook engine for respec, camera, IK, papers and save slots) has a Windows stub:
+  COFF symbol, the argument in `rcx`, 32 bytes of shadow space.
+
+The only warnings in the runtime are 3 old unused-variable ones in upstream code. Every DLL the executables
+import is in MSYS2 CLANG64 or Windows. `bb-probe.exe` is a GUI-subsystem program (SDL3's `-mwindows`, as in
+Supermedo's), so `run.py` passes it the standard handles for its log.
+
 ## Open
-- None of this has been built on Windows yet. Expect compile fixes, and keep them on the `windows` branch:
-  - the force-included `bbport_win32.h` meets `play.c`, `wepoll.c` and bbcoop's own `src/runtime_*.c`;
-  - bbnet20 has never been compiled for Windows;
-  - Supermedo's tree has Windows fixes that 0.6's layer may not (`src/compat_win.c`, 207 commits on top of
-    bbport); copy them in as each problem shows up.
+- Not yet run on Windows: the game itself, online, the launcher and the package. Those need the PC.
 - The C tests (`build.sh --test`) have no Windows path.
 - Cross-play is not tested: Windows↔Mac and Windows↔Linux, with the Windows PC hosting and joining.

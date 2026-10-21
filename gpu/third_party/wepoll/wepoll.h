@@ -89,11 +89,14 @@ enum {
 typedef void* HANDLE;
 typedef uintptr_t SOCKET;
 
+/* bbcoop: the port's Win32 layer (platform/win32/include/bbport_signal.h, force-included) has its own. */
+#ifndef BBPORT_SIGSET_T
 #define _SIGSET_NWORDS (1024 / (8 * sizeof (size_t)))
 typedef struct
 {
 	size_t __val[_SIGSET_NWORDS];
 } sigset_t;
+#endif
 
 typedef union epoll_data {
 	void* ptr;

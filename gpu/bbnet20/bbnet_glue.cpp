@@ -523,8 +523,12 @@ BBNET_EXPORT void bbnet_image_ready(uint64_t base, uint64_t size) {
             for (const auto& title : std::filesystem::directory_iterator(id.path(), error)) {
                 const auto folder = title.path() / "SPRJ0005";
                 if (!getenv("BBSC_SAVE_DIR") && std::filesystem::is_directory(folder, error)) {
+#ifdef _WIN32
+                    _putenv_s("BBSC_SAVE_DIR", folder.string().c_str()); // bbcoop: no setenv there
+#else
                     setenv("BBSC_SAVE_DIR", folder.c_str(), 0);
-                    std::printf("BBSC: save folder %s\n", folder.c_str());
+#endif
+                    std::printf("BBSC: save folder %s\n", folder.string().c_str());
                 }
             }
         }
@@ -682,8 +686,11 @@ BBNET_EXPORT int bbnet_init(const BbNetHost* host) {
     return 0;
 }
 
-// The Hunter's Dream backend starts its dispatcher as a guest thread (thd_session.cpp).
+// The Hunter's Dream backend starts its dispatcher as a guest thread (thd_session.cpp). bbcoop: on
+// Windows the module is linked into bb-probe.exe and calls the runtime's own.
+#ifndef _WIN32
 extern "C" int32_t runtime_thread_spawn(void** out, void* PS4_SYSV_ABI (*entry)(void*),
                                         void* argument, uint64_t stack, const char* name) {
     return g_host.thread_spawn(out, entry, argument, stack, name);
 }
+#endif
