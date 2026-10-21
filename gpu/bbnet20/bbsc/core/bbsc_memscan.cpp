@@ -25,24 +25,32 @@ namespace {
 
 #ifdef _WIN32
 // One region. The emulator changes page protection all the time (GPU tracking), so a page that was
-// readable a moment ago may fault now: the search runs under SEH and a fault just ends the region.
+// readable a moment ago may fault now: a fault just ends the region. bbcoop: copied in pieces with
+// ReadProcessMemory, as the Linux and macOS paths do (clang for MinGW has no SEH __try).
 void SearchRegion(const std::uint8_t* start, std::size_t size, const std::uint8_t* needle,
                   std::size_t length, std::vector<std::uint64_t>& hits, std::size_t max_hits) {
-    __try {
-        const std::uint8_t* end = start + size;
-        const std::uint8_t* at = start;
-        while (hits.size() < max_hits && end - at >= static_cast<std::ptrdiff_t>(length)) {
-            at = static_cast<const std::uint8_t*>(
-                std::memchr(at, needle[0], static_cast<std::size_t>(end - at) - length + 1));
+    constexpr std::size_t Piece = 1u << 20;
+    std::vector<std::uint8_t> buffer(Piece + length);
+    for (std::size_t offset = 0; offset < size && hits.size() < max_hits; offset += Piece) {
+        const std::size_t want = std::min(size - offset, Piece + length - 1);
+        SIZE_T got = 0;
+        const bool whole = ReadProcessMemory(GetCurrentProcess(), start + offset, buffer.data(), want, &got) &&
+                           got == want;
+        // Matches that start in this piece; the next piece finds those starting after it.
+        const std::size_t last = got >= length ? std::min(Piece, static_cast<std::size_t>(got) - length + 1) : 0;
+        for (std::size_t i = 0; i < last && hits.size() < max_hits; ++i) {
+            const auto* at = static_cast<const std::uint8_t*>(std::memchr(&buffer[i], needle[0], last - i));
             if (at == nullptr) {
                 break;
             }
+            i = static_cast<std::size_t>(at - buffer.data());
             if (std::memcmp(at, needle, length) == 0) {
-                hits.push_back(reinterpret_cast<std::uint64_t>(at));
+                hits.push_back(reinterpret_cast<std::uint64_t>(start + offset + i));
             }
-            ++at;
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!whole) {
+            return;
+        }
     }
 }
 #endif

@@ -48,13 +48,13 @@ if (APPLE)
 elseif (WIN32)
     # bbcoop: as Supermedo/bloodborne_pc builds this module on Windows: wepoll for epoll, a static
     # miniupnpc, OpenSSL's own chain check (cpp-httplib's second one could pick an expired cross-signed
-    # root from the user's store: "SSL server verification failed"), the Win32 helpers.
+    # root from the user's store: "SSL server verification failed"); gettid comes from ../platform/win32.
     target_sources(bbnet20 PRIVATE ../third_party/wepoll/wepoll.c)
     target_include_directories(bbnet20 PRIVATE ../third_party/wepoll)
+    # Its symbol table stays apart from the GPU library's, which has a SymbolsResolver of its own
+    # (one executable here; on Linux each module keeps its own with -Bsymbolic).
     target_compile_definitions(bbnet20 PRIVATE MINIUPNP_STATICLIB NOMINMAX WIN32_LEAN_AND_MEAN
-        CPPHTTPLIB_DISABLE_WINDOWS_AUTOMATIC_ROOT_CERTIFICATES_UPDATE)
-    target_compile_options(bbnet20 PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/include/bb_win_compat.h>")
+        CPPHTTPLIB_DISABLE_WINDOWS_AUTOMATIC_ROOT_CERTIFICATES_UPDATE SymbolsResolver=BbNetSymbolsResolver)
     target_link_libraries(bbnet20 PRIVATE ws2_32 iphlpapi bcrypt crypt32)
     set(BBNET20_RPATH "")
 else()

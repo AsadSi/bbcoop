@@ -40,6 +40,7 @@ extern "C" {
 #define SEGV_ACCERR 2
 
 typedef unsigned long long sigset_t;
+#define BBPORT_SIGSET_T 1 // bbcoop: wepoll.h's own is left out
 
 typedef struct {
     int si_signo;
