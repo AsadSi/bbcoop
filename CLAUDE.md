@@ -96,7 +96,7 @@ Runtime mods (`src/`):
   `scripts/mac-deps.sh`.
 - The Mac is GPU-bound by the game's effects, not by Rosetta. On an M4 Air the Central Yharnam street (test warp
   `BB_TEST_WARP=2412951`; `central-yharnam` is the clinic sickroom, indoors) runs ~55 FPS uncapped at 720p with every
-  effect off and ~44 with every effect on. The native arm64 GPU process (branch `mac-gpu-process`) measured 1.05x and
+  effect off and ~44 with every effect on. The native arm64 GPU process (tag `archive/mac-gpu-process`) measured 1.05x and
   is parked.
 - Asad plays locked 30 (Asad, 2026-10-19): 720p native, every effect on but SSR, model_lod 0 (`bbport.ini`).
   At 30 each frame is timed to the display's refreshes (`gpu/vulkan/swapchain.cpp` present times,
