@@ -16,6 +16,7 @@ Everything else in the tree is upstream's. bbcoop's own files sit beside it so m
 | Respec talk-script/text mod generator | `tools/respec_mod.py` → `mods/bbcoop-respec/` (git-ignored, from the player's own files) |
 | Our shadNet server (optional, standalone) | `server/` |
 | Mac build pieces | `scripts/mac-deps.sh`, `scripts/mac/` (MoltenVK and mimalloc patches) |
+| Windows build pieces | `docs/bbcoop/windows.md`, `run.py`, `msys2-env.sh`, `launcher/bbport_launcher_win.py`, `packaging/windows/` |
 | Docker tests, server image | `scripts/docker-test.sh`, `scripts/docker-shell.nix`, `scripts/build-server.sh`, `scripts/server.Dockerfile` |
 | Tests | `tests/test_*.c`, `tests/test_*.py` |
 
@@ -49,7 +50,7 @@ Runtime mods (`src/`):
 
 ## Online and co-op
 - Online is upstream's module: since 0.6 (merged 2026-10-19) `gpu/bbnet20` (`libbbnet20`, shadPS4 0.20, the
-  default), `BB_NET_GEN=19` the older `gpu/bbnet` (the only one on macOS); `BB_ONLINE=1`, `src/runtime_net.c` is
+  default), `BB_NET_GEN=19` the older `gpu/bbnet` (not on Windows); `BB_ONLINE=1`, `src/runtime_net.c` is
   upstream's. bbcoop's BBSC changes are in both, kept the same (`bbsc/core/` in bbnet20, `shadps4/core/` in bbnet;
   packets 0x23..0x28 in bbnet20's `np/signaling_handler.cpp`). BBSC's memory search reads AMD's dma-buf guest
   memory through `/proc/self/mem` (`bbsc_memscan.cpp`). `BB_GPU_LOG=info` shows BBSC's info lines.
@@ -104,6 +105,15 @@ Runtime mods (`src/`):
   prints for how many refreshes frames stay on screen.
 - No mist by default (`BB_MIST=1` keeps it): run.sh skips its two pixel shaders through `BB_SKIP_PS`; `BB_DRAW_LIST=<file>`
   lists a few frames' draws (pixel shader, primitive, blending) to find others. Lean texture usages (flicker only the mist: off with `BB_MIST=1`; `BB_FULL_IMAGE_USAGE=1` off, `BB_PROMOTE_LOG=1`), pipeline QoS (`BB_PIPELINE_QOS=0` off).
+
+## Windows
+- A native build in MSYS2 CLANG64 (`docs/bbcoop/windows.md`: packages, build, package, what came from where):
+  upstream 0.6's Win32 layer plus Supermedo/bloodborne_pc's Windows build step, red-zone fix, mod links,
+  launcher and package. `bash build.sh` there builds `out/bb-probe.exe`; `run.py` is the Windows `run.sh` and
+  must carry the same bbcoop defaults (change both together); `bash packaging/windows/package.sh` makes
+  `dist/bbcoop-windows.zip` (`Bloodborne.exe`, no Python needed).
+- The online module (gen 20) is linked into `bb-probe.exe` there (`src/runtime_net.c`, `gpu/bbnet20/CMakeLists.txt`).
+- Red-zone sites (`patches/redzone.json`, `scripts/link_modules.py`) are on only on Windows (`BB_RED_ZONE=0/1`).
 
 ## Running and testing
 - `./build.sh`, then `./run.sh` (or `python3 launcher/bbport_launcher.py --play`), with your own decrypted v1.09 dump.

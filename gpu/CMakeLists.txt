@@ -251,6 +251,13 @@ if (WIN32)
     endforeach()
     target_link_options(bb-probe PRIVATE -Wl,--disable-high-entropy-va
         -Wl,--stack,16777216 -Wl,--error-limit=0)
+    # bbcoop: the GPU check (run.py: live_resolution=auto, --device) and "Play Bloodborne.exe"
+    # (packaging/windows/play.c), as Supermedo/bloodborne_pc builds them.
+    add_executable(bb-gpu-capabilities ../tools/gpu_capabilities.c ../packaging/windows/bb-gpu-capabilities.rc)
+    target_link_libraries(bb-gpu-capabilities PRIVATE PkgConfig::SDL3 ${Vulkan_LIBRARIES})
+    add_executable(bb-play WIN32 ../packaging/windows/play.c ../packaging/windows/play.rc)
+    target_compile_options(bb-play PRIVATE -municode)
+    target_link_options(bb-play PRIVATE -municode)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
@@ -365,7 +372,12 @@ if (BB_NET)
     find_package(OpenSSL QUIET)
     find_package(ZLIB QUIET)
     find_path(MINIUPNPC_INCLUDE miniupnpc.h PATH_SUFFIXES miniupnpc)
-    find_library(MINIUPNPC_LIBRARY NAMES miniupnpc)
+    # bbcoop: Windows links miniupnpc statically (MINIUPNP_STATICLIB in bbnet20), as Supermedo/bloodborne_pc.
+    if (WIN32)
+        find_library(MINIUPNPC_LIBRARY NAMES libminiupnpc.a miniupnpc)
+    else()
+        find_library(MINIUPNPC_LIBRARY NAMES miniupnpc)
+    endif()
     # macOS: epoll on kqueue (epoll-shim); elsewhere the system's epoll counts as found.
     set(epoll-shim_FOUND TRUE)
     if (APPLE)
@@ -373,8 +385,14 @@ if (BB_NET)
     endif()
     if (Protobuf_FOUND AND nlohmann_json_FOUND AND OpenSSL_FOUND AND ZLIB_FOUND AND
         MINIUPNPC_INCLUDE AND MINIUPNPC_LIBRARY AND epoll-shim_FOUND)
-        add_subdirectory(bbnet)
+        # bbcoop: Windows builds the shadPS4 0.20 module only, linked into bb-probe.exe.
+        if (NOT WIN32)
+            add_subdirectory(bbnet)
+        endif()
         add_subdirectory(bbnet20)
+        if (WIN32)
+            target_link_libraries(bb-probe PRIVATE bbnet20)
+        endif()
         message(STATUS "Online module: on (libbbnet${CMAKE_SHARED_LIBRARY_SUFFIX}, libbbnet20${CMAKE_SHARED_LIBRARY_SUFFIX})")
     else()
         # Named one by one (#145: "the build has no online module" with no hint why).
