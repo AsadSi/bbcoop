@@ -289,7 +289,9 @@ def game_info(folder):
     try:
         from prepare import sfo
         values = sfo((folder / 'sce_sys/param.sfo').read_bytes())
-        return values.get('TITLE', 'Bloodborne').replace('™', '').strip(), values.get('APP_VER', '?')
+        # bbcoop: some 1.09 dumps (CUSA00900) keep APP_VER 01.00 and carry the update in VERSION.
+        version = PATCH_VERSION if values.get('VERSION') == PATCH_VERSION else values.get('APP_VER', '?')
+        return values.get('TITLE', 'Bloodborne').replace('™', '').strip(), version
     except (OSError, ValueError, ImportError):
         return 'Bloodborne', '?'
 
