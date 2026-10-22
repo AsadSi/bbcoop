@@ -50,6 +50,18 @@ The fix is on only on Windows (`BB_RED_ZONE=0/1` overrides). Checked on the Mac 
 - With `BB_RED_ZONE=1` the game loaded into the clinic with every hook installed (respec 9, save slots 3,
   camera, papers, all guest hooks).
 
+## One command
+In PowerShell, with Git for Windows (`winget install Git.Git`); the repo is private, so the clone signs in through the browser:
+
+```powershell
+git clone --recursive -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop; cd C:\bbcoop
+powershell -ExecutionPolicy Bypass -File install.ps1   # asks for your Bloodborne folder; -GameDir D:\Games\CUSA00900 skips the picker
+```
+
+`install.ps1` installs MSYS2 and Python (winget), the packages below, builds and packages, unpacks to
+`%LOCALAPPDATA%\bbcoop`, sets the launcher's game folder and puts a Bloodborne shortcut on the desktop. The steps below
+are the same thing by hand. Not yet run on Windows.
+
 ## Build (on the Windows PC)
 Install [MSYS2](https://www.msys2.org) (`winget install MSYS2.MSYS2`) and a python.org Python 3.12+ for
 the package. The repo is private: clone it from PowerShell with Git for Windows (`winget install Git.Git`),
