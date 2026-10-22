@@ -3,7 +3,7 @@
 # Bloodborne.exe (the launcher, frozen with PyInstaller so players need no Python; it also runs
 # run.py and the preparation scripts, soulstruct included for the respec mod), Play Bloodborne.exe,
 # bb-probe.exe with the MSYS2 CLANG64 DLLs it loads, the scripts and patches. No game files.
-# Run from an MSYS2 CLANG64 shell after `bash build.sh`. Freezing uses a Windows Python 3.12+
+# Run from an MSYS2 CLANG64 shell after `bash build.sh`. Freezing uses a Windows Python 3.13+
 # (python.org; WINPYTHON overrides) and a private venv in out/pyenv.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
@@ -17,7 +17,7 @@ if [[ -z $python ]]; then
         [[ -x $candidate ]] && python=$candidate
     done
 fi
-[[ -n $python ]] || { echo 'Need a Windows Python 3.12+ (python.org) or WINPYTHON=path\to\python.exe' >&2; exit 1; }
+[[ -n $python ]] || { echo 'Need a Windows Python 3.13+ (python.org) or WINPYTHON=path\to\python.exe' >&2; exit 1; }
 # Windows Python needs USERPROFILE (some MSYS2 shells start without it).
 export USERPROFILE=${USERPROFILE:-$(cygpath -w "/c/Users/$(id -un)")}
 if [[ ! -x out/pyenv/Scripts/python.exe ]]; then
