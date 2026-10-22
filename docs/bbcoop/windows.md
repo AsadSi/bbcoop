@@ -51,10 +51,10 @@ The fix is on only on Windows (`BB_RED_ZONE=0/1` overrides). Checked on the Mac 
   camera, papers, all guest hooks).
 
 ## One command
-In PowerShell, with Git for Windows (`winget install Git.Git`); the repo is private, so the clone signs in through the browser:
+In PowerShell, with Git for Windows (`winget install Git.Git`); the repo is public:
 
 ```powershell
-git clone --recursive -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop; cd C:\bbcoop
+git -c core.autocrlf=false -c core.longpaths=true clone -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop; cd C:\bbcoop
 powershell -ExecutionPolicy Bypass -File install.ps1   # asks for your Bloodborne folder; -GameDir D:\Games\CUSA00900 skips the picker
 ```
 
@@ -64,13 +64,12 @@ are the same thing by hand. Not yet run on Windows.
 
 ## Build (on the Windows PC)
 Install [MSYS2](https://www.msys2.org) (`winget install MSYS2.MSYS2`) and a python.org Python 3.13+ for
-the package. The repo is private: clone it from PowerShell with Git for Windows (`winget install Git.Git`),
-which signs in through the browser:
+the package. Clone it from PowerShell with Git for Windows (`winget install Git.Git`):
 
 ```powershell
 git config --global core.longpaths true
 git config --global core.autocrlf false   # LF endings: bash scripts and the FSR-Vulkan patches need them
-git clone --recursive -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop
+git clone --recursive -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop   # --recursive pulls a large server submodule too; install.ps1 needs only 3
 ```
 
 Then, in the **MSYS2 CLANG64** shell:
@@ -84,7 +83,7 @@ pacman -S --needed git patch \
   mingw-w64-clang-x86_64-{spirv-tools,spirv-headers,spirv-cross} \
   mingw-w64-clang-x86_64-{protobuf,openssl,zlib,miniupnpc,nlohmann-json}
 # magic_enum and miniz come through CMake FetchContent when MSYS2 has no package (gpu/CMakeLists.txt).
-cd /c/bbcoop   # cloned from PowerShell above: it signs in to GitHub in the browser
+cd /c/bbcoop   # cloned from PowerShell above
 bash build.sh                       # out/bb-probe.exe, bb-gpu-capabilities.exe, bb-play.exe
 bash packaging/windows/package.sh   # dist/bbcoop-windows.zip (after the game runs)
 ```

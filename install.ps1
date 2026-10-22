@@ -9,12 +9,12 @@ $msys = 'C:\msys64'
 $dest = Join-Path $env:LOCALAPPDATA 'bbcoop'
 
 function Add-WingetPackage($id) {
-    winget.exe install --id $id -e --silent --accept-package-agreements --accept-source-agreements
-    # winget.exe: the function must not share its name. -1978335189 = already installed, no upgrade available
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget install $id failed ($LASTEXITCODE)" }
+    winget.exe install --id $id -e --source winget --silent --accept-package-agreements --accept-source-agreements
+    # winget.exe: the function must not share its name. Exit codes -1978335189 and -1978335135: already installed.
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189 -and $LASTEXITCODE -ne -1978335135) { throw "winget install $id failed ($LASTEXITCODE)" }
 }
 function Msys($command) {
-    $env:MSYSTEM = 'CLANG64'; $env:CHERE_INVOKING = '1'
+    $env:MSYSTEM = 'CLANG64'; $env:CHERE_INVOKING = '1'; $env:MSYS2_PATH_TYPE = 'inherit'  # inherit: powershell, git, py
     & "$msys\usr\bin\bash.exe" -lc $command
     if ($LASTEXITCODE -ne 0) { throw "MSYS2 step failed: $command" }
 }
@@ -28,12 +28,17 @@ if (-not $GameDir) {
     $GameDir = $picker.SelectedPath
 }
 if (-not (Test-Path (Join-Path $GameDir 'eboot.bin'))) { throw "No eboot.bin in $GameDir" }
+# Git for Windows turns LF into CRLF by default, which breaks the bash scripts and the FSR patches.
+if ((Get-Content (Join-Path $repo 'build.sh') -Raw) -match "`r`n") {
+    throw 'This clone has CRLF line endings. Delete it and clone again with: git -c core.autocrlf=false -c core.longpaths=true clone -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop'
+}
 
 Add-WingetPackage 'MSYS2.MSYS2'
 Add-WingetPackage 'Python.Python.3.13'
-Push-Location $repo
-git submodule update --init --recursive
-Pop-Location
+if (-not (Test-Path "$msys\usr\bin\bash.exe")) { throw "MSYS2 is not in $msys. Install it there or edit `$msys at the top of install.ps1." }
+# Only the submodules the build needs (not server/externals/protobuf).
+git -C $repo submodule update --init gpu/third_party/fsr-vulkan gpu/third_party/imgui third_party/LibAtrac9
+if ($LASTEXITCODE -ne 0) { throw 'git submodule update failed' }
 
 $unix = (& "$msys\usr\bin\cygpath.exe" -u $repo)
 try { Msys 'pacman -Syu --noconfirm' } catch { }   # the first run may end after updating MSYS2 itself
@@ -45,7 +50,8 @@ Msys ('pacman -S --needed --noconfirm git patch ' +
   'mingw-w64-clang-x86_64-{spirv-tools,spirv-headers,spirv-cross} ' +
   'mingw-w64-clang-x86_64-{protobuf,openssl,zlib,miniupnpc,nlohmann-json}')
 # package.sh picks the last Python3* folder by name, so an old Python39 would win: name the 3.13 one.
-$py = (py -3.13 -c 'import sys; print(sys.executable)' 2>$null)
+$py = $null
+try { $py = (py -3.13 -c 'import sys; print(sys.executable)' 2>$null) } catch { }
 if (-not $py) { $py = (Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe", 'C:\Program Files\Python313\python.exe', 'C:\Python313\python.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
 if (-not $py) { throw 'Python 3.13 not found after the winget install. Open a new PowerShell window and run install.ps1 again.' }
 $pyUnix = (& "$msys\usr\bin\cygpath.exe" -u $py)
@@ -66,7 +72,8 @@ New-Item $configDir -ItemType Directory -Force | Out-Null
 $settings = @{}
 if (Test-Path $config) { (Get-Content $config -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $settings[$_.Name] = $_.Value } }
 $settings['game_dir'] = $GameDir
-$settings | ConvertTo-Json | Set-Content $config -Encoding UTF8
+# No BOM: the launcher reads this with Python's json, which rejects one (Set-Content -Encoding UTF8 adds it).
+[IO.File]::WriteAllText($config, ($settings | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 
 $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Bloodborne.lnk'))
 $lnk.TargetPath = Join-Path $dest 'Bloodborne.exe'
