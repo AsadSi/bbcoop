@@ -37,7 +37,10 @@ Add-WingetPackage 'MSYS2.MSYS2'
 Add-WingetPackage 'Python.Python.3.13'
 if (-not (Test-Path "$msys\usr\bin\bash.exe")) { throw "MSYS2 is not in $msys. Install it there or edit `$msys at the top of install.ps1." }
 # Only the submodules the build needs (not server/externals/protobuf).
-git -C $repo submodule update --init gpu/third_party/fsr-vulkan gpu/third_party/imgui third_party/LibAtrac9
+# Checked out with LF: with the default autocrlf they come out CRLF and the FSR-Vulkan patch does not apply.
+$modules = 'gpu/third_party/fsr-vulkan', 'gpu/third_party/imgui', 'third_party/LibAtrac9'
+git -C $repo submodule deinit -f -- $modules 2>$null   # drops an earlier CRLF checkout; the clone is cached
+git -C $repo -c core.autocrlf=false submodule update --init -- $modules
 if ($LASTEXITCODE -ne 0) { throw 'git submodule update failed' }
 
 $unix = (& "$msys\usr\bin\cygpath.exe" -u $repo)
