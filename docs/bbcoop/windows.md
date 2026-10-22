@@ -63,7 +63,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1   # asks for your Bloodborn
 are the same thing by hand. Not yet run on Windows.
 
 ## Build (on the Windows PC)
-Install [MSYS2](https://www.msys2.org) (`winget install MSYS2.MSYS2`) and a python.org Python 3.12+ for
+Install [MSYS2](https://www.msys2.org) (`winget install MSYS2.MSYS2`) and a python.org Python 3.13+ for
 the package. The repo is private: clone it from PowerShell with Git for Windows (`winget install Git.Git`),
 which signs in through the browser:
 
@@ -94,8 +94,8 @@ for the DLLs:
 
 ```powershell
 cd C:\bbcoop
-py -3.12 -m pip install soulstruct==2.6.0      # the respec mod
-py -3.12 launcher\bbport_launcher_win.py       # or: $env:BB_GAME_DIR="D:/Games/CUSA00900"; py -3.12 run.py
+py -3.13 -m pip install soulstruct==2.6.0      # the respec mod
+py -3.13 launcher\bbport_launcher_win.py       # or: $env:BB_GAME_DIR="D:/Games/CUSA00900"; py -3.13 run.py
 ```
 
 The package freezes the launcher with PyInstaller into `Bloodborne.exe`, with soulstruct for the respec

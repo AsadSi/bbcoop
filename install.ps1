@@ -30,7 +30,7 @@ if (-not $GameDir) {
 if (-not (Test-Path (Join-Path $GameDir 'eboot.bin'))) { throw "No eboot.bin in $GameDir" }
 
 Add-WingetPackage 'MSYS2.MSYS2'
-Add-WingetPackage 'Python.Python.3.12'
+Add-WingetPackage 'Python.Python.3.13'
 Push-Location $repo
 git submodule update --init --recursive
 Pop-Location
@@ -44,10 +44,10 @@ Msys ('pacman -S --needed --noconfirm git patch ' +
   'mingw-w64-clang-x86_64-{sdl3,fmt,boost,robin-map,xxhash,ffmpeg,zydis} ' +
   'mingw-w64-clang-x86_64-{spirv-tools,spirv-headers,spirv-cross} ' +
   'mingw-w64-clang-x86_64-{protobuf,openssl,zlib,miniupnpc,nlohmann-json}')
-# package.sh picks the last Python3* folder by name, so an old Python39 would win: name the 3.12 one.
-$py = (py -3.12 -c 'import sys; print(sys.executable)' 2>$null)
-if (-not $py) { $py = (Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe", 'C:\Program Files\Python312\python.exe', 'C:\Python312\python.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
-if (-not $py) { throw 'Python 3.12 not found after the winget install. Open a new PowerShell window and run install.ps1 again.' }
+# package.sh picks the last Python3* folder by name, so an old Python39 would win: name the 3.13 one.
+$py = (py -3.13 -c 'import sys; print(sys.executable)' 2>$null)
+if (-not $py) { $py = (Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe", 'C:\Program Files\Python313\python.exe', 'C:\Python313\python.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+if (-not $py) { throw 'Python 3.13 not found after the winget install. Open a new PowerShell window and run install.ps1 again.' }
 $pyUnix = (& "$msys\usr\bin\cygpath.exe" -u $py)
 Msys "cd '$unix' && bash build.sh && WINPYTHON='$pyUnix' bash packaging/windows/package.sh"
 
