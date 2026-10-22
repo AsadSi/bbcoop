@@ -39,7 +39,7 @@ if (-not (Test-Path "$msys\usr\bin\bash.exe")) { throw "MSYS2 is not in $msys. I
 # Only the submodules the build needs (not server/externals/protobuf).
 # Checked out with LF: with the default autocrlf they come out CRLF and the FSR-Vulkan patch does not apply.
 $modules = 'gpu/third_party/fsr-vulkan', 'gpu/third_party/imgui', 'third_party/LibAtrac9'
-git -C $repo submodule deinit -f -- $modules 2>$null   # drops an earlier CRLF checkout; the clone is cached
+try { git -C $repo submodule deinit -f -- $modules } catch { }   # drops an earlier CRLF checkout; the clone is cached
 git -C $repo -c core.autocrlf=false submodule update --init -- $modules
 if ($LASTEXITCODE -ne 0) { throw 'git submodule update failed' }
 
