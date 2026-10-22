@@ -8,9 +8,9 @@ $repo = $PSScriptRoot
 $msys = 'C:\msys64'
 $dest = Join-Path $env:LOCALAPPDATA 'bbcoop'
 
-function Winget($id) {
-    winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements
-    # -1978335189 = already installed, no upgrade available
+function Install-Package($id) {
+    winget.exe install --id $id -e --silent --accept-package-agreements --accept-source-agreements
+    # winget.exe: the function must not share its name. -1978335189 = already installed, no upgrade available
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget install $id failed ($LASTEXITCODE)" }
 }
 function Msys($command) {
@@ -29,8 +29,8 @@ if (-not $GameDir) {
 }
 if (-not (Test-Path (Join-Path $GameDir 'eboot.bin'))) { throw "No eboot.bin in $GameDir" }
 
-Winget 'MSYS2.MSYS2'
-Winget 'Python.Python.3.12'
+Install-Package 'MSYS2.MSYS2'
+Install-Package 'Python.Python.3.12'
 Push-Location $repo
 git submodule update --init --recursive
 Pop-Location
