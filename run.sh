@@ -303,7 +303,7 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
         if [[ -n ${BB_PREBUILT:-} ]]; then BB_NET_MODULE=$PWD/bin/gpu/libbbnet20.$suffix; else BB_NET_MODULE=$PWD/out/gpu/libbbnet20.$suffix; fi
         export BB_NET_MODULE
     fi
-    export BB_SHADNET_SERVER=${BB_SHADNET_SERVER:-play.seamlesshunt.com:31313}
+    export BB_SHADNET_SERVER=${BB_SHADNET_SERVER:-100.106.120.120:31313}  # bbcoop: the group's server
     # HTTPS needs CA certificates: OpenSSL from Nix looks only in its own store path (the
     # packaged wrapper brings a bundle; from source the system's is taken).
     if [[ ! -r ${SSL_CERT_FILE:-} ]]; then

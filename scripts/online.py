@@ -28,14 +28,15 @@ import time
 import urllib.error
 import urllib.request
 
-COMMUNITY_SERVER = 'http://play.seamlesshunt.com'
-SHADNET_SERVER = 'play.seamlesshunt.com:31313'
-WEBAPI_SERVER = 'http://play.seamlesshunt.com:31315'
-# The defaults before 2026-10-15 (the launcher replaces them in saved settings).
+# bbcoop: the group's own server (Tailscale address of the host PC, docs/bbcoop/friends.md).
+COMMUNITY_SERVER = 'http://100.106.120.120'
+SHADNET_SERVER = '100.106.120.120:31313'
+WEBAPI_SERVER = 'http://100.106.120.120:31315'
+# The defaults before (the launcher replaces them in saved settings).
 OLD_DEFAULTS = {
-    'online_server': ('srv.shadps4.net:31313',),
-    'online_community': ('https://thehuntersdream.com', ''),
-    'online_webapi': ('',),
+    'online_server': ('srv.shadps4.net:31313', 'play.seamlesshunt.com:31313'),
+    'online_community': ('https://thehuntersdream.com', '', 'http://play.seamlesshunt.com'),
+    'online_webapi': ('', 'http://play.seamlesshunt.com:31315'),
 }
 # Bloodborne's own game server, answered by the community server on the same port.
 GAME_SERVER = 'https://ss4.scej-network.jp:20443'
