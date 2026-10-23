@@ -5,20 +5,35 @@
 #include "stream_extractor.h"
 #include "stun_server.h"
 
-// Must match the client's SIGNALING_VPORT_NBO / VPORT_HEADER_SIZE
+// The client's signaling frame: shadPS4 0.19 sends FF FF FF FF + payload ("narrow"), 0.20
+// (gpu/bbnet20, net/p2p_codec.cpp FrameDatagram) FF 83 FF FF FF FF + payload ("wide"). bbcoop:
+// both are accepted and the echo goes back in the framing of the ping.
 static constexpr uint16_t SIGNALING_VPORT_NBO = 0xFFFF;
 static constexpr int VPORT_HEADER_SIZE = 4;
+static constexpr int WIDE_HEADER_SIZE = 6;
 
-static QByteArray FrameSignaling(const QByteArray& payload) {
+static bool IsWide(const QByteArray& data) {
+    return data.size() >= WIDE_HEADER_SIZE && static_cast<uint8_t>(data[0]) == 0xFF &&
+           static_cast<uint8_t>(data[1]) == 0x83 && static_cast<uint8_t>(data[2]) == 0xFF &&
+           static_cast<uint8_t>(data[3]) == 0xFF && static_cast<uint8_t>(data[4]) == 0xFF &&
+           static_cast<uint8_t>(data[5]) == 0xFF;
+}
+
+static QByteArray FrameSignaling(const QByteArray& payload, bool wide) {
     QByteArray framed;
-    framed.reserve(VPORT_HEADER_SIZE + payload.size());
-    framed.append(reinterpret_cast<const char*>(&SIGNALING_VPORT_NBO), 2);
-    framed.append(reinterpret_cast<const char*>(&SIGNALING_VPORT_NBO), 2);
+    if (wide) {
+        framed.append(QByteArray::fromHex("ff83ffffffff"));
+    } else {
+        framed.append(reinterpret_cast<const char*>(&SIGNALING_VPORT_NBO), 2);
+        framed.append(reinterpret_cast<const char*>(&SIGNALING_VPORT_NBO), 2);
+    }
     framed.append(payload);
     return framed;
 }
 
-static QByteArray StripVportHeader(const QByteArray& data) {
+static QByteArray StripVportHeader(const QByteArray& data, bool wide) {
+    if (wide)
+        return data.mid(WIDE_HEADER_SIZE);
     if (data.size() < VPORT_HEADER_SIZE)
         return {};
     uint16_t src_vp, dst_vp;
@@ -56,14 +71,15 @@ void StunServer::OnReadyRead() {
             continue;
 
         // Strip signaling vport header
-        QByteArray data = StripVportHeader(raw);
+        const bool wide = IsWide(raw);
+        QByteArray data = StripVportHeader(raw, wide);
         if (data.isEmpty())
             continue;
 
         uint8_t cmd = static_cast<uint8_t>(data[0]);
         switch (cmd) {
         case 0x01:
-            HandleStunPing(data, sender, senderPort);
+            HandleStunPing(data, sender, senderPort, wide);
             break;
         default:
             break;
@@ -72,7 +88,7 @@ void StunServer::OnReadyRead() {
 }
 
 void StunServer::HandleStunPing(const QByteArray& data, const QHostAddress& sender,
-                                uint16_t senderPort) {
+                                uint16_t senderPort, bool wide) {
     // cmd(1) + online_id(16) + local_ip(4) = 21 bytes minimum
     if (data.size() < 21)
         return;
@@ -105,5 +121,5 @@ void StunServer::HandleStunPing(const QByteArray& data, const QHostAddress& send
     QByteArray response;
     response.append(reinterpret_cast<const char*>(&ipNet), 4);
     response.append(reinterpret_cast<const char*>(&portNet), 2);
-    m_socket->writeDatagram(FrameSignaling(response), sender, senderPort);
+    m_socket->writeDatagram(FrameSignaling(response, wide), sender, senderPort);
 }

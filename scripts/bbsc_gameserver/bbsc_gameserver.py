@@ -1077,8 +1077,9 @@ def main():
                         help="address to put in ss.info if it differs from --host")
     parser.add_argument("--summon-interval", type=int, default=0,
                         help="seconds between summon polls (vanilla 35; try 5 for quick summons)")
-    parser.add_argument("--level-range", type=int, default=0,
-                        help="co-op level window (vanilla 20; try 999 to match at any level)")
+    # bbcoop: friends summon each other at any level (the broker has no level filter either)
+    parser.add_argument("--level-range", type=int, default=999,
+                        help="co-op level window (default 999 = any level; vanilla 20)")
     parser.add_argument("--no-playlog", action="store_true",
                         help="turn off the play-log uploads to Amazon S3 (recommended)")
     parser.add_argument("--verbose", action="store_true", help="log headers and request bodies")
