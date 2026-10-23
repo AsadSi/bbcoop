@@ -16,7 +16,8 @@ private slots:
     void OnReadyRead();
 
 private:
-    void HandleStunPing(const QByteArray& data, const QHostAddress& sender, uint16_t senderPort);
+    void HandleStunPing(const QByteArray& data, const QHostAddress& sender, uint16_t senderPort,
+                        bool wide);
 
     QUdpSocket* m_socket;
     SharedState* m_shared;
