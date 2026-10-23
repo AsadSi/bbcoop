@@ -57,7 +57,7 @@ talking to us.
 | --- | --- |
 | `--shadnet ADDR` | **required** — the machine running `shadnet.exe` |
 | `--summon-interval N` | seconds between summon-sign checks (retail 35 / 30) |
-| `--level-range N` | co-op level window (retail ±20) |
+| `--level-range N` | co-op level window (bbcoop default 999 = any level; retail ±20) |
 | `--host` / `--port` | where to listen (default `127.0.0.1:20443`) |
 | `--advertise ADDR` | address to write into `ss.info` when it differs from `--host` |
 | `--verbose` | log request headers and bodies |
