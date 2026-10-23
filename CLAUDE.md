@@ -59,6 +59,10 @@ Runtime mods (`src/`):
   `BB_TEST_GUEST_DEATH=<respawn point>`, `coop_respawn_re.md`), mirrored loot (`coop_loot_re.md`).
 - Servers: public ones are allowed (Asad, 2026-10-12): upstream's defaults (Seamless Hunt's; srv.shadps4.net refuses
   non-shadPS4 builds) or a group's own shadNet server (`server/`), in any mix.
+- The launcher and `run.sh` default to the group's own server (Tailscale `100.106.120.120`, Asad 2026-10-24): shadNet
+  from `server/` plus `scripts/bbsc_gameserver/` (the 3478 relay and `ss.info` live there, not in shadNet), co-op level
+  window 999. Friends' guide and hosting steps: `docs/bbcoop/friends.md`. gen 20 frames signaling with a 6-byte header;
+  `server/src/stun_server.cpp` answers both framings.
 - Old vendored shadp2p networking is at tag `bbcoop-online-0.4`. `launcher/bbcoop_online.py` (Host/Join tab) is not
   loaded; porting it onto `gpu/bbnet` is open in the brief.
 
