@@ -17,6 +17,7 @@ let
   # Only what the package needs (the tree also holds builds, profiles and captures).
   wanted = [
     "run.sh" "out" "out/bb-probe" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libbbgpu.so" "tools"
+    "tools/respec_mod.py"
   ] ++ assetDirs;
   # DLSS (a build with DLSS_SDK_ROOT): the bridge, NVIDIA's runtime library and its license, as
   # NVIDIA's RTX SDK license allows in an application. Without them the launcher lets the player
@@ -32,6 +33,45 @@ let
         || lib.any (dir: lib.hasPrefix (dir + "/") rel) assetDirs;
   };
   python = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
+  # bbcoop: the respec mod's generator (tools/respec_mod.py, run.sh's BB_RE_PYTHON) needs
+  # soulstruct 2.6 (Python 3.13+), which nixpkgs does not have: its wheel and constrata's.
+  wheel = ps: pname: version: url: hash: deps: ps.buildPythonPackage {
+    inherit pname version;
+    format = "wheel";
+    src = pkgs.fetchurl { inherit url hash; };
+    propagatedBuildInputs = deps;
+  };
+  rePython = pkgs.python313.withPackages (ps:
+    let
+      constrata = wheel ps "constrata" "1.3.3"
+        "https://files.pythonhosted.org/packages/54/55/00c8635ab91b8ff51a16a5bc781b4eb6ac961e25c5e9cdb34525e1ad3f51/constrata-1.3.3-py3-none-any.whl"
+        "sha256-7HTIIJEAYVfLIlp9yZoIFru0qr4esxobEPzGbF/WyMo=" [ ];
+    in [
+      (wheel ps "soulstruct" "2.6.0"
+        "https://files.pythonhosted.org/packages/d8/bf/0bca0fef45663cb76a1d5a06c614800f7b13da76cb02fabb2de1ea913d78/soulstruct-2.6.0-py3-none-any.whl"
+        "sha256-0AGYpuila3ZrQMwFw7c5Eb1mknwTZViAwH3z5opCnyg="
+        (with ps; [ constrata frozendict numpy rich typer zstandard ]))
+    ]);
+  # bbcoop: the shadNet server (server/) the launcher runs to host. Its protobuf is the vendored
+  # one (server/externals/protobuf, a submodule appimage.sh checks out), with nixpkgs' abseil
+  # instead of the download it forces (no network in a Nix build).
+  shadnet = pkgs.stdenv.mkDerivation {
+    pname = "shadnet";
+    version = "0.0.13";
+    src = builtins.path {
+      name = "shadnet-src";
+      path = ../server;
+      filter = path: _type: !(lib.hasPrefix "build-" (baseNameOf path)) && baseNameOf path != ".DS_Store";
+    };
+    nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.qt6.wrapQtAppsNoGuiHook ];
+    buildInputs = [ pkgs.qt6.qtbase pkgs.qt6.qthttpserver pkgs.qt6.qtwebsockets pkgs.abseil-cpp ];
+    postPatch = ''
+      substituteInPlace externals/CMakeLists.txt \
+        --replace-fail "protobuf_FORCE_FETCH_DEPENDENCIES ON" "protobuf_FORCE_FETCH_DEPENDENCIES OFF"
+    '';
+    cmakeFlags = [ "-DCMAKE_BUILD_TYPE=Release" "-Dprotobuf_LOCAL_DEPENDENCIES_ONLY=ON" ];
+    installPhase = "install -Dm755 shadnet $out/bin/shadnet";
+  };
   # FSR 4.1.1 from the user's own AMD DLL (the launcher's button, tools/fsr4cap/build_assets.sh):
   # its two tools built here, so that the package needs no compiler and no network for it. Proton
   # (GE-Proton 10+) and Steam's runtime come from the user's Steam. On NixOS the recording runs
@@ -179,6 +219,11 @@ pkgs.stdenv.mkDerivation {
     PY
       cp -r fsr4_411 $d/
     fi
+    # bbcoop: Host (the shadNet server and the data it starts with) and the respec mod's generator.
+    ln -s ${shadnet}/bin/shadnet $d/bin/shadnet
+    install -Dm644 ${../server/worlds.cfg} $d/server/worlds.cfg
+    install -Dm644 ${../server/scoreboards.cfg} $d/server/scoreboards.cfg
+    install -m644 tools/respec_mod.py $d/tools/respec_mod.py
     install -m755 out/bb-probe $d/bin/bb-probe
     install -m755 out/bb-gpu-capabilities $d/bin/bb-gpu-capabilities
     install -Dm755 out/gpu/libbbgpu.so $d/bin/gpu/libbbgpu.so
@@ -213,6 +258,7 @@ pkgs.stdenv.mkDerivation {
       ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${python}/bin/python3 $out/share/bbport/launcher/bbport_launcher.py" \
       --set BB_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
+      --set BB_RE_PYTHON ${rePython}/bin/python3 \
       --set BB_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux pkgs.procps
                                           pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.spirv-tools
@@ -223,6 +269,7 @@ pkgs.stdenv.mkDerivation {
       ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${pkgs.bash}/bin/bash $out/share/bbport/run.sh" \
       --set BB_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
+      --set BB_RE_PYTHON ${rePython}/bin/python3 \
       --set BB_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.procps ]} \
       --run 'export BB_DATA_DIR=''${BB_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$BB_DATA_DIR"'

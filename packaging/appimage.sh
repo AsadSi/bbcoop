@@ -7,6 +7,8 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 [[ -f out/bb-probe && -f out/gpu/libbbgpu.so ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
+# bbcoop: the shadNet server (packaging/default.nix builds it for Host) needs its protobuf.
+git submodule update --init --depth 1 server/externals/protobuf
 root=$PWD
 # The libraries' store paths: for each library a binary needs (NEEDED), the RUNPATH directory it
 # is found in (their closures come along). Not every RUNPATH entry: built in nix-shell, the
