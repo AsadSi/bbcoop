@@ -762,6 +762,12 @@ class Handler(BaseHTTPRequestHandler):
 
         bbhost = ARGS.bbhost and bbhost_service.is_bbhost(self.headers)
 
+        # bbcoop: the launcher's hello (launcher/bbcoop_online.py): who hosts, on which build.
+        if path == "/bbcoop/hello":
+            self._send(json.dumps({"name": ARGS.bbcoop_name, "build": ARGS.bbcoop_build}).encode(),
+                       "application/json")
+            return
+
         if path.rstrip("/").endswith("/ss.info"):
             if bbhost:
                 info = SS_INFO_BBHOST_LOCAL_B64 if is_local else SS_INFO_BBHOST_B64
@@ -1083,6 +1089,9 @@ def main():
     parser.add_argument("--no-playlog", action="store_true",
                         help="turn off the play-log uploads to Amazon S3 (recommended)")
     parser.add_argument("--verbose", action="store_true", help="log headers and request bodies")
+    # bbcoop: answered at /bbcoop/hello for the launchers' Join list and build check
+    parser.add_argument("--bbcoop-name", default="", help="the host's hunter name")
+    parser.add_argument("--bbcoop-build", default="", help="the host's build (git commit)")
     parser.add_argument("--no-bbhost", dest="bbhost", action="store_false",
                         help="turn off the bbhost players' services (bbhost_service.py)")
     parser.add_argument("--bbhost-port", type=int, default=18671,
