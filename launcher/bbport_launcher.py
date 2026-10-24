@@ -647,6 +647,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.host = bbcoop_online.Host(PORT_DIR, DATA_DIR, [sys.executable])
         self.host_lock, self.host_note, self.hosts_found = threading.Lock(), "", []
         self.build_id = bbcoop_online.build_id(PORT_DIR)
+        self.ini_edits = {}  # bbcoop: control bindings set here, kept by store()
         self.build()
         self.connect("close-request", self.on_close)
         GLib.idle_add(self.first_start)
@@ -676,6 +677,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.stack.add_titled_with_icon(self.build_log_page(), "log", tr("Журнал"),
                                         "utilities-terminal-symbolic")
         self.log_view.get_buffer().set_text(log_text)
+        self.ini_shown = self.ini_values()  # bbcoop: what store() compares against
         self.update_launch_button()
         self.update_game_status()
         self.update_user_status()
@@ -1138,7 +1140,7 @@ class LauncherWindow(Adw.ApplicationWindow):
 
     def set_control(self, kind, name, value):
         """value: the binding, or None for the default."""
-        self.ini[f"{kind}.{name}"] = value
+        self.ini[f"{kind}.{name}"] = self.ini_edits[f"{kind}.{name}"] = value  # bbcoop: store() keeps it
         self.show_control(kind, name)
         self.store()
 
@@ -1287,7 +1289,20 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.save_mod_profile()
         self.save_patch_profile()
         save_settings(s)
-        self.ini.update({
+        # bbcoop: the in-game menu writes bbport.ini too (L3+R3): only what was changed here since the
+        # window showed the file replaces its current value; the rest stays as the game left it.
+        values = self.ini_values()
+        self.ini, self.ini_lines = load_ini()
+        self.ini.update({key: value for key, value in values.items() if value != self.ini_shown.get(key)})
+        self.ini.update(self.ini_edits)
+        self.ini_edits = {}
+        self.ini_shown = values
+        save_ini(self.ini, self.ini_lines)
+        self.ini, self.ini_lines = load_ini()
+
+    def ini_values(self):
+        """The bbport.ini keys the settings page shows, as its widgets hold them."""
+        return {
             "upscaler": combo_value(self.upscaler_row),
             "preset": str(combo_value(self.preset_row)),
             "sharpen": "1" if self.sharpen_row.get_active() else "0",
@@ -1302,9 +1317,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             "mouse_sensitivity": f"{self.mouse_sensitivity_row.get_value():.2f}",
             "mouse_invert_y": "1" if self.mouse_invert_row.get_active() else "0",
             **{key: "1" if row.get_active() else "0" for key, row in self.effect_rows.items()},
-        })
-        save_ini(self.ini, self.ini_lines)
-        self.ini, self.ini_lines = load_ini()
+        }
 
     def environment(self):
         return game_environment(self.settings)
@@ -2025,9 +2038,13 @@ class LauncherWindow(Adw.ApplicationWindow):
             pass
         status = process.get_exit_status() if process.get_if_exited() else -1
         self.process = None
-        self.update_launch_button()
-        self.update_game_status()
         self.append_log(tr("\n— игра завершилась (код {}) —\n").format(status))
+        # bbcoop: show what the in-game menu changed in bbport.ini (the page is rebuilt from the file,
+        # after this launcher's own changes are saved).
+        self.store()
+        self.build()
+        self.stack.set_visible_child_name("log")
+        self.on_coop_mode()
 
     def on_close(self, _window):
         self.store()
