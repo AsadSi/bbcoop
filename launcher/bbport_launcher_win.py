@@ -441,6 +441,7 @@ class Launcher:
         self.set_icon()
         self.style()
         self.build()
+        self.ini_shown = self.ini_values()  # bbcoop: what collect() compares against
         self.show('play')
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.drain_output)
@@ -1512,17 +1513,19 @@ class Launcher:
     def collect(self):
         """Writes settings.json, bbport.ini, mods.json and patches.json."""
         for key, var in self.vars.items():
-            try:
-                value = var.get()
-            except self.tk.TclError:  # an unfinished number in a spinbox
-                value = APP_DEFAULTS.get(key, INI_DEFAULTS.get(key))
-            if var.store == 'ini':
-                self.ini[key] = ('1' if value else '0') if key in INI_FLAGS else \
-                    f'{float(value):.2f}' if key == 'sharpness' else str(value)
-            else:
-                self.app[key] = value
+            if var.store != 'ini':
+                try:
+                    self.app[key] = var.get()
+                except self.tk.TclError:  # an unfinished number in a spinbox
+                    self.app[key] = APP_DEFAULTS.get(key)
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(self.app, indent=2, ensure_ascii=False), encoding='utf-8')
+        # bbcoop: the in-game menu writes bbport.ini too (L3+R3): only what was changed here since the
+        # window showed the file replaces its current value; the rest stays as the game left it.
+        values = self.ini_values()
+        self.ini, self.ini_lines = load_ini()
+        self.ini.update({key: value for key, value in values.items() if value != self.ini_shown.get(key)})
+        self.ini_shown = values
         save_ini({key: self.ini[key] for key in INI_DEFAULTS}, self.ini_lines)
         self.ini, self.ini_lines = load_ini()
         if self.mod_order:
@@ -1536,6 +1539,29 @@ class Launcher:
             disabled = {k for k in chosen.get('disabled', []) if k not in shown} | {k for k, v in self.patch_vars.items() if not v.get()}
             (DATA_DIR / 'patches.json').write_text(json.dumps(
                 {'enabled': sorted(enabled), 'disabled': sorted(disabled)}, indent=2), encoding='utf-8')
+
+    def ini_values(self):
+        """bbcoop: the bbport.ini keys the window shows, as its variables hold them."""
+        values = {}
+        for key, var in self.vars.items():
+            if var.store == 'ini':
+                try:
+                    value = var.get()
+                except self.tk.TclError:  # an unfinished number in a spinbox
+                    value = INI_DEFAULTS.get(key)
+                values[key] = ('1' if value else '0') if key in INI_FLAGS else \
+                    f'{float(value):.2f}' if key == 'sharpness' else str(value)
+        return values
+
+    def reload_ini(self):
+        """bbcoop: after a game: this window's changes saved, then the file (with the in-game menu's)
+        shown."""
+        self.collect()
+        for key, var in self.vars.items():
+            if var.store == 'ini':
+                value = self.ini.get(key, INI_DEFAULTS.get(key))
+                var.set(value == '1' if key in INI_FLAGS else float(value or 0.5) if key == 'sharpness' else value)
+        self.ini_shown = self.ini_values()
 
     # ---- game process ------------------------------------------------------------------------
     def play(self):
@@ -1628,6 +1654,7 @@ class Launcher:
                 if isinstance(item, tuple):
                     self.append(_('\n— the game exited (code {}) —\n', '\n— игра завершилась (код {}) —\n').format(item[0]))
                     self.process = None
+                    self.reload_ini()  # bbcoop: keep the in-game menu's changes
                     if self.job:
                         self.job.close()
                     self.stop_button.configure(state='disabled')
