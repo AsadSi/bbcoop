@@ -181,11 +181,11 @@ def online_setup(env, user_dir, probe_done):
     if not env.get('BB_SHADNET_WEBAPI'):
         env['BB_SHADNET_WEBAPI'] = 'http://' + env['BB_SHADNET_SERVER'].rsplit(':', 1)[0] + ':31315'
     if env.get('BB_BBSC') == '1':
-        # bbcoop: BBSC's co-op scaling with Asad's numbers (docs/bbcoop/brief.md: +50% HP and +10%
-        # damage per extra player; bosses scale through HP too); BBSC's own stagger numbers.
-        env.setdefault('BBSC_SCALE_ENEMY_HP', '50')
-        env.setdefault('BBSC_SCALE_BOSS_HP', '50')
-        env.setdefault('BBSC_SCALE_DAMAGE', '10')
+        # bbcoop: vanilla co-op difficulty (docs/bbcoop/brief.md, Asad 2026-10-24): BBSC's scaling off,
+        # which also lifts its patch-out of the game's own boss-only buff (Lua_MultiDoping).
+        env.setdefault('SHADPS4_BBSC_SCALING', '0')
+        # Loot once per hunter (coop_loot_re.md, Doubles): BBSC's own guest copies off, mirroring gives them.
+        env.setdefault('SHADPS4_BBSC_GUEST_ITEMS', '0')
         bbsc_game_server(env, user_dir, probe_done)
     if env.get('BB_NET_BACKEND') == 'thd':
         # The Hunter's Dream (bbhost's protocol): the account comes from the launcher's Discord sign-in.

@@ -149,7 +149,19 @@ void PS4_SYSV_ABI BbcoopLootItemGetHook(u64 /*tag*/, const GuestRegisterSnapshot
     if (site == TakeItemReturn1 || site == TakeItemReturn2) {
         // The map item (+0x20: its number << 4 | kind; kind 2 is what an enemy drops, 0x017DD0B0).
         const u32 item = ReadValue<u32>(registers->r13, 0x20);
-        packet.source = static_cast<u8>((item & 0xF) == 2 ? LootSource::EnemyDrop : LootSource::Pickup);
+        if ((item & 0xF) == 1) {
+            // ItemGet's own ground drop (0x017DA960 writes kind 1): what didn't fit when it was given,
+            // a mirrored copy already; sending it on gives the partner one more on every pickup.
+            LOG_INFO(Debug, "bbcoop loot: an item that didn't fit picked up again - not mirrored");
+            return;
+        }
+        if ((item & 0xF) == 2) {
+            // Every hunter's game drops its own copy when an enemy dies, so a mirrored one doubled it
+            // (both players' logs, 2026-10-24).
+            LOG_INFO(Debug, "bbcoop loot: enemy drop - every hunter has its own, not mirrored");
+            return;
+        }
+        packet.source = static_cast<u8>(LootSource::Pickup);
     } else if (site == HandedItemReturn) {
         packet.source = static_cast<u8>(LootSource::HandedPickup);
     } else if (site == AwardLotReturn) {

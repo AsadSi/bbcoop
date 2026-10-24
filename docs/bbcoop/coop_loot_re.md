@@ -37,7 +37,10 @@ its return address, `[RBP]` the caller's frame) and R13 still holds the caller's
 - **Map items** (pickups): `[R13+0x20]` is the item's number `<< 4 | kind`. The kind is the spawn
   descriptor's first field: the enemy drop `0x017DD0B0` writes 2 (`0x017DDA60`), the MSB treasure
   placement `0x017DC300` writes 3 (`0x017DCA56`; BBSC's log shows treasure 0x53). Kind 2 is sent as
-  "enemy drop", anything else as "pickup"; the two are mirrored the same way.
+  "pickup"; kind 2 is not mirrored (below). Kind 1 is ItemGet's
+  own ground drop (`0x017DA960`, called at `0x017D95DC`): what the carry limit and storage didn't take.
+  It is not mirrored (2026-10-24): a given copy that landed at the receiver's feet went back to the
+  sender as a new pickup every time it was picked up.
 - **Enemy drops are map items.** The death of an enemy runs `0x018C4F90(chr)`, which calls
   `0x017DD0B0(item man, chr id, NpcParam info)`. That rolls the enemy's item lot (`0x01A8B080`) and
   spawns the result as a kind 2 map item at the enemy (`0x017D5320`), which a player takes with the
@@ -95,9 +98,9 @@ The signaling receive thread (`np_signaling_helpers.cpp`) hands type 0x28 to `On
   `SHADPS4_BBSC_GUEST_ITEMS` is on, because BBSC gives the guest that boss's reward itself (first or
   repeat lot, by the guest's own flag). BBSC's own gives are never sent. So with BBSC's guest items on,
   boss drops are not mirrored at all; with them off, the host's boss drop is.
-- **Enemy drops**: BBSC's own roll of each enemy for a guest (`NoteBbscGuestEnemyDeath`) is skipped
-  while mirroring is on, because the drop a hunter picks up now reaches every other hunter. With
-  `SHADPS4_BBSC_MIRROR_LOOT=0` it is back.
+- **Enemy drops are not mirrored (2026-10-24):** every hunter's game drops its own copy when an enemy
+  dies, so mirroring one doubled it (seen in both players' logs). BBSC's own roll for a guest
+  (`NoteBbscGuestEnemyDeath`) stays skipped while mirroring is on; it would be a third copy.
 - **World state**: ItemGet sets no flag, so a mirrored item never marks the receiver's own pickup as
   taken. A player can therefore still take the same treasure in their own world (or, in a session,
   the copy BBSC gives every guest), and then everyone gets it again.
@@ -132,16 +135,16 @@ read. The send side logs every packet with the number of peers it went to (0 whe
 
 - **A treasure in the host's world, in a BBSC session**: BBSC gives each guest its own copy of every
   treasure (GuestItems.SpawnOwn / CreateOwn; the host's copy stays). Each copy taken is mirrored, so a
-  treasure both hunters take reaches each of them twice.
+  treasure both hunters take reaches each of them twice. So `run.sh`/`run.py` default
+  `SHADPS4_BBSC_GUEST_ITEMS=0` (2026-10-24): the guest sees no treasures in the host's world and gets
+  each one the host takes.
 - **The receiver's own world**: a mirrored pickup leaves the receiver's pickup flags alone (shared
   progress does not merge kind 5 either), so the receiver can take the same treasure again at home.
-- **Enemy drops**: one per kill reaches everyone through whoever picks the drop up; BBSC's extra
-  per-guest roll is off while mirroring runs. If a guest also sees and takes the host's drop as its
-  own copy (not verified), that copy is mirrored too.
+- **Enemy drops**: each hunter takes the one its own game drops; none is mirrored.
 - **Boss drops**: none in a BBSC session (the guest keeps BBSC's own reward and drops the mirrored
   one); with `SHADPS4_BBSC_GUEST_ITEMS=0` the guest gets the host's.
-- **Overflow**: what ItemGet cannot fit is dropped on the ground (`0x017DA960`); picking that up later
-  is a new pickup and is mirrored again.
+- **Overflow**: what ItemGet cannot fit is dropped on the ground (`0x017DA960`, kind 1); picking it
+  up is not mirrored again.
 
 ## Not verified (needs a real session)
 
