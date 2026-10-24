@@ -110,6 +110,10 @@ Supporting pieces:
   flicker and load-crash fixes. bbcoop's BBSC changes below (loot, packets 0x23..0x27, host-lamp death, ss.info format,
   CUSA03173 serial, APP_VER 01.09, image reads) are ported into bbnet20 too; macOS stays on bbnet (bbnet20 has no Mac port).
   Built and the C/Python tests pass; not yet run in the game.
+- **NPC helpers (Old Hunter Bell) in a session (2026-10-24):** only the host can summon one, as in vanilla
+  (the game's summon builder refuses a guest), and only while fewer than 2 guests are in the world (the
+  map events' own rule). The guest no longer gets the host's "summon spot available" flags, which showed
+  it a spot that did nothing. A guest's follow reload keeps the phantom type (`coop_respawn_re.md`).
 - **Mirrored loot on BBSC (2026-10-17, merged):** every pickup, enemy drop and boss drop goes to every hunter
   (`gpu/bbnet/shadps4/core/bbcoop_loot.inc`, relay "SHAD" 0x28, `SHADPS4_BBSC_MIRROR_LOOT=0` off,
   `docs/bbcoop/coop_loot_re.md`). Verified alone with its test seam (receive side); a real pickup's send side and a
