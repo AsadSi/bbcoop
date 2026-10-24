@@ -46,6 +46,7 @@ sys.path.insert(0, str(PORT_DIR / 'scripts'))
 from mods import discover as discover_mods  # noqa: E402
 import game_check  # noqa: E402
 import online  # noqa: E402  (the online module: addresses and the connection test)
+import bbcoop_online  # noqa: E402  (bbcoop: Host and Join)
 from patches import external_patches  # noqa: E402
 # Packaged (AppImage): generated files, saves and bbport.ini live in BB_DATA_DIR.
 PACKAGED = bool(os.environ.get("BB_PREBUILT"))
@@ -237,6 +238,10 @@ DEFAULTS = {
     "thd_server": "",
     "thd_online_id": "",
     "thd_token": "",
+    # bbcoop: Host/Join (launcher/bbcoop_online.py): "host", "join" or "manual" (the server fields
+    # above); the host joined.
+    "coop_mode": "manual",
+    "coop_join": "",
 }
 
 # bbport.ini keys the launcher edits; the rest of the file is kept.
@@ -638,8 +643,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.process = None
         self.stream = None
         self.fsr411_build = None  # tools/fsr4cap/build_assets.sh while it runs
+        # bbcoop: Host/Join: the server while hosting, this build, the hosts found.
+        self.host = bbcoop_online.Host(PORT_DIR, DATA_DIR, [sys.executable])
+        self.host_lock, self.host_note, self.hosts_found = threading.Lock(), "", []
+        self.build_id = bbcoop_online.build_id(PORT_DIR)
         self.build()
         self.connect("close-request", self.on_close)
+        GLib.idle_add(self.first_start)
 
     def build(self):
         """(Re)creates the window's content in the current launcher language."""
@@ -1272,6 +1282,8 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["online_pool"] = self.online_pool()
         s["thd_server"] = self.thd_server_row.get_text().strip()
         s["thd_online_id"], s["thd_token"] = self.thd_id, self.thd_token
+        s["coop_mode"] = combo_value(self.mode_row)  # bbcoop
+        s["coop_join"] = self.join_row.get_text().strip()
         self.save_mod_profile()
         self.save_patch_profile()
         save_settings(s)
@@ -1413,10 +1425,9 @@ class LauncherWindow(Adw.ApplicationWindow):
     def build_online_page(self):
         s = self.settings
         page = Adw.PreferencesPage()
-        play = Adw.PreferencesGroup(description=tr(
-            "Сообщения, пятна крови и призраки приходят с игрового сервера; колокола и призывы "
-            "идут через сервер shadNet. По умолчанию оба — Seamless Hunt (сервер BBSC). Игра по сети "
-            "совместима с версией для Windows: нужны версия игры 1.09 и тот же сервер"))
+        play = Adw.PreferencesGroup(description=(  # bbcoop
+            "Host or join your friends over Tailscale, or play on another server. bbcoop on Linux, "
+            "macOS and Windows play together: everyone needs game version 1.09 and the same build"))
         self.online_row = Adw.SwitchRow(title=tr("Играть онлайн"),
                                         subtitle=tr("Выключено: игра остаётся офлайн, как раньше"),
                                         active=s["online"])
@@ -1432,6 +1443,28 @@ class LauncherWindow(Adw.ApplicationWindow):
         ], "huntersdream" if s.get("online_pool") == "huntersdream" else "seamless")
         play.add(self.pool_row)
         page.add(play)
+
+        # bbcoop: Host and Join (launcher/bbcoop_online.py; docs/bbcoop/brief.md, "Easy online").
+        together = Adw.PreferencesGroup(title="Play together", description=(
+            "Host: this computer runs the server while the launcher is open. Join: a friend who "
+            "hosts. Both of you need Tailscale on. Other server: the addresses below."))
+        self.hunter_row = Adw.EntryRow(title="Hunter name (3 to 16 letters, digits, - or _)",
+                                       text=s["online_npid"])
+        together.add(self.hunter_row)
+        self.mode_row = combo_row("Co-op", "", [("Host a game", "host"), ("Join a game", "join"),
+                                                ("Other server", "manual")], s.get("coop_mode", "manual"))
+        together.add(self.mode_row)
+        self.host_row = Adw.ActionRow(title="Your server")
+        together.add(self.host_row)
+        page.add(together)
+        self.hosts_group = Adw.PreferencesGroup(title="Hosts", description="Friends hosting on your Tailscale network")
+        refresh = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER)
+        refresh.connect("clicked", lambda _b: self.find_hosts())
+        self.hosts_group.set_header_suffix(refresh)
+        self.join_row = Adw.EntryRow(title="Host address (100.x.y.z)", text=s.get("coop_join", ""))
+        self.hosts_group.add(self.join_row)
+        self.host_rows = []
+        page.add(self.hosts_group)
 
         game = Adw.PreferencesGroup(title=tr("Игровой сервер (сообщения, пятна крови, призраки)"))
         self.game_group = game
@@ -1507,6 +1540,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.connection_group = connection
         page.add(connection)
         self.pool_row.connect("notify::selected", self.on_pool_changed)
+        self.mode_row.connect("notify::selected", self.on_coop_mode)
+        self.online_row.connect("notify::active", self.on_coop_mode)
+        # One name in two rows: Play together's and the account's.
+        self.hunter_row.connect("changed", lambda row: self.npid_row.get_text() != row.get_text()
+                                and self.npid_row.set_text(row.get_text()))
+        self.npid_row.connect("changed", lambda row: self.hunter_row.get_text() != row.get_text()
+                              and self.hunter_row.set_text(row.get_text()))
         self.on_pool_changed()
         return page
 
@@ -1516,11 +1556,16 @@ class LauncherWindow(Adw.ApplicationWindow):
     def on_pool_changed(self, *_):
         pool = self.online_pool()
         legacy, thd = pool == "seamless", pool == "huntersdream"
-        self.game_group.set_visible(not thd)
-        self.coop_group.set_visible(not thd)
-        self.account_group.set_visible(not thd)
+        coop = combo_value(self.mode_row) in ("host", "join")  # bbcoop: Host and Join need none of these
+        self.pool_row.set_visible(not coop)
+        self.game_group.set_visible(not thd and not coop)
+        self.coop_group.set_visible(not thd and not coop)
+        self.account_group.set_visible(not thd and not coop)
         self.bbsc_row.set_visible(legacy)
-        self.thd_group.set_visible(thd)
+        self.thd_group.set_visible(thd and not coop)
+        self.connection_group.set_visible(not coop)
+        self.host_row.set_visible(combo_value(self.mode_row) == "host")
+        self.hosts_group.set_visible(combo_value(self.mode_row) == "join")
         if not online_module(pool):
             self.pool_row.set_subtitle(tr("В этой сборке нет модуля для этого пула (libbbnet20.so)"))
 
@@ -1656,6 +1701,166 @@ class LauncherWindow(Adw.ApplicationWindow):
 
         threading.Thread(target=lambda: GLib.idle_add(show, online.check_thd(server)), daemon=True).start()
 
+    # --- bbcoop: Host and Join ------------------------------------------------------------
+
+    def first_start(self):
+        """A new install asks for a hunter name only; the password is made here (docs/bbcoop/brief.md,
+        "Easy online")."""
+        if not self.hunter_row.get_text().strip() and hasattr(Adw, "AlertDialog"):
+            entry = Gtk.Entry(placeholder_text="3 to 16 letters, digits, - or _")
+            dialog = Adw.AlertDialog(heading="Your hunter name",
+                                     body="The name your friends see when you host or join.")
+            dialog.set_extra_child(entry)
+            dialog.add_response("later", "Later")
+            dialog.add_response("ok", "Save")
+            dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+
+            def on_response(_dialog, response):
+                name = entry.get_text().strip()
+                if response != "ok":
+                    return
+                if not bbcoop_online.valid_name(name):
+                    self.alert("Bloodborne", "Hunter name: 3 to 16 letters, digits, - or _.")
+                    GLib.idle_add(self.first_start)
+                    return
+                self.hunter_row.set_text(name)
+                self.mode_row.set_selected(self.mode_row.values.index("join"))
+                self.online_row.set_active(True)
+                self.store_password()
+            dialog.connect("response", on_response)
+            dialog.present(self)
+        self.store_password()
+        self.on_coop_mode()
+        return False
+
+    def store_password(self):
+        if self.hunter_row.get_text().strip() and not self.password_row.get_text():
+            self.password_row.set_text(bbcoop_online.new_password())
+            self.store()
+
+    def on_coop_mode(self, *_):
+        """Hosting runs while Host is picked (and Play online is on); Join looks for hosts."""
+        mode, playing_online = combo_value(self.mode_row), self.online_row.get_active()
+        if mode in ("host", "join") and not playing_online and _ and _[0] is self.mode_row:
+            self.online_row.set_active(True)  # picking Host or Join means playing online
+            return  # its notify comes back here
+        self.on_pool_changed()
+        if mode == "host" and playing_online:
+            self.start_hosting()
+        elif not self.process:  # a hosted game keeps its server until it ends
+            self.stop_hosting()
+        if mode == "join" and playing_online:
+            self.find_hosts()
+
+    def ensure_host(self, name):
+        """The server on this computer's address (helper threads); returns the address."""
+        with self.host_lock:
+            if not self.host.running():
+                address, self.host_note = bbcoop_online.my_address()
+                self.host.start(address, name, self.build_id)
+            return self.host.address
+
+    def start_hosting(self):
+        name = self.hunter_row.get_text().strip() or "Hunter"
+        self.host_row.set_subtitle("Starting the server…")
+
+        def work():
+            try:
+                address = self.ensure_host(name)
+                text = (f'Your address: {address}. Friends pick "{name} — hosting" in Join, or type '
+                        "this address." + (f"\n{self.host_note}" if self.host_note else ""))
+            except RuntimeError as error:
+                text = f"The server did not start: {error}"
+            GLib.idle_add(self.host_row.set_subtitle, GLib.markup_escape_text(text))
+        threading.Thread(target=work, daemon=True).start()
+
+    def stop_hosting(self):
+        self.host_row.set_subtitle("")
+
+        def work():
+            with self.host_lock:
+                self.host.stop()
+        threading.Thread(target=work, daemon=True).start()
+
+    def find_hosts(self):
+        self.show_hosts([], "Looking for hosts on Tailscale…")
+
+        def work():
+            hosts = bbcoop_online.find_hosts()
+            GLib.idle_add(self.show_hosts, hosts)
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_hosts(self, hosts, note=None):
+        for row in self.host_rows:
+            self.hosts_group.remove(row)
+        self.host_rows, self.hosts_found = [], hosts or []
+        if note is None:
+            note = ("Tailscale is not connected: open Tailscale and connect." if hosts is None else
+                    "Nobody is hosting right now. Refresh, or type an address." if not hosts else None)
+        if note:
+            self.host_rows.append(Adw.ActionRow(title=note))
+        group = None
+        for address, name, build in self.hosts_found:
+            other = bbcoop_online.build_problem(self.build_id, build, name)
+            row = Adw.ActionRow(title=GLib.markup_escape_text(f"{name} — hosting"),
+                                subtitle=GLib.markup_escape_text(address + ("  (another build)" if other else "")))
+            check = Gtk.CheckButton(group=group, active=address == self.join_row.get_text().strip())
+            group = group or check
+            check.connect("toggled", lambda button, a=address: button.get_active() and self.join_row.set_text(a))
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            self.host_rows.append(row)
+        for row in self.host_rows:
+            self.hosts_group.add(row)
+        return False
+
+    def prepare_coop(self, mode):
+        """Before a Host or Join game (helper thread): the server, the build check, the account."""
+        name, address = self.hunter_row.get_text().strip(), self.join_row.get_text().strip()
+        if not bbcoop_online.valid_name(name):
+            self.alert("Bloodborne", "Hunter name: 3 to 16 letters, digits, - or _.")
+            self.stack.set_visible_child_name("online")
+            return
+        if mode == "join" and not address:
+            self.alert("Bloodborne", "Pick a host to join (Online).")
+            self.stack.set_visible_child_name("online")
+            return
+        if not self.password_row.get_text():
+            self.password_row.set_text(bbcoop_online.new_password())
+        secret = self.password_row.get_text()
+        self.launch_button.set_sensitive(False)
+
+        def done(where, error):
+            self.launch_button.set_sensitive(True)
+            if error:
+                self.alert("Bloodborne", error)
+                self.stack.set_visible_child_name("online")
+                return False
+            # The host's three server fields (bbcoop_online.server_fields), BBSC on, no UPnP.
+            fields = bbcoop_online.server_fields(where)
+            self.server_row.set_text(fields["online_server"])
+            self.webapi_row.set_text(fields["online_webapi"])
+            self.community_row.set_text(fields["online_community"])
+            self.pool_row.set_selected(self.pool_row.values.index("seamless"))
+            self.bbsc_row.set_active(True)
+            self.upnp_row.set_active(False)
+            self.start_game(prepared=True)
+            return False
+
+        def work():
+            try:
+                if mode == "host":
+                    where = self.ensure_host(name)
+                    bbcoop_online.make_account(where, name, secret)
+                else:
+                    where = address
+                    bbcoop_online.prepare_join(where, name, secret, self.build_id)
+            except (RuntimeError, ValueError) as error:
+                GLib.idle_add(done, "", str(error))
+                return
+            GLib.idle_add(done, where, "")
+        threading.Thread(target=work, daemon=True).start()
+
     def build_log_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.log_view = Gtk.TextView(editable=False, monospace=True, cursor_visible=False,
@@ -1729,7 +1934,9 @@ class LauncherWindow(Adw.ApplicationWindow):
             self.stop_game()
             return
         npid = self.npid_row.get_text().strip()
-        if online_module() and not self.online_row.get_active() and npid and hasattr(Adw, "AlertDialog"):
+        coop = combo_value(self.mode_row) in ("host", "join")  # bbcoop: these always have a name
+        if online_module() and not self.online_row.get_active() and npid and not coop \
+                and hasattr(Adw, "AlertDialog"):
             dialog = Adw.AlertDialog(heading="Bloodborne", body=tr(
                 "Учётная запись для игры онлайн указана, но «Играть онлайн» выключено"))
             dialog.add_response("cancel", tr("Отмена"))
@@ -1746,8 +1953,12 @@ class LauncherWindow(Adw.ApplicationWindow):
             return
         self.start_game()
 
-    def start_game(self):
-        if self.online_row.get_active() and "@" in self.npid_row.get_text():
+    def start_game(self, prepared=False):
+        mode = combo_value(self.mode_row)
+        if not prepared and self.online_row.get_active() and mode in ("host", "join"):
+            self.prepare_coop(mode)  # bbcoop: then start_game(prepared=True)
+            return
+        if self.online_row.get_active() and "@" in self.npid_row.get_text() and mode == "manual":
             self.alert("Bloodborne", tr("Online ID — это имя учётной записи (NPID), "
                                         "зарегистрированное на сервере, а не адрес email"))
             self.stack.set_visible_child_name("online")
@@ -1822,6 +2033,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.store()
         if self.process:
             self.stop_game()
+        self.host.stop()  # bbcoop: hosting ends with the launcher
         if self.fsr411_build:
             self.stop_fsr411_build()
         return False
