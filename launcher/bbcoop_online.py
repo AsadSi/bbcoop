@@ -11,6 +11,7 @@ Asad's decisions, 2026-10-24: docs/bbcoop/brief.md, "Easy online".
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import secrets
 import shutil
 import socket
@@ -110,9 +111,12 @@ def hello(address, timeout=3):
 
 
 def find_hosts(timeout=1.5):
-    """Online tailnet peers hosting (TCP 31313 answers): [(address, name, build)], by name. A host
-    without a hello (a server started by hand) is listed by its machine name."""
-    status = tailscale_status() or {}
+    """Online tailnet peers hosting (TCP 31313 answers): [(address, name, build)], by name, or None
+    when Tailscale is not connected. A host without a hello (a server started by hand) is listed by
+    its machine name."""
+    status = tailscale_status()
+    if not status or status.get("BackendState") != "Running":
+        return None
     peers = [(ipv4(peer.get("TailscaleIPs")), peer.get("HostName") or "")
              for peer in (status.get("Peer") or {}).values() if peer.get("Online")]
 
@@ -304,6 +308,7 @@ class Host:
                 if source.is_file():
                     shutil.copy(source, server / data)
                     break
+        (server / "db").mkdir(exist_ok=True)
         logs = self.directory / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         flags = {"start_new_session": True} if sys.platform != "win32" else \
@@ -311,6 +316,7 @@ class Host:
         try:
             with open(logs / "shadnet.log", "ab") as log:
                 shadnet = subprocess.Popen([str(binary)], cwd=server, stdout=log,
+                                           env={**os.environ, "SHADNET_HOME": str(server)},
                                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
             self.processes.append(shadnet)
             _wait(lambda: _answers(address, GAME_PORT), shadnet, "The shadNet server", 15)

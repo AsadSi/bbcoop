@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Bloodborne launcher for Windows (Tkinter; launcher/bbport_launcher.py is the Linux one).
+"""Bloodborne launcher for Windows and macOS (Tkinter; launcher/bbport_launcher.py is the Linux one).
 
 Every setting of the port in one window: the game folder and saves, bbport.ini (upscaler,
 preset, output, effects), start-up options passed to run.py as environment variables
 (frame rate, presentation, HDR, ...), mods, third-party patches and the FSR 4 assets.
-Launcher options live in %APPDATA%/bbcoop-launcher/settings.json.
+Launcher options live in %APPDATA%/bbcoop-launcher/settings.json (macOS: ~/Library/Application
+Support/bbcoop-launcher).
 
 bbcoop: Supermedo's launcher (github.com/Supermedo/bloodborne_pc, 1.9.2) without what bbcoop's runtime
-does not have (docs/bbcoop/windows.md lists it), with the Linux launcher's co-op pools.
+does not have (docs/bbcoop/windows.md lists it), with the Linux launcher's co-op pools and Host/Join
+(launcher/bbcoop_online.py). On macOS it starts run.sh; the Mac app (packaging/macos/package.sh)
+keeps the port in Contents/Resources/port and its data in ~/Library/Application Support/bbcoop.
 
 Frozen with PyInstaller (packaging/windows/package.sh) the same Bloodborne.exe also runs the
 game without the window (`--play`), run.py (`--run`) and the preparation scripts (`--script`),
@@ -20,6 +23,7 @@ import os
 from pathlib import Path
 import queue
 import runpy
+import signal
 import subprocess
 import sys
 import threading
@@ -28,15 +32,21 @@ import urllib.request
 import webbrowser
 
 FROZEN = getattr(sys, 'frozen', False)
+MAC = sys.platform == 'darwin'  # bbcoop
 PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
+if FROZEN and MAC:  # bbcoop: Bloodborne.app/Contents/MacOS/Bloodborne
+    PORT_DIR = PORT_DIR.parent / 'Resources' / 'port'
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
-DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
+SUPPORT = Path.home() / 'Library' / 'Application Support'
+DATA_DIR = Path(os.environ.get('BB_DATA_DIR', SUPPORT / 'bbcoop' if FROZEN and MAC else PORT_DIR))
 # bbcoop: its own settings, apart from a bbport launcher on the same PC.
-CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / 'bbcoop-launcher'
+CONFIG_DIR = SUPPORT / 'bbcoop-launcher' if MAC else Path(os.environ.get('APPDATA', Path.home())) / 'bbcoop-launcher'
 CONFIG_FILE = CONFIG_DIR / 'settings.json'
 PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+# bbcoop: how the game starts; elsewhere than Windows in its own process group (GameJob).
+SPAWN = {'creationflags': NO_WINDOW} if sys.platform == 'win32' else {'start_new_session': True}
 # This build; GitHub release tags are windows-v<VERSION>.
 VERSION = 'bbcoop'
 # Never copied over an installation by an update (the package does not hold them either).
@@ -48,6 +58,8 @@ USER_FILES = ('user', 'out', 'mods', 'bbport.ini', 'input.ini', 'mods.json', 'pa
 
 def attach_stdio():
     """A windowed executable starts without sys.stdout; inherited pipes or a console still exist."""
+    if sys.platform != 'win32':  # bbcoop: the Mac app's are inherited
+        return
     import msvcrt
     for name, std in (('stdout', -11), ('stderr', -12)):
         if getattr(sys, name) is not None:
@@ -96,7 +108,11 @@ def run_role(argv):
             pass
     sys.stdout, sys.stderr = LossyStream(sys.stdout), LossyStream(sys.stderr)
     if argv[0] == '--script':
-        path, sys.argv = argv[1], argv[1:]
+        args = argv[1:]
+        while args and args[0].startswith('-'):  # bbcoop: run.sh's `python3 -I script` (Mac app)
+            args = args[1:]
+        path, sys.argv = args[0], args
+        sys.path.insert(0, str(Path(path).resolve().parent))  # its neighbours, as `python3 script`
     else:
         path = str(PORT_DIR / 'run.py')
         sys.argv = [path, *argv[1:]]
@@ -108,8 +124,15 @@ def run_role(argv):
 
 
 def run_command():
-    """The command that starts run.py: this executable when frozen, else Python."""
+    """The command that starts run.py: this executable when frozen, else Python. bbcoop: run.sh on macOS."""
+    if MAC:
+        return ['/bin/bash', str(PORT_DIR / 'run.sh')]
     return [sys.executable, '--run'] if FROZEN else [sys.executable, str(PORT_DIR / 'run.py')]
+
+
+def python_command():
+    """bbcoop: how a script of the port runs (the host's game server): this executable when frozen."""
+    return [sys.executable, '--script'] if FROZEN else [sys.executable]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -121,6 +144,7 @@ import bbport_lang  # noqa: E402
 # bbcoop: the co-op addresses are scripts/online.py's (run.py and the Linux launcher use it too).
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 import online  # noqa: E402
+import bbcoop_online  # noqa: E402
 
 LANG = 'en'
 
@@ -177,8 +201,13 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'online': False, 'online_server': online.SHADNET_SERVER,
                 'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True,
                 'online_community': online.COMMUNITY_SERVER, 'online_pool': 'seamless', 'online_bbsc': True,
-                'thd_online_id': '', 'thd_token': ''}
+                'thd_online_id': '', 'thd_token': '',
+                # bbcoop: Host/Join ('manual': the server fields above); the host joined.
+                'coop_mode': 'manual', 'coop_join': ''}
 # bbbridge's own app reads and writes the online_* keys above: keep their names.
+if MAC:  # bbcoop: what an M4 Air runs (CLAUDE.md, "macOS"): 30 FPS, 720p native
+    INI_DEFAULTS.update(upscaler='off', preset='0', output_res='1280x720')
+    APP_DEFAULTS.update(fps_mode='30')
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -348,6 +377,9 @@ def game_environment(s):
             env['BB_THD_TOKEN'] = str(s.get('thd_token', ''))
         elif s.get('online_bbsc'):
             env['BB_BBSC'] = '1'
+    if MAC and FROZEN:  # bbcoop: the Mac app's prebuilt port; this executable runs its scripts
+        python = str(PORT_DIR / 'bin' / 'python3')
+        env.update(BB_PREBUILT='1', BB_DATA_DIR=str(DATA_DIR), PYTHON=python, BB_RE_PYTHON=python)
     env['PYTHONUNBUFFERED'] = '1'
     env['PYTHONIOENCODING'] = 'utf-8'
     return env
@@ -375,8 +407,14 @@ class Launcher:
         self.banner_source = self.banner_image = None
         self.ui_calls = queue.Queue()  # work for the Tk thread from helper threads
         self.mod_order, self.mod_vars, self.patch_vars = [], {}, {}
+        # bbcoop: Host/Join (launcher/bbcoop_online.py): the server while hosting, this build.
+        self.host = bbcoop_online.Host(PORT_DIR, DATA_DIR, python_command())
+        self.build_id = bbcoop_online.build_id(PORT_DIR)
+        self.hosts_found, self.host_lock, self.host_note = [], threading.Lock(), ''
         root.title('Bloodborne — bbcoop')
         root.configure(bg=BG)
+        if MAC:  # bbcoop: Tk's macOS points are 72 per inch; the layout is drawn for 96
+            root.tk.call('tk', 'scaling', 96 / 72)
         self.dpi = root.winfo_fpixels('1i') / 96.0
         root.geometry(f'{self.px(1120)}x{self.px(740)}')
         root.minsize(self.px(980), self.px(660))
@@ -386,6 +424,7 @@ class Launcher:
         self.show('play')
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.drain_output)
+        root.after(300, self.first_start)
         threading.Thread(target=self.detect_gpu, daemon=True).start()
 
     def px(self, size):
@@ -593,7 +632,8 @@ class Launcher:
         tk.Label(side, text='BLOODBORNE', bg=BG, fg=GOLD, font=('Georgia', 16)).pack(anchor='w', padx=22, pady=(24, 0))
         self.side = side
         tk.Label(side, text='bbcoop', bg=BG, fg=TEXT, font=('Segoe UI', 10)).pack(anchor='w', padx=22)
-        tk.Label(side, text=_('native port · Windows', 'нативный порт · Windows'), bg=BG, fg=MUTED, justify='left',
+        tk.Label(side, text=_('native port · macOS') if MAC else _('native port · Windows', 'нативный порт · Windows'),
+                 bg=BG, fg=MUTED, justify='left',
                  font=('Segoe UI', 9)).pack(anchor='w', padx=22, pady=(0, 20))
         self.nav, self.current_page = {}, None
         for name, title in (('play', _('Play', 'Играть')), ('graphics', _('Graphics', 'Графика')),
@@ -645,7 +685,7 @@ class Launcher:
         page = self.pages.get(self.current_page)
         if hasattr(page, 'scroll') and not isinstance(event.widget, (self.tk.Text, self.ttk.Combobox)) \
                 and 'popdown' not in str(event.widget):
-            page.scroll(int(-event.delta / 120))
+            page.scroll(-event.delta if MAC else int(-event.delta / 120))  # bbcoop: macOS sends lines
 
     def show(self, name):
         for page in self.pages.values():
@@ -691,8 +731,9 @@ class Launcher:
             row=self.next_row(quick), column=1, sticky='w', pady=(8, 0))
         ttk.Checkbutton(quick, text=_('Play online'), variable=self.var('online', 'app')).grid(
             row=self.next_row(quick), column=1, sticky='w', pady=(4, 0))
-        ttk.Button(quick, text=_('Add to Steam'), command=self.add_to_steam).grid(
-            row=self.next_row(quick), column=1, sticky='w', pady=(10, 0))
+        if not MAC:  # bbcoop: Steam's shortcuts here are Windows'
+            ttk.Button(quick, text=_('Add to Steam'), command=self.add_to_steam).grid(
+                row=self.next_row(quick), column=1, sticky='w', pady=(10, 0))
         for key in ('fps_mode', 'upscaler', 'output_res'):
             self.vars[key].trace_add('write', lambda *_a: self.refresh_status())
 
@@ -847,11 +888,47 @@ class Launcher:
     def build_online(self):
         ttk = self.ttk
         f = self.scrolled_page('online', _('Online co-op'),
-                               _("Messages, bloodstains and ghosts come from The Hunter's Dream; bells and summons "
-                                 'go through a shadNet server.'))
+                               _('Host or join your friends over Tailscale, or play on another server.'))
         self.check(f, 'online', 'app', _('Play online'),
                    _('Off: the game stays offline, as before.'))
         self.var('online', 'app').trace_add('write', lambda *_a: self.refresh_status())
+        # Each pool shows only its own settings (show_pool below). bbcoop: Host and Join show neither.
+        groups = {}
+        before = set(f.grid_slaves())
+
+        def group(name):
+            nonlocal before
+            now = set(f.grid_slaves())
+            groups[name] = groups.get(name, []) + list(now - before)
+            before = now
+
+        group('always')
+        # bbcoop: Host and Join (launcher/bbcoop_online.py; docs/bbcoop/brief.md, "Easy online").
+        self.section(f, _('Play together'))
+        self.row(f, _('Hunter name'), ttk.Entry(f, textvariable=self.var('online_npid', 'app'), width=24),
+                 _('Your name on every host: 3 to 16 letters, digits, - or _.'))
+        mode = self.var('coop_mode', 'app')
+        modes = ttk.Frame(f)
+        for value, text in (('host', _('Host a game')), ('join', _('Join a game')), ('manual', _('Other server'))):
+            ttk.Radiobutton(modes, text=text, variable=mode, value=value,
+                            command=lambda: self.var('online', 'app').set(True)).pack(side='left', padx=(0, 16))
+        self.row(f, _('Co-op'), modes,
+                 _('Host: this computer runs the server while the launcher is open. Join: a friend who '
+                   'hosts. Both of you need Tailscale on. Other server: the addresses below.'))
+        group('always')
+        self.host_label = ttk.Label(f, text='', justify='left', wraplength=self.px(560))
+        self.row(f, _('Your server'), self.host_label)
+        group('host')
+        hosts = ttk.Frame(f)
+        self.host_list = self.tk.Listbox(hosts, height=4, width=46, bg=CARD, fg=TEXT, selectbackground=BLOOD,
+                                         highlightthickness=0, borderwidth=0, activestyle='none')
+        self.host_list.pack(side='left')
+        self.host_list.bind('<<ListboxSelect>>', self.on_host_picked)
+        ttk.Button(hosts, text=_('Refresh'), command=self.find_hosts).pack(side='left', anchor='n', padx=(8, 0))
+        self.row(f, _('Hosts'), hosts, _('Friends hosting on your Tailscale network.'))
+        self.row(f, _('Host address'), ttk.Entry(f, textvariable=self.var('coop_join', 'app'), width=24),
+                 _("Or type the host's Tailscale address (100.x.y.z)."))
+        group('join')
         self.section(f, _('Co-op pool'))
         pool = self.var('online_pool', 'app')
         pool.trace_add('write', lambda *_a: self.refresh_status())
@@ -864,15 +941,7 @@ class Launcher:
         self.row(f, _('Play with'), pools,
                  _("Seamless Hunt: BBSC's seamless co-op with bbcoop's rules, through a shadNet server "
                    "(Seamless Hunt's or a group's own) and its account."))
-        # Each pool shows only its own settings (show_pool below).
-        groups = {}
-        before = set(f.grid_slaves())
-
-        def group(name):
-            nonlocal before
-            now = set(f.grid_slaves())
-            groups[name] = groups.get(name, []) + list(now - before)
-            before = now
+        group('pool')
 
         self.section(f, _("The Hunter's Dream account"))
         account = ttk.Label(f, text='', justify='left')
@@ -982,13 +1051,15 @@ class Launcher:
             threading.Thread(target=work, daemon=True).start()
         self.row(f, '', ttk.Button(f, text=_('Test connection'), command=check))
         result.grid(row=self.next_row(f), column=1, sticky='w', pady=(6, 0))
+        group('test')
         self.note(f, _('Everyone in a session needs the same game version (1.09) and the same server. '
                        'bbcoop on Linux, macOS and Windows play together.'))
         show_code()  # hidden until a sign-in shows one; its row stays reserved (rows are counted above)
         shown = {'seamless': {'seamless', 'upnp'}, 'huntersdream': {'huntersdream', 'upnp'}}
 
         def show_pool(*_args):
-            want = shown.get(pool.get(), shown['seamless'])
+            coop = mode.get() if mode.get() in ('host', 'join') else ''  # bbcoop
+            want = {'always', coop} if coop else {'always', 'pool', 'test'} | shown.get(pool.get(), shown['seamless'])
             for name, widgets in groups.items():
                 for widget in widgets:
                     if widget is not code_box:
@@ -998,7 +1069,164 @@ class Launcher:
             else:
                 code_box.grid_remove()
         pool.trace_add('write', show_pool)
+        mode.trace_add('write', show_pool)
+        for key in ('coop_mode', 'online'):
+            self.var(key, 'app').trace_add('write', self.on_coop_mode)
         show_pool()
+
+    # ---- bbcoop: Host and Join -----------------------------------------------------------------
+    def first_start(self):
+        """A new install asks for its game folder and a hunter name, nothing else; the hunter's
+        password is made here (docs/bbcoop/brief.md, "Easy online")."""
+        game = self.var('game_dir', 'app')
+        if not game_info(game.get()):
+            self.messagebox.showinfo('Bloodborne', _('Choose your Bloodborne folder: your own dump of v1.09 '
+                                                     '(CUSA03173 or CUSA00900), the folder with eboot.bin in it.'))
+            chosen = self.filedialog.askdirectory(title=_('Bloodborne folder'))
+            if chosen:
+                game.set(str(Path(chosen)))
+                self.game_changed()
+        name = self.var('online_npid', 'app')
+        if not name.get().strip():
+            from tkinter import simpledialog
+            while True:
+                answer = simpledialog.askstring(
+                    'Bloodborne', _('Your hunter name, as your friends will see it\n(3 to 16 letters, digits, - or _):'),
+                    parent=self.root)
+                if answer is None:
+                    break
+                if bbcoop_online.valid_name(answer.strip()):
+                    name.set(answer.strip())
+                    self.var('coop_mode', 'app').set('join')
+                    self.var('online', 'app').set(True)
+                    break
+                self.messagebox.showwarning('Bloodborne', _('3 to 16 letters, digits, - or _, please.'))
+        if name.get().strip() and not self.var('online_password', 'app').get():
+            self.var('online_password', 'app').set(bbcoop_online.new_password())
+        self.collect()
+        self.on_coop_mode()
+
+    def on_coop_mode(self, *_args):
+        if not getattr(self, 'coop_pending', False):  # one update for the several variables a click sets
+            self.coop_pending = True
+            self.root.after_idle(self.apply_coop_mode)
+
+    def apply_coop_mode(self):
+        """Hosting runs while Host is picked (and Play online is on); Join looks for hosts."""
+        self.coop_pending = False
+        mode, playing_online = self.var('coop_mode', 'app').get(), self.var('online', 'app').get()
+        if mode == 'host' and playing_online:
+            self.start_hosting()
+        elif not self.process:  # a hosted game keeps its server until it ends
+            self.stop_hosting()
+        if mode == 'join' and playing_online:
+            self.find_hosts()
+        self.refresh_status()
+
+    def ensure_host(self, name):
+        """The server on this computer's address (helper threads); returns the address."""
+        with self.host_lock:
+            if not self.host.running():
+                address, self.host_note = bbcoop_online.my_address()
+                self.host.start(address, name, self.build_id)
+            return self.host.address
+
+    def start_hosting(self):
+        name = self.var('online_npid', 'app').get().strip() or 'Hunter'
+        self.host_label.configure(text=_('Starting the server…'))
+
+        def work():
+            try:
+                address = self.ensure_host(name)
+                text = _('Your address: {0}. Friends pick "{1} — hosting" in Join, or type this '
+                         'address.').format(address, name) + (f'\n{self.host_note}' if self.host_note else '')
+            except RuntimeError as error:
+                text = _('The server did not start: {}').format(error)
+            self.ui_calls.put(lambda: self.host_label.configure(text=text))
+        threading.Thread(target=work, daemon=True).start()
+
+    def stop_hosting(self):
+        self.host_label.configure(text='')
+
+        def work():
+            with self.host_lock:
+                self.host.stop()
+        threading.Thread(target=work, daemon=True).start()
+
+    def find_hosts(self):
+        self.host_list.delete(0, 'end')
+        self.host_list.insert('end', _('Looking for hosts on Tailscale…'))
+
+        def work():
+            hosts = bbcoop_online.find_hosts()
+            self.ui_calls.put(lambda: self.show_hosts(hosts))
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_hosts(self, hosts):
+        self.host_list.delete(0, 'end')
+        self.hosts_found = hosts or []
+        for address, name, build in self.hosts_found:
+            other = bbcoop_online.build_problem(self.build_id, build, name)
+            self.host_list.insert('end', f'{name} — hosting' + (_('  (another build)') if other else ''))
+            if address == self.var('coop_join', 'app').get().strip():
+                self.host_list.selection_set('end')
+        if hosts is None:
+            self.host_list.insert('end', _('Tailscale is not connected: open Tailscale and connect.'))
+        elif not hosts:
+            self.host_list.insert('end', _('Nobody is hosting right now. Refresh, or type an address.'))
+
+    def on_host_picked(self, _event):
+        picked = self.host_list.curselection()
+        if picked and picked[0] < len(self.hosts_found):
+            self.var('coop_join', 'app').set(self.hosts_found[picked[0]][0])
+
+    def prepare_coop(self, mode):
+        """Before a Host or Join game (helper thread): the server, the build check, the account."""
+        name = self.var('online_npid', 'app').get().strip()
+        password = self.var('online_password', 'app')
+        address = self.var('coop_join', 'app').get().strip()
+        if not bbcoop_online.valid_name(name):
+            self.messagebox.showwarning('Bloodborne', _('Hunter name: 3 to 16 letters, digits, - or _.'))
+            self.show('online')
+            return
+        if mode == 'join' and not address:
+            self.messagebox.showwarning('Bloodborne', _('Pick a host to join (Online co-op).'))
+            self.show('online')
+            return
+        if not password.get():
+            password.set(bbcoop_online.new_password())
+        secret = password.get()
+        self.play_button.configure(state='disabled')
+        self.status.configure(text=_('Starting your server…') if mode == 'host' else _('Checking the host…'), fg=GOLD)
+
+        def work():
+            try:
+                if mode == 'host':
+                    where = self.ensure_host(name)
+                    bbcoop_online.make_account(where, name, secret)
+                else:
+                    where = address
+                    bbcoop_online.prepare_join(where, name, secret, self.build_id)
+            except (RuntimeError, ValueError) as error:
+                self.ui_calls.put(lambda e=error: self.coop_failed(str(e)))
+                return
+            self.ui_calls.put(lambda: self.coop_ready(where))
+        threading.Thread(target=work, daemon=True).start()
+
+    def coop_ready(self, address):
+        """The host's three server fields (bbcoop_online.server_fields), BBSC on, no UPnP; then the game."""
+        for key, value in bbcoop_online.server_fields(address).items():
+            self.var(key, 'app').set(value)
+        self.var('online_pool', 'app').set('seamless')
+        self.var('online_bbsc', 'app').set(True)
+        self.var('online_upnp', 'app').set(False)
+        self.collect()
+        self.launch()
+
+    def coop_failed(self, text):
+        self.refresh_status()
+        self.messagebox.showerror('Bloodborne', text)
+        self.show('online')
 
     def build_mods(self):
         f = self.scrolled_page('mods', _('Mods & patches', 'Моды и патчи'),
@@ -1033,8 +1261,9 @@ class Launcher:
         self.check(f, 'close_on_play', 'app', _('Close the launcher when the game starts', 'Закрывать лаунчер при запуске игры'))
         holder = ttk.Frame(f)
         holder.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(10, 0))
-        ttk.Button(holder, text=_('Desktop shortcut', 'Ярлык на рабочем столе'), command=self.shortcut).pack(side='left')
-        ttk.Button(holder, text=_('Add to Steam'), command=self.add_to_steam).pack(side='left', padx=(6, 0))
+        if not MAC:  # bbcoop: PowerShell and Steam's Windows shortcuts
+            ttk.Button(holder, text=_('Desktop shortcut', 'Ярлык на рабочем столе'), command=self.shortcut).pack(side='left')
+            ttk.Button(holder, text=_('Add to Steam'), command=self.add_to_steam).pack(side='left', padx=(6, 0))
         ttk.Button(holder, text=_('Port folder', 'Папка порта'), command=lambda: self.open_path(DATA_DIR)).pack(side='left', padx=6)
         ttk.Button(holder, text='bbport.ini', command=lambda: self.open_path(ini_path())).pack(side='left')
         holder = ttk.Frame(f)
@@ -1110,6 +1339,8 @@ class Launcher:
         fsr4 = (_('✓ FSR 4 assets installed', '✓ Ассеты FSR 4 установлены') if not missing else
                 _('• FSR 4 assets missing (Graphics); FSR 3.1 is used meanwhile',
                   '• Нет ассетов FSR 4 («Графика»); пока используется FSR 3.1'))
+        if MAC:  # bbcoop: FSR 4 needs what Apple's GPUs lack
+            fsr4 = ''
         for key, text in (('game', game), ('saves', save), ('gpu', self.gpu_text), ('fsr4', fsr4)):
             self.checks[key].configure(text=text, foreground=MUTED if text.startswith('•') else
                                        '#d9a441' if text.startswith('⚠') else '#d36b5c' if text.startswith('✗') else TEXT)
@@ -1134,9 +1365,19 @@ class Launcher:
         state = _('Online') if self.var('online', 'app').get() else _('Offline')
         if self.var('online', 'app').get() and self.var('online_pool', 'app').get() == 'huntersdream':
             state = _("Online (The Hunter's Dream)")
+        mode = self.var('coop_mode', 'app').get()  # bbcoop
+        if self.var('online', 'app').get() and mode in ('host', 'join'):
+            state = _('Hosting') if mode == 'host' else _('Joining {}').format(
+                self.var('coop_join', 'app').get().strip() or '?')
         return f'{_(*fps)}   ·   {upscaler}   ·   {output}   ·   {state}'
 
     def detect_gpu(self):
+        if MAC:  # bbcoop: Apple's GPU through MoltenVK; the x86-64 game needs Rosetta 2
+            rosetta = subprocess.run(['/usr/bin/arch', '-x86_64', '/usr/bin/true'], capture_output=True).returncode == 0
+            self.gpu_text = (_('✓ Graphics: Apple GPU (Metal); Rosetta 2 installed') if rosetta else
+                             _('✗ Rosetta 2 is missing: run  softwareupdate --install-rosetta  in Terminal'))
+            self.ui_calls.put(self.refresh_status)
+            return
         exe = PORT_DIR / 'bin' / 'bb-gpu-capabilities.exe'
         if not exe.is_file():
             exe = PORT_DIR / 'out' / 'bb-gpu-capabilities.exe'
@@ -1147,7 +1388,7 @@ class Launcher:
         text = _('• Graphics card: not checked', '• Видеокарта: не проверена')
         try:
             result = subprocess.run([str(exe), '--live-resolution'], capture_output=True, text=True, timeout=30,
-                                    env=env, creationflags=NO_WINDOW)
+                                    env=env, **SPAWN)
             names = [line[5:].split(':')[0] for line in result.stderr.splitlines() if line.startswith('GPU: ')]
             if names:
                 text = _('✓ Graphics card: {}', '✓ Видеокарта: {}').format(names[0])
@@ -1281,7 +1522,8 @@ class Launcher:
         if self.process:
             return
         playing_online, npid = self.var('online', 'app'), self.var('online_npid', 'app')
-        if not playing_online.get() and npid.get().strip():
+        mode = self.var('coop_mode', 'app').get()  # bbcoop: Host and Join always have a name
+        if not playing_online.get() and npid.get().strip() and mode not in ('host', 'join'):
             choice = self.messagebox.askyesnocancel(
                 'Bloodborne', _('An online account is filled in, but "Play online" is off.\n\n'
                                 'Yes: play online.   No: play offline.'))
@@ -1295,7 +1537,7 @@ class Launcher:
                 'Bloodborne', _("To play online with The Hunter's Dream, sign in with Discord first."))
             self.show('online')
             return
-        if playing_online.get() and pool_name == 'seamless' and '@' in npid.get():
+        if playing_online.get() and pool_name == 'seamless' and '@' in npid.get() and mode == 'manual':
             self.messagebox.showwarning(
                 'Bloodborne', _('The Online ID is the account name (NPID) you registered on the server, '
                                 'not your email address.'))
@@ -1307,11 +1549,17 @@ class Launcher:
                                                       'Выберите папку игры с eboot.bin (CUSA03173).'))
             self.show('game')
             return
+        if playing_online.get() and mode in ('host', 'join'):
+            self.prepare_coop(mode)  # then launch()
+            return
+        self.launch()
+
+    def launch(self):
         self.set_log('')
         try:
             self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(self.app),
                                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+                                            stderr=subprocess.STDOUT, **SPAWN)
         except OSError as error:
             self.append(_('Could not start: {}', 'Не удалось запустить: {}').format(error) + '\n')
             self.process = None
@@ -1417,7 +1665,10 @@ class Launcher:
             self.collect()
         elif not path.exists():
             path.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(path))
+        if MAC:  # bbcoop
+            subprocess.Popen(['open', str(path)])
+        else:
+            os.startfile(str(path))
 
     # ---- updates -------------------------------------------------------------------------------
 
@@ -1510,9 +1761,13 @@ class Launcher:
 
 class GameJob:
     """A Windows job holding run.py and everything it starts: bb-probe.exe and the launches made
-    by the in-game restart (no longer descendants of the first process)."""
+    by the in-game restart (no longer descendants of the first process). bbcoop: elsewhere the
+    process group run.sh starts in (SPAWN)."""
 
     def __init__(self, process):
+        self.process, self.handle = process, None
+        if sys.platform != 'win32':
+            return
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateJobObjectW.restype = ctypes.c_void_p
         self.handle = kernel32.CreateJobObjectW(None, None)
@@ -1520,6 +1775,12 @@ class GameJob:
             kernel32.AssignProcessToJobObject(ctypes.c_void_p(self.handle), ctypes.c_void_p(int(process._handle)))
 
     def terminate(self):
+        if sys.platform != 'win32':
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except OSError:
+                pass
+            return
         if self.handle:
             ctypes.windll.kernel32.TerminateJobObject(ctypes.c_void_p(self.handle), 1)
 
@@ -1538,7 +1799,7 @@ def play_without_window(settings):
     with open(log_dir / 'last_run.log', 'w', encoding='utf-8', buffering=1) as log:
         process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(settings),
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+                                   stderr=subprocess.STDOUT, **SPAWN)
         for raw in iter(process.stdout.readline, b''):
             text = raw.decode('utf-8', errors='replace')
             log.write(text)
@@ -1566,8 +1827,11 @@ def main():
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
-    Launcher(root, tk, ttk, filedialog, messagebox)
-    root.mainloop()
+    launcher = Launcher(root, tk, ttk, filedialog, messagebox)
+    try:
+        root.mainloop()
+    finally:
+        launcher.host.stop()  # bbcoop: hosting ends with the launcher
 
 
 if __name__ == '__main__':
