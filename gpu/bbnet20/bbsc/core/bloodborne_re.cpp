@@ -6952,6 +6952,13 @@ bool BbscRespawnInPlace(std::string_view why) {
         ReadablePointer(event_state, 4) && HasMemoryAccess(event_state, 4, MemoryProt::CpuWrite)) {
         WriteValue<s32>(event_state, 0, 0);
     }
+    // 6. the death reload's full recover: the death steps set [0x0553B130]+0x70 (SoloPlayDeath_2
+    // 0x01381EF9, PartyGhostDeath_2 0x013825ED) and the player create 0x01939470 runs 0x018FD460
+    // (call at 0x019395CF) before clearing it: HP and stamina to max, the status meters (poison,
+    // toxic, bleed, curse, frenzy) back to max, status SpEffects timed out. Without the reload,
+    // poison stayed after a co-op respawn (2026-10-24).
+    using FullRecover = void PS4_SYSV_ABI (*)(u64 chr);
+    reinterpret_cast<FullRecover>(image_base + 0x018FD460)(player);
     ClearBbscStaleDeathRequest(why);
     ArmBbscDeathLockClear();
 

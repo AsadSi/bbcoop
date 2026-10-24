@@ -42,6 +42,17 @@ lamp."
 - **Switch.** `SHADPS4_BBSC_DEATH_TO_HOST_LAMP` is on by default with BBSC (`bbsc_persistence.h`
   `DefaultOnSwitches`); `=0` turns it off.
 
+## Respawn in place and the full recover (2026-10-24)
+- A death's reload runs the game's full recover: the death steps set `[0x0553B130]+0x70`
+  (SoloPlayDeath_2 `0x01381EF9`, PartyGhostDeath_2 `0x013825ED`), and the player create `0x01939470`
+  calls `0x018FD460(player)` (`0x019395CF`) before clearing the byte (`0x01939610`). It sets HP and
+  stamina to max, the 5 status meters `[[chr+0x3B0]+0x28]+0x10..` back to max, and times out status
+  SpEffects (stateInfo 2/5/6/0x74/0x75/0x88/0x104).
+- `BbscRespawnInPlace` has no reload, and `TickBbscDeathLockClear` drops the byte, so poison stayed
+  after a co-op respawn (host and guest). It now calls `0x018FD460` itself, after the death globals.
+- Still not reset by design: enemies (BBSC: "the world is not reset"). Vials and bullets come from
+  `BbscRestockFromStorage`.
+
 ## The load (CONFIRMED statically)
 
 **The placement choice.** The stage flow builds a load's placement in `0x01943F10`, which checks in this

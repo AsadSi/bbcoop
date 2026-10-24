@@ -54,7 +54,7 @@ Runtime mods (`src/`):
   upstream's. bbcoop's BBSC changes are in both, kept the same (`bbsc/core/` in bbnet20, `shadps4/core/` in bbnet;
   packets 0x23..0x28 in bbnet20's `np/signaling_handler.cpp`). BBSC's memory search reads AMD's dma-buf guest
   memory through `/proc/self/mem` (`bbsc_memscan.cpp`). `BB_GPU_LOG=info` shows BBSC's info lines.
-- Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17) with bbcoop's scaling numbers (`run.sh`).
+- Seamless co-op is BBSC (`BB_BBSC=1`, Asad 2026-10-17) with vanilla co-op difficulty: BBSC's scaling off (`SHADPS4_BBSC_SCALING=0` in `run.sh`/`run.py`), so only bosses get the game's own buff.
   `BB_SEAMLESS=1` is the fallback, skipped while BBSC is on (same sites).
 - bbcoop's rules on BBSC: a guest's death at the host's lamp (`SHADPS4_BBSC_DEATH_TO_HOST_LAMP=0` off, test cheat
   `BB_TEST_GUEST_DEATH=<respawn point>`, `coop_respawn_re.md`), mirrored loot (`coop_loot_re.md`).
@@ -70,8 +70,10 @@ Runtime mods (`src/`):
   - `BB_TEST_ENDGAME=1`: level-150 character, upgraded weapons, warped to the Dream with the Doll awake, once per save.
   - `BB_TEST_WARP=<lamp>`: once in game, to `dream`, `cathedral-ward`, `central-yharnam`, `old-yharnam` or a respawn
     point ID `<map><block>29xx`; with `tools/new_game.sh --continue` it starts a test mid-game.
-  - `BB_TEST_GIVE=<id>,..`: weapons (final ids, `27001000` = Rakuyo +10) the character doesn't hold yet, on any save,
+  - `BB_TEST_GIVE=<id>,..`: weapons (final ids, `27001000` = Rakuyo +10) the character doesn't hold yet (`goods:<id>:<count>`, `armor:<id>` too), on any save,
     saves backed up first.
+  - `BB_TEST_STATS=<level>,<vit>,<end>,<str>,<skl>,<blt>,<arc>`: sets the loaded character's stats (any name) on the
+    run's first load, saves backed up first. Level = sum of stats − 50.
   - `BB_TEST_LOADOUT=<list>`: fills a character named TEST once (stats 99, every weapon +10 Uncanny/Lost, all armor,
     stacks, gems); list `mods/bbcoop-respec/test-loadout.txt`; launcher `~/.local/bin/bloodborne-testchar.sh`.
 - **Frame rate and camera:**
