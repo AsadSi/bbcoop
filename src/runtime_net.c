@@ -45,24 +45,39 @@ int runtime_net_symbol(const char *symbol) {
 
 static void *module_handle;
 
+#ifdef _WIN32
+/* bbcoop: on Windows the module (gpu/bbnet20) is linked into bb-probe.exe (gpu/CMakeLists.txt): a
+ * DLL would carry its own copy of the GPU library, a static library there. */
+static void *module_symbol(const char *name) {
+    if (!strcmp(name,"bbnet_init")) return (void *)bbnet_init;
+    if (!strcmp(name,"bbnet_resolve")) return (void *)bbnet_resolve;
+    if (!strcmp(name,"bbnet_image_ready")) return (void *)bbnet_image_ready;
+    if (!strcmp(name,"bbnet_image_mapped")) return (void *)bbnet_image_mapped;
+    if (!strcmp(name,"bbnet_start")) return (void *)bbnet_start;
+    return NULL;
+}
+#else
+static void *module_symbol(const char *name) { return dlsym(module_handle,name); }
+#endif
+
 /* The game's image is ready (probe.c): the module's hooks in it go in now. */
 void runtime_net_image_ready(uintptr_t base, uint64_t size) {
     if (!module_handle) return;
-    const BbNetImageReadyFn ready=(BbNetImageReadyFn)dlsym(module_handle,"bbnet_image_ready");
+    const BbNetImageReadyFn ready=(BbNetImageReadyFn)module_symbol("bbnet_image_ready");
     if (ready) ready(base,size);
 }
 
 /* The game's image is mapped and relocated, its code not yet patched (probe.c). */
 void runtime_net_image_mapped(uint8_t *image, uint64_t size) {
     if (!module_handle) return;
-    const BbNetImageMappedFn mapped=(BbNetImageMappedFn)dlsym(module_handle,"bbnet_image_mapped");
+    const BbNetImageMappedFn mapped=(BbNetImageMappedFn)module_symbol("bbnet_image_mapped");
     if (mapped) mapped(image,size);
 }
 
 /* The game is loaded and about to run (probe.c): online sessions start. */
 void runtime_net_start(void) {
     if (!module_handle) return;
-    const BbNetStartFn start=(BbNetStartFn)dlsym(module_handle,"bbnet_start");
+    const BbNetStartFn start=(BbNetStartFn)module_symbol("bbnet_start");
     if (start) start();
 }
 
@@ -73,6 +88,10 @@ static BbNetResolveFn module_resolve(void) {
     if (tried) return resolve;
     tried=1;
     char path[PATH_MAX];
+#ifdef _WIN32
+    snprintf(path,sizeof(path),"bb-probe.exe"); /* bbcoop: linked in */
+    module_handle=(void *)1;
+#else
     const char *forced=getenv("BB_NET_MODULE");
     if (forced && forced[0]) {
         snprintf(path,sizeof(path),"%s",forced);
@@ -101,8 +120,9 @@ static BbNetResolveFn module_resolve(void) {
         return NULL;
     }
     module_handle=module;
-    const BbNetInitFn init=(BbNetInitFn)dlsym(module,"bbnet_init");
-    const BbNetResolveFn found=(BbNetResolveFn)dlsym(module,"bbnet_resolve");
+#endif
+    const BbNetInitFn init=(BbNetInitFn)module_symbol("bbnet_init");
+    const BbNetResolveFn found=(BbNetResolveFn)module_symbol("bbnet_resolve");
     const BbNetHost host={
         .abi=BBNET_ABI_VERSION, .app0=game_folder, .serial=game_serial, .title=game_title,
         .app_ver=game_version, .thread_spawn=runtime_thread_spawn,

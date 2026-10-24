@@ -53,6 +53,9 @@ extern "C" void bbcoop_placement_consume(const BbcoopPlacement* placement) {
     if (received && Same(*received, *placement)) received_consumed = true;
 }
 
+// bbcoop: on Windows the online module is linked into the same executable and its own (BBSC's) are the
+// only ones called, as on Linux, where each module binds its own (-Bsymbolic).
+#ifndef _WIN32
 namespace Core::Bloodborne {
 
 std::optional<std::string> GetSeamlessHostPlacementHeader() {
@@ -118,3 +121,4 @@ void TraceMatching2LeaveRoom(std::uintptr_t return_address, std::uint64_t room_i
 }
 
 } // namespace Core::Bloodborne
+#endif

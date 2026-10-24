@@ -4875,6 +4875,14 @@ void TickBbscFollowHost() {
     to.y = spot.y;
     to.z = spot.z;
     to.heading = spot.heading;
+    // A guest's full reload rebuilds the character with the own-world restore type ([[0x0553B188]+4]
+    // = 0) unless a kept death's v8 swap is active. 2026-10-24: a follow load just after the v8 window
+    // closed made the guest type 0, so the boss kill ran SoloBlockClear (0x013859F0 ->
+    // CSMultiPlayMan::Stop) instead of BlockClear2_2/_3 and ended the session. v8 makes the load
+    // build the phantom type and re-types it after.
+    if (!bbsc_v8_pending && GetLocalPlayerType() > 0) {
+        ArmBbscReinsertV8();
+    }
     if (!RequestBbscSessionWarp(global, to, "follow")) {
         LOG_WARNING(Debug, "BBSC warp together: could not ask for the reload into {:#x}",
                     host.packed_map);
@@ -5223,6 +5231,15 @@ bool ApplyBbscHostWorldFlags(u32 packed_map, std::string_view why) {
             std::memcpy(live, snap.groups[i].data(), BbscWorldGroupBytes);
             if (snap.map == BbscDreamStateMap) {
                 keep_own_dream_messengers(key, before.data(), live);
+            }
+            // NPC summon spots (2026-10-24): each map's "Old Hunter Bell summon available" flags,
+            // 1AAB4440..1AAB4449, are set only by the host's own availability event (multiplayer state
+            // Host); a vanilla guest never has them. Copied, the guest's game showed the spot and let it
+            // ring for an NPC its summon builder refuses (session state 6, 0x018747E6).
+            if (key / 10'000 == 1 && key % 10 == 4) {
+                for (u32 bit = 440; bit <= 449; ++bit) {
+                    live[bit / 8] = static_cast<u8>(live[bit / 8] & ~(0x80u >> (bit % 8)));
+                }
             }
             ++written;
         }
@@ -6952,6 +6969,13 @@ bool BbscRespawnInPlace(std::string_view why) {
         ReadablePointer(event_state, 4) && HasMemoryAccess(event_state, 4, MemoryProt::CpuWrite)) {
         WriteValue<s32>(event_state, 0, 0);
     }
+    // 6. the death reload's full recover: the death steps set [0x0553B130]+0x70 (SoloPlayDeath_2
+    // 0x01381EF9, PartyGhostDeath_2 0x013825ED) and the player create 0x01939470 runs 0x018FD460
+    // (call at 0x019395CF) before clearing it: HP and stamina to max, the status meters (poison,
+    // toxic, bleed, curse, frenzy) back to max, status SpEffects timed out. Without the reload,
+    // poison stayed after a co-op respawn (2026-10-24).
+    using FullRecover = void PS4_SYSV_ABI (*)(u64 chr);
+    reinterpret_cast<FullRecover>(image_base + 0x018FD460)(player);
     ClearBbscStaleDeathRequest(why);
     ArmBbscDeathLockClear();
 

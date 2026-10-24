@@ -3,7 +3,7 @@
  * bbcoop_hook_entry, calls the C handler with them, restores them, runs the site's original
  * instructions and jumps back. Same scheme as shadp2p's InstallGuestCodeHook
  * (src/core/cpu_patches.cpp), without a code generator: the stub is a fixed byte template. */
-#if defined(__x86_64__) && (defined(__linux__) || defined(__APPLE__))
+#if defined(__x86_64__) && (defined(__linux__) || defined(__APPLE__) || defined(_WIN32)) /* bbcoop: + Windows */
 #define _GNU_SOURCE
 #include "darwin_compat.h" /* bbcoop: MAP_FIXED_NOREPLACE on macOS */
 #include "hooks.h"
@@ -27,6 +27,10 @@ __asm__(
     ".globl _bbcoop_hook_entry\n"
     ".private_extern _bbcoop_hook_entry\n"
     "_bbcoop_hook_entry:\n"
+#elif defined(_WIN32)
+    ".globl bbcoop_hook_entry\n"
+    ".def bbcoop_hook_entry; .scl 2; .type 32; .endef\n"
+    "bbcoop_hook_entry:\n"
 #else
     ".globl bbcoop_hook_entry\n"
     ".hidden bbcoop_hook_entry\n"
@@ -47,8 +51,16 @@ __asm__(
     "    vmovdqu %ymm15, 480(%rsp)\n"
     "    stmxcsr 512(%rsp)\n"
     "    cld\n"
+#ifdef _WIN32
+    /* Windows x64: the argument in rcx and 32 bytes of shadow space for the handler. */
+    "    mov %rbx, %rcx\n"
+    "    sub $32, %rsp\n"
+    "    call *%rax\n"
+    "    add $32, %rsp\n"
+#else
     "    mov %rbx, %rdi\n"
     "    call *%rax\n"
+#endif
     "    ldmxcsr 512(%rsp)\n"
     "    vmovdqu 0(%rsp), %ymm0\n    vmovdqu 32(%rsp), %ymm1\n    vmovdqu 64(%rsp), %ymm2\n"
     "    vmovdqu 96(%rsp), %ymm3\n   vmovdqu 128(%rsp), %ymm4\n   vmovdqu 160(%rsp), %ymm5\n"
@@ -61,7 +73,7 @@ __asm__(
     "    pop %rbp\n pop %rdi\n pop %rsi\n pop %rdx\n pop %rcx\n pop %rbx\n"
     "    popfq\n"
     "    ret\n"
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(_WIN32)
     ".size bbcoop_hook_entry, .-bbcoop_hook_entry\n"
 #endif
     );

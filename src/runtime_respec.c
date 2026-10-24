@@ -15,7 +15,7 @@
  *                      Dream. For testing an area (its frame rate) without playing to it.
  *   BB_TEST_GIVE=<id>,.. (bbcoop) once in game, the weapons (final ids, e.g. 27001000 Rakuyo +10) the
  *                      character doesn't hold yet, on any character; goods:<id>:<count> tops goods up
- *                      to count (goods:1400:99, Bold Hunter's Mark). */
+ *                      to count (goods:1400:99, Bold Hunter's Mark); armor:<id> gives a piece not held. */
 #define _GNU_SOURCE
 #include "hooks.h"
 #include "runtime.h"
@@ -126,6 +126,7 @@ static int text_hook_installed; /* the menu text hook, which runtime_saveslots.c
 int respec_text_hook_installed(void) { return text_hook_installed; }
 static const char *test_loadout; /* BB_TEST_LOADOUT: the item list for a character named TEST */
 static const char *test_give;    /* BB_TEST_GIVE: weapon ids */
+static const char *test_stats;   /* BB_TEST_STATS: level,vit,end,str,skl,blt,arc for the loaded character */
 /* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
@@ -513,14 +514,14 @@ static void give_workshop_tools(void) {
     printf("Respec: BB_TEST_LOADOUT: Workshop tools given (Haze Extractor, Blood Gem Workshop Tool, Rune Workshop Tool)\n");
 }
 
-/* The count of a goods row held (inventory entry +8). */
-static int32_t goods_held(uint64_t pgd, int32_t id) {
+/* The count of a goods or armor row held (inventory entry +8). */
+static int32_t item_held(uint64_t pgd, uint32_t category, int32_t id) {
     uint64_t inventory = pgd + PGD_INVENTORY;
     uint32_t total = read_u32(inventory, 0x24) + read_u32(inventory, 0x14);
     int32_t held = 0;
     for (uint32_t i = 0; i < total && i < 4096; ++i) {
         uint64_t entry = inventory_entry(inventory, i);
-        if (read_u32(entry, 0) && read_u32(entry, 4) == (CATEGORY_GOODS | (uint32_t)id)) held += read_s32(entry, 8);
+        if (read_u32(entry, 0) && read_u32(entry, 4) == (category | (uint32_t)id)) held += read_s32(entry, 8);
     }
     return held;
 }
@@ -529,16 +530,20 @@ static int32_t goods_held(uint64_t pgd, int32_t id) {
 static void give_weapons(uint64_t pgd, const char *ids) {
     for (const char *p = ids; *p;) {
         char *end;
-        if (!strncmp(p, "goods:", 6)) {
-            int32_t id = (int32_t)strtol(p + 6, &end, 10), count = *end == ':' ? (int32_t)strtol(end + 1, &end, 10) : 0;
+        int armor = !strncmp(p, "armor:", 6);
+        if (armor || !strncmp(p, "goods:", 6)) {
+            uint32_t category = armor ? CATEGORY_ARMOR : CATEGORY_GOODS;
+            int32_t id = (int32_t)strtol(p + 6, &end, 10);
+            int32_t count = armor ? 1 : *end == ':' ? (int32_t)strtol(end + 1, &end, 10) : 0;
             p = *end == ',' ? end + 1 : end;
-            int32_t held = goods_held(pgd, id);
+            int32_t held = item_held(pgd, category, id);
             if (count > held) {
                 char where[1200];
                 printf("Respec: BB_TEST_GIVE: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
-                NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, CATEGORY_GOODS, id, count - held);
+                NATIVE(ChangeItemQty, CHANGE_ITEM_QTY)(0, category, id, count - held);
             }
-            printf("Respec: BB_TEST_GIVE: goods %d: %d held, now %d\n", id, held, goods_held(pgd, id));
+            printf("Respec: BB_TEST_GIVE: %s %d: %d held, now %d\n", armor ? "armor" : "goods", id, held,
+                   item_held(pgd, category, id));
             continue;
         }
         int32_t id = (int32_t)strtol(p, &end, 10), give = respec_weapon_base(id);
@@ -785,14 +790,14 @@ static void frame_update(HookRegs *regs) {
     /* A new load (the Lua event manager is recreated): the flags are saved, so a game quit with the
      * workbench's refund menu open would leave refund mode on for its own Fortify Weapon. */
     static uint64_t loaded;
-    static int loadout_checked, give_checked;
+    static int loadout_checked, give_checked, stats_checked;
     uint64_t lua = image_pointer(LUA_EVENT_MAN);
     if (lua >= 0x10000 && lua != loaded && player_data() >= 0x10000) {
         loaded = lua;
         refund_requested = 0;
         if (get_flag(FLAG_REFUND)) set_flag(FLAG_REFUND, 0); /* saved by builds before it was never stored */
         if (get_flag(FLAG_RESPEC)) set_flag(FLAG_RESPEC, 0);
-        loadout_checked = give_checked = 0;
+        loadout_checked = give_checked = 0; /* BB_TEST_STATS stays applied once a run: the save keeps it */
     }
     /* BB_TEST_LOADOUT: checked once per load, when the character is in the world. */
     if (test_loadout && !loadout_checked && in_game(&pgd)) {
@@ -801,6 +806,20 @@ static void frame_update(HookRegs *regs) {
         else if (!get_flag(FLAG_LOADOUT_GIVEN)) make_test_loadout(pgd, test_loadout);
         else if (!get_flag(FLAG_TOOLS_GIVEN)) give_workshop_tools(); /* filled before the tools were added */
         else printf("Respec: BB_TEST_LOADOUT: TEST was filled before: left alone\n");
+    }
+    if (test_stats && !stats_checked && in_game(&pgd)) {
+        stats_checked = 1;
+        RespecStats stats = {0};
+        if (sscanf(test_stats, "%d,%d,%d,%d,%d,%d,%d", &stats.level, &stats.stat[0], &stats.stat[1], &stats.stat[2],
+                   &stats.stat[3], &stats.stat[4], &stats.stat[5]) != 7 || !respec_stats_valid(&stats))
+            printf("Respec: BB_TEST_STATS: need 7 numbers, level = sum of stats - 50\n");
+        else {
+            char where[1200];
+            printf("Respec: BB_TEST_STATS: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
+            apply_stats(&stats);
+            fill_hp(pgd);
+            printf("Respec: BB_TEST_STATS: level %d\n", read_s32(pgd, PGD_LEVEL));
+        }
     }
     if (test_give && !give_checked && in_game(&pgd)) {
         give_checked = 1;
@@ -851,8 +870,7 @@ static void set_event_flag(HookRegs *regs) {
     uint64_t pgd;
     if (!in_game(&pgd)) printf("Respec: refused: not in game\n");
     else if ((current_packed_map() >> 24) != DREAM_AREA) printf("Respec: refused: not in the Hunter's Dream\n");
-    else if (in_session()) printf("Respec: refused: a co-op session is active\n");
-    else reset_attributes(pgd);
+    else reset_attributes(pgd); /* in a co-op session too (Asad, 2026-10-24): only our own character changes */
 }
 
 typedef struct {
@@ -927,6 +945,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
     }
     test_loadout = (env = getenv("BB_TEST_LOADOUT")) && *env ? env : NULL;
     test_give = (env = getenv("BB_TEST_GIVE")) && *env ? env : NULL;
+    test_stats = (env = getenv("BB_TEST_STATS")) && *env ? env : NULL;
     trace = (env = getenv("BB_RESPEC_TRACE")) && !strcmp(env, "1");
     const char *failure = hooks_init(image, size);
     for (size_t i = 0; !failure && i < count; ++i)

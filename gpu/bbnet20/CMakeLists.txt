@@ -26,7 +26,13 @@ list(FILTER BBNET20_SOURCES EXCLUDE REGEX
 file(GLOB BBNET20_BBSC_SOURCES CONFIGURE_DEPENDS bbsc/core/*.cpp bbsc/bbsc_glue.cpp)
 file(GLOB BBNET20_THD_SOURCES CONFIGURE_DEPENDS thd/*.cpp compat/common/*.cpp)
 
-add_library(bbnet20 SHARED ${BBNET20_SOURCES} ${BBNET20_THD_SOURCES} ${BBNET20_BBSC_SOURCES}
+# bbcoop: static on Windows, linked into bb-probe.exe with the GPU library (../CMakeLists.txt).
+if (WIN32)
+    set(BBNET20_LIBRARY_TYPE STATIC)
+else()
+    set(BBNET20_LIBRARY_TYPE SHARED)
+endif()
+add_library(bbnet20 ${BBNET20_LIBRARY_TYPE} ${BBNET20_SOURCES} ${BBNET20_THD_SOURCES} ${BBNET20_BBSC_SOURCES}
     "${SHADNET_PROTO_OUT20}/shadnet.pb.cc" bbnet_glue.cpp)
 target_include_directories(bbnet20 PRIVATE include bbsc compat . .. ../shim "${BBNET_VENDOR}"
     "${BBNET_VENDOR}/shadnet" "${SHADNET_PROTO_OUT20}" ../third_party/imgui ../third_party/httplib)
@@ -39,6 +45,18 @@ if (APPLE)
     # bbcoop: as gpu/bbnet on macOS: only bbnet.h's calls exported, runtime symbols from bb-probe.
     target_link_options(bbnet20 PRIVATE -Wl,-undefined,dynamic_lookup "-Wl,-exported_symbol,_bbnet_*")
     set(BBNET20_RPATH "@loader_path")
+elseif (WIN32)
+    # bbcoop: as Supermedo/bloodborne_pc builds this module on Windows: wepoll for epoll, a static
+    # miniupnpc, OpenSSL's own chain check (cpp-httplib's second one could pick an expired cross-signed
+    # root from the user's store: "SSL server verification failed"); gettid comes from ../platform/win32.
+    target_sources(bbnet20 PRIVATE ../third_party/wepoll/wepoll.c)
+    target_include_directories(bbnet20 PRIVATE ../third_party/wepoll)
+    # Its symbol table stays apart from the GPU library's, which has a SymbolsResolver of its own
+    # (one executable here; on Linux each module keeps its own with -Bsymbolic).
+    target_compile_definitions(bbnet20 PRIVATE MINIUPNP_STATICLIB NOMINMAX WIN32_LEAN_AND_MEAN
+        CPPHTTPLIB_DISABLE_WINDOWS_AUTOMATIC_ROOT_CERTIFICATES_UPDATE SymbolsResolver=BbNetSymbolsResolver)
+    target_link_libraries(bbnet20 PRIVATE ws2_32 iphlpapi bcrypt crypt32)
+    set(BBNET20_RPATH "")
 else()
     target_link_options(bbnet20 PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
     set(BBNET20_RPATH "\$ORIGIN")
