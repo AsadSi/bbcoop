@@ -1,139 +1,341 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""bbcoop: online co-op for the launcher, without any GTK.
+"""bbcoop: Host and Join for the launchers (GTK on Linux, Tk on macOS and Windows), without a toolkit.
 
-Off, Host or Join. The host's launcher runs the shadNet server (server/, built by
-scripts/build-server.sh) next to the game and shows the address and invite code to share; a
-friend enters both, and their game creates its account with the code on first contact. Friends
-connect over Tailscale (or a LAN), so the address is the host's Tailscale IP when there is one.
+Host: while the launcher is open this PC runs the group's server: shadNet (server/: accounts, bells
+and summons) and scripts/bbsc_gameserver (ss.info, the UDP 3478 relay, messages). Friends reach it
+over Tailscale at this PC's Tailscale address. Join: a host found on the tailnet, or typed in.
+Before the game starts the launcher checks that the host runs the same build (the game server's
+hello) and makes this install's account there (shadNet's Create command; its WebAPI has none).
+Asad's decisions, 2026-10-24: docs/bbcoop/brief.md, "Easy online".
 """
 
+from concurrent.futures import ThreadPoolExecutor
+import json
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
+import sys
 import time
 from pathlib import Path
+import urllib.request
 
-MODES = ("off", "host", "join")
-GAME_PORT, STUN_PORT, WEB_PORT = 31313, 31314, 31315
-
-
-def new_secret():
-    """A random code people can read out loud: invite codes and per-install passwords."""
-    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"  # no 0/o, 1/l/i
-    return "-".join("".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(3))
+GAME_PORT, STUN_PORT, WEB_PORT, SS_PORT = 31313, 31314, 31315, 20443
+HELLO = "/bbcoop/hello"
+TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+# shadNet's errors (server/src/protocol.h) that the account step explains.
+INVALID_INPUT, ALREADY_LOGGED_IN, INVALID_PASSWORD, EXISTING_USERNAME, UNAUTHORIZED = 3, 6, 8, 11, 23
 
 
-def ensure_secrets(settings):
-    """Fills the settings' invite code and password on first use; returns True when it did."""
-    changed = False
-    for key in ("coop_invite", "coop_password"):
-        if not settings.get(key):
-            settings[key] = new_secret()
-            changed = True
-    return changed
-
-
-def share_address():
-    """The address friends should use: the Tailscale IPv4 when Tailscale is up, else the LAN one."""
+def build_id(port_dir):
+    """This build: the BUILD file a package carries, else the checkout's commit, with '+' when
+    tracked files differ from it. '' when neither is known."""
+    stamp = Path(port_dir) / "BUILD"
+    if stamp.is_file():
+        return stamp.read_text(encoding="utf-8").strip()
     try:
-        run = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5)
-        if run.returncode == 0 and run.stdout.split():
-            return run.stdout.split()[0]
+        git = ["git", "-C", str(port_dir)]
+        commit = subprocess.run(git + ["rev-parse", "--short=12", "HEAD"], capture_output=True,
+                                text=True, timeout=5, check=True).stdout.strip()
+        changed = subprocess.run(git + ["status", "--porcelain", "--untracked-files=no",
+                                        "--ignore-submodules"], capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
-        pass
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-            probe.connect(("10.255.255.255", 1))  # no packet is sent; picks the outgoing interface
-            return probe.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
+        return ""
+    return commit + ("+" if changed else "")
 
 
-def environment(settings):
-    """Environment variables for run.sh. Off sets nothing: the network stays unplugged."""
-    mode = settings.get("coop_mode", "off")
-    if mode not in ("host", "join"):
-        return {}
-    server = "127.0.0.1" if mode == "host" else settings.get("coop_host", "").strip()
-    invite = settings.get("coop_invite", "") if mode == "host" else settings.get("coop_join_invite", "").strip()
-    return {
-        "BB_SHADNET_SERVER": f"{server}:{GAME_PORT}",
-        "BB_SHADNET_NPID": settings.get("coop_name") or "Hunter",
-        "BB_SHADNET_PASSWORD": settings["coop_password"],
-        "BB_SHADNET_INVITE": invite,
-        "BB_SEAMLESS": "1",
-    }
-
-
-def problem(settings, server_binary):
-    """Why co-op cannot start with these settings, or None."""
-    mode = settings.get("coop_mode", "off")
-    name = settings.get("coop_name", "")
-    if mode == "off":
+def build_problem(ours, theirs, host):
+    """Why this build cannot join the host's, or None. Local changes ('+') are not compared."""
+    if not theirs or not ours:
         return None
-    if not name or len(name) > 16 or not name.replace("-", "").replace("_", "").isalnum():
-        return "Player name: 1 to 16 letters, digits, - or _."
-    if mode == "join" and not settings.get("coop_host", "").strip():
-        return "Enter the host's address."
-    if mode == "join" and not settings.get("coop_join_invite", "").strip():
-        return "Enter the host's invite code."
-    if mode == "host" and not Path(server_binary).is_file():
-        return f"Server not built: {server_binary} (run scripts/build-server.sh)."
+    if ours.rstrip("+") != theirs.rstrip("+"):
+        return (f"{host} runs build {theirs}, this is {ours}. Co-op needs the same build on both "
+                "sides (packets change between builds): get the same download as the host.")
     return None
 
 
-def write_config(directory, invite):
-    """The server's shadnet.cfg (QSettings ini) and the data files it reads, in `directory`."""
+def valid_name(name):
+    """shadNet's rule for an account name (server/src/client_session.h, IsValidNpid)."""
+    return 3 <= len(name) <= 16 and name.replace("-", "").replace("_", "").isalnum() \
+        and name.isascii() and name != "DeletedUser"
+
+
+def new_password():
+    return secrets.token_urlsafe(18)
+
+
+def tailscale_status():
+    """`tailscale status --json`, or None without Tailscale."""
+    for cli in (shutil.which("tailscale"), TAILSCALE_APP):
+        if cli and Path(cli).exists():
+            try:
+                run = subprocess.run([cli, "status", "--json"], capture_output=True, text=True,
+                                     timeout=5)
+                return json.loads(run.stdout)
+            except (OSError, subprocess.SubprocessError, ValueError):
+                return None
+    return None
+
+
+def ipv4(addresses):
+    return next((address for address in addresses or () if "." in address), "")
+
+
+def my_address():
+    """(address friends use, note): the Tailscale IPv4, else this PC's LAN address with a note."""
+    status = tailscale_status()
+    if status and status.get("BackendState") == "Running":
+        address = ipv4(status.get("Self", {}).get("TailscaleIPs"))
+        if address:
+            return address, ""
+    note = "Tailscale is not connected: only players on your own network can join."
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("10.255.255.255", 1))  # no packet is sent; picks the outgoing interface
+            return probe.getsockname()[0], note
+    except OSError:
+        return "127.0.0.1", note
+
+
+def hello(address, timeout=3):
+    """The host's hello from its game server ({'name', 'build'}), or None."""
+    try:
+        with urllib.request.urlopen(f"http://{address}:{SS_PORT}{HELLO}", timeout=timeout) as reply:
+            answer = json.loads(reply.read(4096))
+        return answer if isinstance(answer, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def find_hosts(timeout=1.5):
+    """Online tailnet peers hosting (TCP 31313 answers): [(address, name, build)], by name. A host
+    without a hello (a server started by hand) is listed by its machine name."""
+    status = tailscale_status() or {}
+    peers = [(ipv4(peer.get("TailscaleIPs")), peer.get("HostName") or "")
+             for peer in (status.get("Peer") or {}).values() if peer.get("Online")]
+
+    def probe(peer):
+        address, machine = peer
+        try:
+            socket.create_connection((address, GAME_PORT), timeout=timeout).close()
+        except OSError:
+            return None
+        answer = hello(address, timeout) or {}
+        return address, str(answer.get("name") or machine), str(answer.get("build") or "")
+
+    peers = [peer for peer in peers if peer[0]]
+    if not peers:
+        return []
+    with ThreadPoolExecutor(max_workers=min(16, len(peers))) as pool:
+        found = [host for host in pool.map(probe, peers) if host]
+    return sorted(found, key=lambda host: host[1].lower())
+
+
+def server_fields(address):
+    """The launcher's three server settings for a host address."""
+    return {"online_server": f"{address}:{GAME_PORT}", "online_webapi": f"http://{address}:{WEB_PORT}",
+            "online_community": f"http://{address}"}
+
+
+# ---- accounts: shadNet's own protocol (server/src/protocol.h, client_session.cpp) -------------
+
+def _varint(value):
+    out = bytearray()
+    while True:
+        out.append((value & 0x7F) | (0x80 if value > 0x7F else 0))
+        value >>= 7
+        if not value:
+            return bytes(out)
+
+
+def _strings(*values):
+    """A protobuf message of string fields 1, 2, ... (RegistrationRequest, LoginRequest)."""
+    out = b""
+    for number, value in enumerate(values, 1):
+        data = value.encode()
+        out += _varint(number << 3 | 2) + _varint(len(data)) + data
+    return out
+
+
+def _receive(sock, size):
+    data = b""
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            raise OSError("the server closed the connection")
+        data += chunk
+    return data
+
+
+def _packet(sock):
+    kind, command, size, packet = struct.unpack("<BHIQ", _receive(sock, 15))
+    return kind, command, packet, _receive(sock, size - 15)
+
+
+def _call(sock, command, message, packet):
+    """One request; the reply's error byte."""
+    body = struct.pack("<I", len(message)) + message
+    sock.sendall(struct.pack("<BHIQ", 0, command, 15 + len(body), packet) + body)
+    while True:
+        kind, _command, reply_to, payload = _packet(sock)
+        if kind == 1 and reply_to == packet:
+            return payload[0] if payload else 0
+
+
+def make_account(address, name, password, timeout=8):
+    """Makes this install's account on the host's shadNet server: 'created', or 'exists' when it
+    is there already with this password. Raises ValueError with the reason otherwise."""
+    try:
+        with socket.create_connection((address, GAME_PORT), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            _packet(sock)  # ServerInfo
+            # Create (2): npid, password, avatar (the server's default), email (required, unused).
+            error = _call(sock, 2, _strings(name, password, "", f"{name.lower()}@bbcoop.invalid"), 1)
+            if error == 0:
+                return "created"
+            if error == EXISTING_USERNAME:
+                error = _call(sock, 0, _strings(name, password), 2)  # Login: is it ours?
+                if error in (0, ALREADY_LOGGED_IN):
+                    return "exists"
+                if error == INVALID_PASSWORD:
+                    raise ValueError(f'The hunter name "{name}" is taken on this host. '
+                                     "Pick another name.")
+    except OSError as failure:
+        raise ValueError(f"The host's server does not answer ({failure}).") from failure
+    if error == INVALID_INPUT:
+        raise ValueError("Hunter name: 3 to 16 letters, digits, - or _.")
+    if error == UNAUTHORIZED:
+        raise ValueError("This server takes new accounts only with its owner's key.")
+    raise ValueError(f"The host's server refused the account (shadNet error {error}).")
+
+
+def prepare_join(address, name, password, build):
+    """Checks the host and makes the account before the game starts; raises ValueError."""
+    answer = hello(address)
+    if answer is None:
+        try:
+            socket.create_connection((address, GAME_PORT), timeout=4).close()
+        except OSError:
+            raise ValueError(f"Nobody is hosting at {address}: the host picks Host in their "
+                             "launcher, and both of you need Tailscale on.") from None
+        raise ValueError(f"{address} runs a server but no bbcoop host (its game server on "
+                         f"port {SS_PORT} does not answer).")
+    problem = build_problem(build, str(answer.get("build") or ""), answer.get("name") or address)
+    if problem:
+        raise ValueError(problem)
+    return make_account(address, name, password)
+
+
+# ---- hosting ---------------------------------------------------------------------------------
+
+def shadnet_binary(port_dir):
+    """The shadNet server: a package's (bin/), else a source build (scripts/build-server.sh)."""
+    port_dir = Path(port_dir)
+    for candidate in (port_dir / "bin" / "shadnet.app" / "Contents" / "MacOS" / "shadnet",
+                      port_dir / "bin" / "shadnet", port_dir / "server" / "build-mac" / "shadnet",
+                      port_dir / "server" / "build-linux" / "shadnet"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def write_config(directory, address):
+    """shadNet's shadnet.cfg (QSettings ini): Bloodborne's co-op on, open registration (only the
+    tailnet reaches this address), no stats server."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "shadnet.cfg").write_text(
         "[General]\n"
-        "Host=0.0.0.0\n"
+        f"Host={address}\n"
         f"UnsecuredPort={GAME_PORT}\n"
         f"MatchingUdpPort={STUN_PORT}\n"
         f"WebApiPort={WEB_PORT}\n"
         "Matching2Enabled=true\n"
         "BloodborneSeamlessCoop=true\n"
-        f"RegistrationSecretKey={invite}\n"
+        "RegistrationSecretKey=\n"
         "EmailValidated=false\n"
         "StatsEnabled=false\n"
-        "AdminsList=\n")
+        "AdminsList=\n", encoding="utf-8")
 
 
-class HostServer:
-    """The shadNet server process while hosting."""
+def _wait(check, process, what, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"{what} exited ({process.returncode}); see its log")
+        if check():
+            return
+        time.sleep(0.2)
+    raise RuntimeError(f"{what} did not start")
 
-    def __init__(self, binary, directory):
-        self.binary = Path(binary)
-        self.directory = Path(directory)
-        self.process = None
 
-    def start(self, invite, log, timeout=15):
-        """Starts the server and waits until its WebAPI port answers. Raises RuntimeError."""
-        write_config(self.directory, invite)
-        for data in ("worlds.cfg", "scoreboards.cfg"):
-            source = self.binary.parent / data
-            if source.is_file():
-                shutil.copy(source, self.directory / data)
-        self.process = subprocess.Popen([str(self.binary)], cwd=self.directory, stdout=log,
-                                        stderr=subprocess.STDOUT)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self.process.poll() is not None:
-                raise RuntimeError(f"the server exited ({self.process.returncode}); see its log")
-            try:
-                socket.create_connection(("127.0.0.1", WEB_PORT), timeout=0.5).close()
-                return
-            except OSError:
-                time.sleep(0.2)
+def _answers(address, port):
+    try:
+        socket.create_connection((address, port), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+class Host:
+    """The group's server on this PC while hosting. `python` runs a script: [python] or, frozen,
+    [the launcher, '--script']."""
+
+    def __init__(self, port_dir, data_dir, python):
+        self.port_dir, self.directory = Path(port_dir).resolve(), Path(data_dir).resolve() / "host"
+        self.python = python
+        self.processes = []
+        self.address = ""
+
+    def running(self):
+        return bool(self.processes) and all(process.poll() is None for process in self.processes)
+
+    def start(self, address, name, build):
+        """Starts shadNet and the game server on `address`; raises RuntimeError."""
         self.stop()
-        raise RuntimeError("the server did not start listening")
+        binary = shadnet_binary(self.port_dir)
+        if binary is None:
+            raise RuntimeError("This build has no server (scripts/build-server.sh builds it).")
+        server = self.directory / "shadnet"
+        write_config(server, address)
+        for data in ("worlds.cfg", "scoreboards.cfg"):
+            for source in (binary.parent / data, self.port_dir / "server" / data):
+                if source.is_file():
+                    shutil.copy(source, server / data)
+                    break
+        logs = self.directory / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        flags = {"start_new_session": True} if sys.platform != "win32" else \
+            {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        try:
+            with open(logs / "shadnet.log", "ab") as log:
+                shadnet = subprocess.Popen([str(binary)], cwd=server, stdout=log,
+                                           stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
+            self.processes.append(shadnet)
+            _wait(lambda: _answers(address, GAME_PORT), shadnet, "The shadNet server", 15)
+            script = self.port_dir / "scripts" / "bbsc_gameserver" / "bbsc_gameserver.py"
+            with open(logs / "gameserver-console.log", "ab") as log:
+                game = subprocess.Popen(
+                    [*self.python, str(script), "--shadnet", address, "--host", address,
+                     "--advertise", address, "--data", str(self.directory / "online-data.json"),
+                     "--log-dir", str(logs), "--bbcoop-name", name, "--bbcoop-build", build],
+                    cwd=script.parent, stdout=log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, **flags)
+            self.processes.append(game)
+            _wait(lambda: hello(address, 0.5) is not None, game, "The game server", 15)
+        except (OSError, RuntimeError) as failure:
+            self.stop()
+            raise RuntimeError(str(failure)) from failure
+        self.address = address
 
     def stop(self):
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-        self.process = None
+        for process in reversed(self.processes):
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+        self.processes = []
+        self.address = ""

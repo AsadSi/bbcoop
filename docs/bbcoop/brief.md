@@ -73,6 +73,41 @@ Supporting pieces:
 - **Build now:** a launcher Host/Join panel. The host sees "share this IP and code"; a guest enters the host's IP and code.
 - **Later:** an in-game session overlay showing who's connected.
 
+## Easy online (plan, 2026-10-25)
+
+Asad's decisions (2026-10-24, final): the host's launcher runs the server (no rented server; Seamless Hunt
+dropped as the default). Guests join over Tailscale (no UPnP on Asad's router). Accounts are made on first
+start from a hunter name only. Friends get a prebuilt download: an unsigned Mac `.app` zip and the Linux
+AppImage. Mac first, Linux second, Windows later.
+
+Engineering calls (Claude):
+- **One toolkit-free module, two windows.** `launcher/bbcoop_online.py` holds hosting, the peer list,
+  accounts and the build check. The GTK launcher (Linux) and the Tk launcher (`bbport_launcher_win.py`,
+  already frozen with PyInstaller on Windows) both call it. The Tk launcher becomes the Mac launcher too:
+  GTK and libadwaita don't freeze well on macOS, and Windows gets the same page for free later.
+- **Build check:** a build is its git commit (`git rev-parse`, or the `BUILD` file a package carries).
+  The host's game server answers `GET :20443/bbcoop/hello` with its build and hunter name. Join
+  refuses a host on another commit and names both commits.
+- **Peers:** `tailscale status --json`, online peers whose TCP 31313 answers, named by their hello.
+- **Accounts:** shadNet's own Create command (TCP 31313; the WebAPI has no account route), sent by the
+  launcher before the game starts. One name and one generated password per install, created on each
+  host the first time; "name taken" if another install already has it there. Open registration:
+  only the tailnet reaches the server.
+- **Host processes:** shadNet and `bbsc_gameserver.py` start when Host is picked and stop when it's
+  unpicked or the launcher quits. The host's own game uses the same address its guests do.
+- **Mac app:** PyInstaller's `.app` with the port in `Contents/Resources/port` (run.sh, scripts,
+  `bin/`: bb-probe, libbbgpu, libbbnet20, MoltenVK, SDL3, Vulkan loader) and shadNet with its Qt
+  (macdeployqt). Ad hoc signed. The frozen launcher runs the port's Python scripts (`--script`), so
+  friends need no Python. Settings and data go in `~/Library/Application Support/bbcoop`.
+
+Steps (each built and verified before the next):
+0. Merge `windows` into `main`; the build check.
+1. Online page: Off / Host / Join / Other server (the old manual fields). Host shows "Your address".
+2. Join: hosts found on the tailnet, plus a manual address box; the three server fields follow it.
+3. Accounts: first start asks for a hunter name; password generated; account made on join.
+4. Mac `.app` zip, then the AppImage with the server and the respec tools.
+5. `docs/bbcoop/friends.md` rewritten; Mac host / Linux join and the reverse; a fresh account.
+
 ## Reference values (to check against v1.09's own tables)
 
 - **Level cost above level 12:** the community model is 0.02x³ + 3.06x² + 105.6x − 895 Blood Echoes at hunter level x (Fextralife; gamerguides.com). Respec refunds should use the game's own cost function once it's located, not this formula.

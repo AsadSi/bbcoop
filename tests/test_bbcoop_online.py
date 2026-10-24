@@ -1,7 +1,6 @@
-"""bbcoop: the launcher's co-op settings, environment and host server lifecycle (no GTK)."""
+"""bbcoop: the launchers' Host and Join (launcher/bbcoop_online.py, no GTK or Tk)."""
 from paths import ROOT
 import socket
-import stat
 import sys
 import tempfile
 import unittest
@@ -11,94 +10,74 @@ sys.path.insert(0, str(ROOT / 'launcher'))
 import bbcoop_online  # noqa: E402
 
 
-class SettingsTests(unittest.TestCase):
-    def test_secrets_fill_once(self):
-        settings = {}
-        self.assertTrue(bbcoop_online.ensure_secrets(settings))
-        invite, password = settings['coop_invite'], settings['coop_password']
-        self.assertRegex(invite, r'^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$')
-        self.assertNotEqual(invite, password)
-        self.assertFalse(bbcoop_online.ensure_secrets(settings))
-        self.assertEqual(settings['coop_invite'], invite)
+class RulesTests(unittest.TestCase):
+    def test_build_problem(self):
+        self.assertIsNone(bbcoop_online.build_problem('abc', 'abc', 'Eileen'))
+        self.assertIsNone(bbcoop_online.build_problem('abc+', 'abc', 'Eileen'))  # local changes
+        self.assertIsNone(bbcoop_online.build_problem('abc', '', 'Eileen'))  # an older host
+        problem = bbcoop_online.build_problem('abc', 'def', 'Eileen')
+        self.assertIn('Eileen runs build def, this is abc', problem)
 
-    def test_environment(self):
-        base = {'coop_name': 'Eileen', 'coop_password': 'pw', 'coop_invite': 'mine',
-                'coop_host': ' 100.64.0.7 ', 'coop_join_invite': ' theirs '}
-        self.assertEqual(bbcoop_online.environment({**base, 'coop_mode': 'off'}), {})
-        host = bbcoop_online.environment({**base, 'coop_mode': 'host'})
-        self.assertEqual(host['BB_SHADNET_SERVER'], '127.0.0.1:31313')
-        self.assertEqual(host['BB_SHADNET_INVITE'], 'mine')
-        self.assertEqual(host['BB_SEAMLESS'], '1')
-        join = bbcoop_online.environment({**base, 'coop_mode': 'join'})
-        self.assertEqual(join['BB_SHADNET_SERVER'], '100.64.0.7:31313')
-        self.assertEqual(join['BB_SHADNET_INVITE'], 'theirs')
-        self.assertEqual(join['BB_SHADNET_NPID'], 'Eileen')
-
-    def test_problems(self):
+    def test_build_id(self):
         with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory) / 'shadnet'
-            ok = {'coop_mode': 'join', 'coop_name': 'Eileen', 'coop_host': '100.64.0.7',
-                  'coop_join_invite': 'abcd'}
-            self.assertIsNone(bbcoop_online.problem({'coop_mode': 'off'}, binary))
-            self.assertIsNone(bbcoop_online.problem(ok, binary))
-            self.assertIn('name', bbcoop_online.problem({**ok, 'coop_name': ''}, binary))
-            self.assertIn('name', bbcoop_online.problem({**ok, 'coop_name': 'a b'}, binary))
-            self.assertIn('address', bbcoop_online.problem({**ok, 'coop_host': ' '}, binary))
-            self.assertIn('invite', bbcoop_online.problem({**ok, 'coop_join_invite': ''}, binary))
-            self.assertIn('not built', bbcoop_online.problem({**ok, 'coop_mode': 'host'}, binary))
-            binary.touch()
-            self.assertIsNone(bbcoop_online.problem({**ok, 'coop_mode': 'host'}, binary))
+            (Path(directory) / 'BUILD').write_text('0123456789ab\n')
+            self.assertEqual(bbcoop_online.build_id(directory), '0123456789ab')
+        self.assertRegex(bbcoop_online.build_id(ROOT), r'^[0-9a-f]{12}\+?$')
+
+    def test_names(self):
+        for name in ('Eileen', 'old_hunter-2', 'abc'):
+            self.assertTrue(bbcoop_online.valid_name(name), name)
+        for name in ('ab', 'a' * 17, 'a b', 'Gehrmanø', 'DeletedUser', ''):
+            self.assertFalse(bbcoop_online.valid_name(name), name)
+
+    def test_server_fields(self):
+        self.assertEqual(bbcoop_online.server_fields('100.64.0.7'), {
+            'online_server': '100.64.0.7:31313', 'online_webapi': 'http://100.64.0.7:31315',
+            'online_community': 'http://100.64.0.7'})
+
+    def test_registration_message(self):
+        # protobuf: field 1 "abc" (0x0a 3 ...), field 2 "" (0x12 0)
+        self.assertEqual(bbcoop_online._strings('abc', ''), b'\x0a\x03abc\x12\x00')
+        self.assertEqual(bbcoop_online._varint(300), b'\xac\x02')
 
     def test_server_config(self):
         with tempfile.TemporaryDirectory() as directory:
-            bbcoop_online.write_config(Path(directory), 'abcd-efgh-jkmn')
-            config = (Path(directory) / 'shadnet.cfg').read_text()
-            for line in ('Host=0.0.0.0', 'RegistrationSecretKey=abcd-efgh-jkmn', 'BloodborneSeamlessCoop=true',
+            bbcoop_online.write_config(Path(directory), '100.64.0.7')
+            config = (Path(directory) / 'shadnet.cfg').read_text().splitlines()
+            for line in ('Host=100.64.0.7', 'RegistrationSecretKey=', 'BloodborneSeamlessCoop=true',
                          'Matching2Enabled=true', 'WebApiPort=31315'):
-                self.assertIn(line, config.splitlines())
+                self.assertIn(line, config)
 
 
-class HostServerTests(unittest.TestCase):
-    """HostServer against a stand-in that listens on the WebAPI port like the real server."""
+@unittest.skipUnless(bbcoop_online.shadnet_binary(ROOT), 'no shadNet build (scripts/build-server.sh)')
+class HostTests(unittest.TestCase):
+    """The real server and game server on 127.0.0.1: hello, accounts, the build check."""
 
     def setUp(self):
-        probe = socket.socket()
-        if probe.connect_ex(('127.0.0.1', bbcoop_online.WEB_PORT)) == 0:
-            probe.close()
-            self.skipTest('port 31315 is in use')
-        probe.close()
+        for port in (bbcoop_online.GAME_PORT, bbcoop_online.SS_PORT):
+            with socket.socket() as probe:
+                if probe.connect_ex(('127.0.0.1', port)) == 0:
+                    self.skipTest(f'port {port} is in use')
+        self.directory = tempfile.TemporaryDirectory()
+        self.host = bbcoop_online.Host(ROOT, self.directory.name, [sys.executable])
+        self.host.start('127.0.0.1', 'Eileen', 'abc')
+        self.addCleanup(self.directory.cleanup)
+        self.addCleanup(self.host.stop)
 
-    def stand_in(self, directory, body):
-        binary = Path(directory) / 'bin' / 'shadnet'
-        binary.parent.mkdir()
-        binary.write_text(f'#!{sys.executable}\n{body}')
-        binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
-        (binary.parent / 'worlds.cfg').write_text('worlds')
-        return binary
-
-    def test_start_and_stop(self):
-        with tempfile.TemporaryDirectory() as directory:
-            binary = self.stand_in(directory, (
-                'import socket, time\n'
-                's = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n'
-                f's.bind(("127.0.0.1", {bbcoop_online.WEB_PORT})); s.listen()\n'
-                'while True: time.sleep(1)\n'))
-            server = bbcoop_online.HostServer(binary, Path(directory) / 'run')
-            with open(Path(directory) / 'log', 'w') as log:
-                server.start('abcd', log)
-            self.assertIn('RegistrationSecretKey=abcd', (Path(directory) / 'run' / 'shadnet.cfg').read_text())
-            self.assertEqual((Path(directory) / 'run' / 'worlds.cfg').read_text(), 'worlds')
-            process = server.process
-            server.stop()
-            self.assertIsNotNone(process.poll())
-            self.assertIsNone(server.process)
-
-    def test_server_that_exits(self):
-        with tempfile.TemporaryDirectory() as directory:
-            binary = self.stand_in(directory, 'raise SystemExit(3)\n')
-            server = bbcoop_online.HostServer(binary, Path(directory) / 'run')
-            with open(Path(directory) / 'log', 'w') as log, self.assertRaisesRegex(RuntimeError, 'exited'):
-                server.start('abcd', log, timeout=5)
+    def test_host(self):
+        self.assertTrue(self.host.running())
+        self.assertEqual(bbcoop_online.hello('127.0.0.1'), {'name': 'Eileen', 'build': 'abc'})
+        self.assertEqual(bbcoop_online.prepare_join('127.0.0.1', 'Djura', 'pw1', 'abc'), 'created')
+        self.assertEqual(bbcoop_online.prepare_join('127.0.0.1', 'Djura', 'pw1', 'abc+'), 'exists')
+        with self.assertRaisesRegex(ValueError, 'taken'):
+            bbcoop_online.make_account('127.0.0.1', 'Djura', 'pw2')
+        with self.assertRaisesRegex(ValueError, 'runs build abc, this is def'):
+            bbcoop_online.prepare_join('127.0.0.1', 'Alfred', 'pw', 'def')
+        processes = list(self.host.processes)
+        self.host.stop()
+        self.assertTrue(all(process.poll() is not None for process in processes))
+        with self.assertRaisesRegex(ValueError, 'Nobody is hosting'):
+            bbcoop_online.prepare_join('127.0.0.1', 'Alfred', 'pw', 'abc')
 
 
 if __name__ == '__main__':
