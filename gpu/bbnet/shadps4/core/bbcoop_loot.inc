@@ -21,10 +21,19 @@
 // (Madman's Knowledge, Coldblood Dew...) are mirrored as items like any other pickup; nothing is
 // used up for the receiver.
 //
+// Treasures (2026-10-24, Asad: "whoever picks a treasure up first gets it and the other gets a
+// copy"): in a session every hunter has its own copy of each MSB treasure of the host's world (BBSC's
+// guest items). The packet names the treasure by its pickup flag (map item +0x28, ItemLotParam
+// getItemFlagId: the same in every game, unlike the item's number); the receiver gives the copy,
+// then takes its own copy of that treasure out of the world the way the game's take does
+// (0x017D6780 with "mark taken": the flag is set, the item and its glow are gone). A receiver whose
+// own pickup took the same treasure (both pressed at once) gives nothing: one each.
+//
 // SHADPS4_BBSC_MIRROR_LOOT=0 turns it off (and BBSC's own per-guest roll of enemy drops back on, as
 // does a hook that did not go in).
 // Test seam: SHADPS4_BBSC_MIRROR_LOOT_INJECT=<file>, polled once a second: each line
-// "<item code> <count> [source]" becomes a packet from a made-up peer and goes the receive way.
+// "<item code> <count> [source] [treasure flag]" becomes a packet from a made-up peer and goes the
+// receive way.
 
 namespace {
 
@@ -34,6 +43,10 @@ constexpr std::array<u8, 10> ItemGetHookBytes{0x49, 0x89, 0xF7,                 
 constexpr u64 ItemGetOffset = 0x017D89F0;     // (item manager, list)
 constexpr u64 TakeItemReturn1 = 0x017D8758;   // the pickup action's take 0x017D8570, map item in R13
 constexpr u64 TakeItemReturn2 = 0x017D88D3;
+constexpr u64 TakeItemFoundOffset = 0x017D85B0; // in the take: the map item found, in R13
+constexpr std::array<u8, 7> TakeItemFoundBytes{0x41, 0x0F, 0xB7, 0x45, 0x48, // MOVZX EAX, [R13+0x48]
+                                               0xA8, 0x40};                  // TEST AL, 0x40
+constexpr u64 RemoveMapItemOffset = 0x017D6780; // (item man, &number, mark taken), the take's removal
 constexpr u64 HandedItemReturn = 0x017D3E8C;  // item packet handler 0x017D2F30: the host's answer
 constexpr u64 AwardLotReturn = 0x017DE33B;    // item lot award 0x017DDC50 (AwardItemLotOffset)
 constexpr u64 EventAwardReturn = 0x017C180B;  // event instruction 2003[04] in 0x017C0420
@@ -43,6 +56,7 @@ constexpr u64 ArmorGenerateOffset = 0x01A87390;  // (out, instances, id)
 constexpr u64 GemGenerateOffset = 0x01A88130;    // (out, instances, doping, modify, features, id)
 constexpr u64 HandleReleaseOffset = 0x01A8BC00;
 constexpr size_t LootItemsMax = 6; // an item lot's and a map item's six slots
+constexpr u32 LootPacketV1Size = 72;  // version 1: no treasure
 constexpr s64 LootApplyGapMs = 300;
 constexpr std::array<s64, 2> LootResendMs{300, 1'500};
 
@@ -68,7 +82,7 @@ std::string_view LootSourceName(u8 source) {
 struct BbcoopLootPacket {
     u8 magic[4] = {'S', 'H', 'A', 'D'};
     u8 type = kBbcoopLootPacketType;
-    u8 version = 1;
+    u8 version = 2;
     u8 source = 0;   // LootSource
     u8 count = 0;    // items, 1..6
     u32 sender = 0;  // the sending game's id (random per run)
@@ -79,8 +93,10 @@ struct BbcoopLootPacket {
         u32 code; // category << 28 | id: weapon 0, armor 1, ring 2, goods 4, gem 8 (generator id)
         u32 count;
     } items[LootItemsMax]{};
+    s32 treasure_flag = -1; // version 2: the MSB treasure's pickup flag (map item +0x28), else -1
+    u32 treasure_item = 0;  // version 2: its map item number << 4 | 3 in the sender's game (the log)
 };
-static_assert(sizeof(BbcoopLootPacket) == 72);
+static_assert(sizeof(BbcoopLootPacket) == 80);
 #pragma pack(pop)
 
 struct BbcoopLootOut {
@@ -96,6 +112,12 @@ std::vector<BbcoopLootPacket> bbcoop_loot_inbox;
 std::vector<u64> bbcoop_loot_seen; // sender << 32 | sequence of packets taken
 std::atomic<u32> bbcoop_loot_sequence{0};
 std::atomic<bool> bbcoop_loot_hooked{false}; // the switch is on and the hook is in
+std::vector<s32> bbcoop_loot_treasures; // pickup flags of the treasures we took or were given
+struct BbcoopTake {
+    u32 item = 0; // number << 4 | kind
+    s32 flag = -1;
+};
+thread_local BbcoopTake bbcoop_loot_take; // the map item the take found, read before it is removed
 
 u32 BbcoopLootSender() {
     static const u32 id = static_cast<u32>(
@@ -130,6 +152,19 @@ T FrameValue(u64 address) {
     return value;
 }
 
+void NoteBbcoopTreasure(s32 flag) {
+    std::scoped_lock lock{bbcoop_loot_mutex};
+    bbcoop_loot_treasures.push_back(flag);
+}
+
+// In the take 0x017D8570, right after it found the map item: its number and pickup flag, before
+// 0x017D6780 removes it (ItemGet runs after that).
+void PS4_SYSV_ABI BbcoopLootTakeHook(u64 /*tag*/, const GuestRegisterSnapshot* registers) {
+    if (registers != nullptr) {
+        bbcoop_loot_take = {ReadValue<u32>(registers->r13, 0x20), ReadValue<s32>(registers->r13, 0x28)};
+    }
+}
+
 void PS4_SYSV_ABI BbcoopLootItemGetHook(u64 /*tag*/, const GuestRegisterSnapshot* registers) {
     if (registers == nullptr) {
         return;
@@ -149,7 +184,29 @@ void PS4_SYSV_ABI BbcoopLootItemGetHook(u64 /*tag*/, const GuestRegisterSnapshot
     if (site == TakeItemReturn1 || site == TakeItemReturn2) {
         // The map item (+0x20: its number << 4 | kind; kind 2 is what an enemy drops, 0x017DD0B0).
         const u32 item = ReadValue<u32>(registers->r13, 0x20);
-        packet.source = static_cast<u8>((item & 0xF) == 2 ? LootSource::EnemyDrop : LootSource::Pickup);
+        if ((item & 0xF) == 1) {
+            // ItemGet's own ground drop (0x017DA960 writes kind 1): what didn't fit when it was given,
+            // a mirrored copy already; sending it on gives the partner one more on every pickup.
+            LOG_INFO(Debug, "bbcoop loot: an item that didn't fit picked up again - not mirrored");
+            return;
+        }
+        if ((item & 0xF) == 2) {
+            // Every hunter's game drops its own copy when an enemy dies, so a mirrored one doubled it
+            // (both players' logs, 2026-10-24).
+            LOG_INFO(Debug, "bbcoop loot: enemy drop - every hunter has its own, not mirrored");
+            return;
+        }
+        packet.source = static_cast<u8>(LootSource::Pickup);
+        const BbcoopTake take = std::exchange(bbcoop_loot_take, {});
+        if ((take.item & 0xF) == 3 && take.flag > 0) {
+            // An MSB treasure: remembered as ours, and named in the packet while we stand in the
+            // session's world (the host's), where every hunter has a copy of it.
+            NoteBbcoopTreasure(take.flag);
+            if (GetSessionState() == 3 || BbscGuestInHostWorld()) {
+                packet.treasure_flag = take.flag;
+                packet.treasure_item = take.item;
+            }
+        }
     } else if (site == HandedItemReturn) {
         packet.source = static_cast<u8>(LootSource::HandedPickup);
     } else if (site == AwardLotReturn) {
@@ -188,9 +245,10 @@ void PS4_SYSV_ABI BbcoopLootItemGetHook(u64 /*tag*/, const GuestRegisterSnapshot
         std::scoped_lock lock{bbcoop_loot_mutex};
         bbcoop_loot_outbox.push_back({packet, 0, SteadyNowMs()});
     }
-    LOG_INFO(Debug, "bbcoop loot: {} [{}] lot {} map {:#x} - packet {} sent to {} peer(s)",
+    LOG_INFO(Debug, "bbcoop loot: {} [{}] lot {} map {:#x} treasure flag {} (item {:#x}) - packet {} "
+                    "sent to {} peer(s)",
              LootSourceName(packet.source), LootItemsText(packet), packet.lot, packet.map,
-             packet.sequence, peers);
+             packet.treasure_flag, packet.treasure_item, packet.sequence, peers);
 }
 
 // UDP: each packet goes twice more; the receiver keeps the first.
@@ -277,12 +335,76 @@ bool BbcoopLootCanGive() {
            (!ReadablePointer(menu, 0x2F4) || ReadValue<u32>(menu, 0x2F0) == 0);
 }
 
+// The treasure a partner took is ours already: our own pickup took it in this run (both pressed at
+// once: each keeps the one it took), another partner's copy was given for it (three hunters), or, as
+// the host, our world has it taken (picked up before the session).
+// A guest's flag is no proof: the host's game tells the guest's to drop the item of that number
+// (packet 0x2C kind 2, 0x017D34D1 -> 0x017D6780), which sets the guest's flag as well.
+bool BbcoopHasTreasure(s32 flag) {
+    {
+        std::scoped_lock lock{bbcoop_loot_mutex};
+        if (std::ranges::find(bbcoop_loot_treasures, flag) != bbcoop_loot_treasures.end()) {
+            return true;
+        }
+    }
+    return GetSessionState() == 3 && BbscEventFlag(static_cast<u32>(flag));
+}
+
+// Our copy of the treasure a partner took: out of the world as our own take would do it
+// (0x017D6780 with "mark taken": pickup flag set - on a guest through GuestItems.MarkTaken - the
+// item and its glow removed, nothing sent to the others). Only in the session's world: the host's
+// own, or a guest's in the host's with BBSC's guest items on (its copies).
+void HideBbcoopTreasure(const BbcoopLootPacket& packet) {
+    const s32 flag = packet.treasure_flag;
+    static const bool guest_items = EnvFlagEnabled("SHADPS4_BBSC_GUEST_ITEMS");
+    if (GetSessionState() != 3 && !(guest_items && BbscGuestInHostWorld())) {
+        LOG_INFO(Debug, "bbcoop loot: treasure flag {} - we are not in the session's world, nothing "
+                        "hidden",
+                 flag);
+        return;
+    }
+    const u64 manager = ReadValue<u64>(image_base + ItemManagerPointerOffset, 0);
+    std::vector<u32> ids;
+    for (size_t list = 0; list < 3 && ReadablePointer(manager, 0x40); ++list) {
+        u64 item = ReadValue<u64>(manager, 0x18 + list * 0x10);
+        for (int guard = 0; item != 0 && guard < 1024 && ReadablePointer(item, 0x50); ++guard) {
+            if ((ReadValue<u32>(item, 0x20) & 0xF) == 3 && ReadValue<s32>(item, 0x28) == flag) {
+                ids.push_back(ReadValue<u32>(item, 0x20));
+            }
+            item = ReadValue<u64>(item, 0);
+        }
+    }
+    using RemoveMapItem = void PS4_SYSV_ABI (*)(u64 manager, u32* id, u32 mark_taken);
+    for (u32 id : ids) {
+        reinterpret_cast<RemoveMapItem>(image_base + RemoveMapItemOffset)(manager, &id, 1);
+    }
+    // Not lying here (another block, or not spawned): the flag alone keeps it from appearing.
+    const bool set_flag = ids.empty() && !BbscEventFlag(static_cast<u32>(flag)) &&
+                          ReadValue<u64>(image_base + 0x0553B0D8, 0) != 0 &&
+                          ReadValue<u64>(image_base + EventFlagManPointerOffset, 0) != 0;
+    if (set_flag) {
+        using SetEventFlag = u64 PS4_SYSV_ABI (*)(u64 unused, u32 flag, u8 value);
+        reinterpret_cast<SetEventFlag>(image_base + 0x0132E5A0)(0, static_cast<u32>(flag), 1);
+    }
+    LOG_INFO(Debug, "bbcoop loot: treasure flag {} (partner's item {:#x}) - our copy {}, map {:#x}",
+             flag, packet.treasure_item,
+             !ids.empty() ? fmt::format("{:#x} taken out of the world", ids.front())
+                          : (set_flag ? "not lying here, flag set" : "already gone"),
+             GetCurrentPackedMap());
+}
+
 void GiveBbcoopLoot(const BbcoopLootPacket& packet) {
     if (packet.source == static_cast<u8>(LootSource::BossDrop) && GetSessionState() == 6 &&
         EnvFlagEnabled("SHADPS4_BBSC_GUEST_ITEMS")) {
         LOG_INFO(Debug, "bbcoop loot: boss drop [{}] (lot {}) not given - BBSC gives the guest "
                         "this boss's reward itself",
                  LootItemsText(packet), packet.lot);
+        return;
+    }
+    if (packet.treasure_flag > 0 && BbcoopHasTreasure(packet.treasure_flag)) {
+        LOG_INFO(Debug, "bbcoop loot: treasure flag {} [{}] (packet {} of {:08x}) not given - we "
+                        "have that treasure already",
+                 packet.treasure_flag, LootItemsText(packet), packet.sequence, packet.sender);
         return;
     }
     // The list as the item lot award 0x017DDC50 builds it: count, six {handle, code, count, -1}.
@@ -321,13 +443,19 @@ void GiveBbcoopLoot(const BbcoopLootPacket& packet) {
         using Release = void PS4_SYSV_ABI (*)(u32* handle);
         reinterpret_cast<Release>(image_base + HandleReleaseOffset)(&list.items[i].handle);
     }
-    LOG_INFO(Debug, "bbcoop loot: given a {}'s {} [{}] (packet {} of {:08x}, map {:#x}){}",
+    LOG_INFO(Debug, "bbcoop loot: given a {}'s {} [{}] (packet {} of {:08x}, map {:#x}, treasure "
+                    "flag {}){}",
              packet.source == static_cast<u8>(LootSource::Test) ? "test" : "co-op partner",
              LootSourceName(packet.source), LootItemsText(packet), packet.sequence, packet.sender,
-             packet.map, counts);
+             packet.map, packet.treasure_flag, counts);
+    if (packet.treasure_flag > 0) {
+        NoteBbcoopTreasure(packet.treasure_flag);
+        HideBbcoopTreasure(packet);
+    }
 }
 
-// The test seam: SHADPS4_BBSC_MIRROR_LOOT_INJECT=<file>, one "<code> <count> [source]" per line.
+// The test seam: SHADPS4_BBSC_MIRROR_LOOT_INJECT=<file>, one "<code> <count> [source] [treasure
+// flag]" per line.
 void PollBbcoopLootInject(s64 now) {
     static const char* path = std::getenv("SHADPS4_BBSC_MIRROR_LOOT_INJECT");
     static s64 last_ms = 0;
@@ -352,6 +480,7 @@ void PollBbcoopLootInject(s64 now) {
         const u32 code = static_cast<u32>(std::strtoul(line.c_str(), &end, 0));
         const u32 count = static_cast<u32>(std::strtoul(end, &end, 0));
         const u32 source = static_cast<u32>(std::strtoul(end, &end, 0));
+        const s32 treasure = static_cast<s32>(std::strtol(end, &end, 0));
         if (count == 0) {
             continue;
         }
@@ -362,6 +491,7 @@ void PollBbcoopLootInject(s64 now) {
         packet.sequence = ++sequence;
         packet.map = GetCurrentPackedMap();
         packet.items[0] = {code, count};
+        packet.treasure_flag = treasure > 0 ? treasure : -1;
         LOG_INFO(Debug, "bbcoop loot: test packet [{}] injected from {}", LootItemsText(packet), path);
         OnBbcoopLootPacket(&packet, sizeof(packet));
     }
@@ -374,14 +504,15 @@ bool BbcoopLootMirroring() {
 }
 
 void OnBbcoopLootPacket(const void* data, std::uint32_t size) {
-    BbcoopLootPacket packet;
-    if (!BbcoopLootMirroring() || data == nullptr || size != sizeof(packet)) {
+    BbcoopLootPacket packet; // a version 1 packet (no treasure) keeps treasure_flag -1
+    if (!BbcoopLootMirroring() || data == nullptr ||
+        (size != sizeof(packet) && size != LootPacketV1Size)) {
         return;
     }
-    std::memcpy(&packet, data, sizeof(packet));
+    std::memcpy(&packet, data, size);
     if (std::memcmp(packet.magic, "SHAD", 4) != 0 || packet.type != kBbcoopLootPacketType ||
-        packet.version != 1 || packet.count == 0 || packet.count > LootItemsMax ||
-        packet.sender == BbcoopLootSender()) {
+        packet.version != (size == LootPacketV1Size ? 1 : 2) || packet.count == 0 ||
+        packet.count > LootItemsMax || packet.sender == BbcoopLootSender()) {
         return;
     }
     const u64 key = u64{packet.sender} << 32 | packet.sequence;
@@ -412,10 +543,14 @@ void InstallBbcoopLoot() {
         InstallGuestCodeHook(reinterpret_cast<void*>(image_base + ItemGetHookOffset),
                              std::span<const u8>{ItemGetHookBytes}, 0, BbcoopLootItemGetHook);
     bbcoop_loot_hooked.store(hooked, std::memory_order_release);
+    // Without it a treasure is mirrored as a plain pickup: given, but no copy is taken away.
+    const bool take = hooked && InstallGuestCodeHook(
+                                    reinterpret_cast<void*>(image_base + TakeItemFoundOffset),
+                                    std::span<const u8>{TakeItemFoundBytes}, 0, BbcoopLootTakeHook);
     if (hooked) {
         LOG_INFO(Debug, "bbcoop loot: mirroring pickups, enemy drops and boss drops (ItemGet hook "
-                        "at {:#x}, sender {:08x})",
-                 ItemGetHookOffset, BbcoopLootSender());
+                        "at {:#x}, sender {:08x}); treasures shared first grab (take hook at {:#x}: {})",
+                 ItemGetHookOffset, BbcoopLootSender(), TakeItemFoundOffset, take);
     } else {
         LOG_ERROR(Debug, "bbcoop loot: ItemGet hook not installed at {:#x} (bytes differ) - "
                          "nothing is mirrored",

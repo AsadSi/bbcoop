@@ -2,6 +2,36 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
 mkdir -p out
+# bbcoop: Windows, in an MSYS2 CLANG64 shell (docs/bbcoop/windows.md), as Supermedo/bloodborne_pc
+# builds it. The GPU library and the online module are static there and CMake links bb-probe.exe
+# with the runtime; no PGO (GCC-only flags), LTO off by default.
+case $(uname -s) in
+MINGW*|MSYS*)
+    source ./msys2-env.sh
+    for tool in clang cmake ninja pkg-config; do
+        command -v "$tool" >/dev/null || { echo "Need $tool from MSYS2 CLANG64 (docs/bbcoop/windows.md)." >&2; exit 1; }
+    done
+    if [[ ! -f gpu/third_party/fsr-vulkan/CMakeLists.txt || ! -f gpu/third_party/imgui/imgui.h ]]; then
+        git submodule update --init --recursive
+    fi
+    for patch in gpu/patches/fsr-vulkan/*.patch; do
+        if ! git -C gpu/third_party/fsr-vulkan apply --reverse --check "$PWD/$patch" 2>/dev/null; then
+            git -C gpu/third_party/fsr-vulkan apply "$PWD/$patch"
+        fi
+    done
+    cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO=off \
+        -DBB_LTO="${BB_LTO:-OFF}" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ > out/gpu-cmake.log
+    grep '^-- Online module' out/gpu-cmake.log || true
+    echo "GPU library and loader: LTO ${BB_LTO:-OFF}"
+    if ! ninja -C out/gpu bb-probe bb-gpu-capabilities bb-play > out/gpu-build.log 2>&1; then
+        grep -v '^\[' out/gpu-build.log | tail -40 >&2
+        echo 'Build failed (full log: out/gpu-build.log)' >&2; exit 1
+    fi
+    cp out/gpu/bb-probe.exe out/gpu/bb-gpu-capabilities.exe out/gpu/bb-play.exe out/
+    echo "Built $PWD/out/bb-probe.exe"
+    exit 0
+    ;;
+esac
 # macOS: an x86-64 build run by Rosetta 2 on Apple Silicon (the game's own x86-64 code runs
 # in-process). Dependencies: an x86-64 prefix, BB_MACOS_DEPS, by default vcpkg's x64-osx tree
 # ($VCPKG_ROOT/installed/x64-osx; see docs/MACOS.md).

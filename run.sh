@@ -315,11 +315,10 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     # BBSC: its game server on this PC when the server's own does not answer (online.py
     # bbsc-local). It lives as long as the game: a watcher stops it when this process (exec'd into
     # the game below) is gone. Messages and bloodstains are then this PC's only.
-    # bbcoop: BBSC's co-op scaling with Asad's numbers (docs/bbcoop/brief.md: +50% HP and +10% damage per
-    # extra player; bosses scale through HP too); BBSC's own stagger numbers. Each is overridable.
+    # bbcoop: vanilla co-op difficulty (docs/bbcoop/brief.md, Asad 2026-10-24): BBSC's scaling off, which
+    # also lifts its patch-out of the game's own boss-only buff (Lua_MultiDoping, +50% HP per cooperator).
     if [[ ${BB_BBSC:-0} == 1 ]]; then
-        export BBSC_SCALE_ENEMY_HP=${BBSC_SCALE_ENEMY_HP:-50} BBSC_SCALE_BOSS_HP=${BBSC_SCALE_BOSS_HP:-50}
-        export BBSC_SCALE_DAMAGE=${BBSC_SCALE_DAMAGE:-10}
+        export SHADPS4_BBSC_SCALING=${SHADPS4_BBSC_SCALING:-0}
     fi
     if [[ ${BB_BBSC:-0} == 1 && -f scripts/bbsc_gameserver/bbsc_gameserver.py ]]; then
         bbsc_shadnet=$("$PYTHON" scripts/online.py bbsc-local) || bbsc_shadnet=
