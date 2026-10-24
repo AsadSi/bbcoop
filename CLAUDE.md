@@ -17,6 +17,7 @@ Everything else in the tree is upstream's. bbcoop's own files sit beside it so m
 | Our shadNet server (optional, standalone) | `server/` |
 | Mac build pieces | `scripts/mac-deps.sh`, `scripts/mac/` (MoltenVK and mimalloc patches) |
 | Windows build pieces | `docs/bbcoop/windows.md`, `run.py`, `msys2-env.sh`, `launcher/bbport_launcher_win.py`, `packaging/windows/` |
+| Host/Join, Mac app | `launcher/bbcoop_online.py`, `packaging/macos/package.sh` |
 | Docker tests, server image | `scripts/docker-test.sh`, `scripts/docker-shell.nix`, `scripts/build-server.sh`, `scripts/server.Dockerfile` |
 | Tests | `tests/test_*.c`, `tests/test_*.py` |
 
@@ -64,8 +65,14 @@ Runtime mods (`src/`):
   from `server/` plus `scripts/bbsc_gameserver/` (the 3478 relay and `ss.info` live there, not in shadNet), co-op level
   window 999. Friends' guide and hosting steps: `docs/bbcoop/friends.md`. gen 20 frames signaling with a 6-byte header;
   `server/src/stun_server.cpp` answers both framings.
-- Old vendored shadp2p networking is at tag `bbcoop-online-0.4`. `launcher/bbcoop_online.py` (Host/Join tab) is not
-  loaded; porting it onto `gpu/bbnet` is open in the brief.
+- Host/Join (Asad 2026-10-24, brief "Easy online"): `launcher/bbcoop_online.py` (no toolkit) runs shadNet and the
+  BBSC game server from the host's launcher on its Tailscale address (`SHADNET_HOME` = the data folder's `host/`),
+  lists the tailnet's hosts, makes the account (shadNet's Create) and refuses another build (the game server's
+  `/bbcoop/hello`; a build is its commit, or the package's `BUILD`). Both launchers use it: GTK on Linux, Tk
+  (`bbport_launcher_win.py`) on Windows and macOS. Tests: `tests/test_bbcoop_online.py`.
+- Mac app: `bash packaging/macos/package.sh` -> `dist/bbcoop-mac.zip` (Tk launcher frozen with PyInstaller, port in
+  `Contents/Resources/port`, ad hoc signed; data in `~/Library/Application Support/bbcoop`).
+- Old vendored shadp2p networking is at tag `bbcoop-online-0.4`.
 
 ## Switches
 - **Respec:** `BB_RESPEC=0` (no hooks), `BB_RESPEC_FREE=1` (no Insight cost), `BB_RESPEC_TRACE=1`, `BB_GUN_GEMS=0`

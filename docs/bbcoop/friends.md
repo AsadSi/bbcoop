@@ -3,37 +3,52 @@
 Private fork for a small group (GPL-2.0+; whoever gets a build gets the source). You need your own decrypted
 Bloodborne v1.09 dump (CUSA03173 EU or CUSA00900 US). Never share game files or saves.
 
-## 1. Get connected (once)
-1. Install [Tailscale](https://tailscale.com/download) and sign in. Asad invites you to the group's tailnet
-   (accept the invite). Check: `tailscale ping 100.106.120.120` answers.
-2. Ask Asad for your NP ID and password (an account on the group's own server) and the in-game multiplayer
-   password. They are not PSN or Seamless Hunt accounts. The protocol is not encrypted, so use a throwaway password.
+One of you hosts: their launcher runs the server while it is open. The others join over Tailscale. Nobody
+needs a server, an account on a website or an in-game password.
 
-## 2. Install and run
-- Linux / Steam Deck: `distrobox enter bbcoop`, then `./build.sh` and `python3 launcher/bbport_launcher.py --play`.
-- Mac (Apple Silicon): `scripts/mac-deps.sh`, `./build.sh`, then `python3 launcher/bbport_launcher.py --play`
-  (details in `CLAUDE.md`, "macOS").
-- Launcher, Online page: Play online on, **Seamless co-op (BBSC)** on, your NP ID and password. The server fields
-  are already filled in (`100.106.120.120:31313`, WebAPI `:31315`, game server `http://100.106.120.120`).
-- In game: Options > Network > Password: the shared multiplayer password.
+## 1. Tailscale (once)
+1. Install [Tailscale](https://tailscale.com/download) and sign in.
+2. Accept Asad's invite to the group's tailnet (an email or a link). Everyone who hosts or joins must be
+   in the same tailnet.
+3. Keep Tailscale connected while you play.
 
-## 3. Co-op
-The host rings the Beckoning Bell (Hunt Bell), the guest rings the Small Resonant Bell (Kin Bell), both
-with the same password. Any level can join: the server's co-op level window is 999.
+## 2. Get the game running (once)
+- **Mac (Apple Silicon):** download `bbcoop-mac.zip`, open it, and drag Bloodborne to Applications.
+  The first time, open it, click Done on the warning, then go to System Settings > Privacy & Security
+  and click **Open Anyway** (the app is not signed by Apple). If macOS asks to install Rosetta, install
+  it: the game is an Intel program.
+- **Linux / Steam Deck:** download `Bloodborne-bbport-x86_64.AppImage`, make it executable
+  (`chmod +x`) and run it.
+
+On the first start the launcher asks for your Bloodborne folder (the one with `eboot.bin` in it) and your
+hunter name, the name your friends see (3 to 16 letters, digits, - or _). That is your account: a password
+is made for you and kept with the launcher's settings.
+
+## 3. Play
+Launcher, **Online co-op**:
+- **Host a game:** your server starts. The page shows your address; friends see you in their list as
+  "<your name> — hosting". Keep the launcher open while anyone plays.
+- **Join a game:** pick the host from the list (or type their address, 100.x.y.z), then Play.
+
+In the game, the host rings the Beckoning Bell, the guests the Small Resonant Bell. Any level can join.
+
+Everyone needs the same download: the launcher refuses to join a host on another build and says which
+builds you both have.
 
 ## If it doesn't connect
-- `tailscale status` must show the server PC (`steamdeck`) online; the server must be running (Asad's PC).
-- `BB_GPU_LOG=info` logs these lines when it works: `P2P relay fallback: our public endpoint`,
-  `'<name>' reached us through the relay`, `BBSC hunters: 2 in the world - 1 cooperator(s)`.
-- No echo from the server on UDP 31314 means the server is too old: gen 20 clients frame their signaling
-  with a 6-byte header (`FF 83 FF FF FF FF`) that only a server built since commit "answer gen 20's 6-byte
-  signaling frame" understands.
+- Your list is empty: Tailscale must be connected on both computers, and the host's launcher must be
+  open with Host picked.
+- "Nobody is hosting at ...": the host's launcher is closed or not on Host.
+- "The hunter name ... is taken": someone else already uses that name on that host. Pick another one
+  (Online co-op, Hunter name).
+- Send the Log page (launcher) to Asad.
 
-## Hosting the server (Asad)
-Two programs on one machine, both reachable over Tailscale:
-1. shadNet: `scripts/build-server.sh`, then `server/build-linux/shadnet` with `shadnet.cfg`: `Host=0.0.0.0`,
-   `BloodborneSeamlessCoop=true`, `RegistrationSecretKey=<private>`; accounts with `shadnet-sample ... register`.
-2. `python3 scripts/bbsc_gameserver/bbsc_gameserver.py --shadnet <tailscale ip> --host 0.0.0.0 --advertise <tailscale ip>`
-   (TCP 20443 `ss.info`, UDP 3478 relay; level window 999 by default).
-Ports: TCP 31313, 31315, 20443; UDP 31314, 3478. Allow them on the tailscale interface only.
-shadNet alone has no 3478 relay and no `ss.info`; the game server provides both.
+## Hosting without the launcher (Asad)
+The launcher runs the same two programs a server PC can run by hand, both reachable over Tailscale:
+1. shadNet: `scripts/build-server.sh` (Linux) or `cmake --build server/build-mac`, then the binary with
+   `shadnet.cfg` next to it (or in `SHADNET_HOME`): `Host=<tailscale ip>`, `BloodborneSeamlessCoop=true`,
+   `RegistrationSecretKey=` (open: only the tailnet reaches it).
+2. `python3 scripts/bbsc_gameserver/bbsc_gameserver.py --shadnet <ip> --host <ip> --advertise <ip>
+   --bbcoop-name <name> --bbcoop-build $(git rev-parse --short=12 HEAD)` (TCP 20443 `ss.info` and the
+   launchers' hello, UDP 3478 relay; level window 999 by default).
+Ports: TCP 31313, 31315, 20443; UDP 31314, 3478.
