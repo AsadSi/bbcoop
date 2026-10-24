@@ -319,8 +319,6 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     # also lifts its patch-out of the game's own boss-only buff (Lua_MultiDoping, +50% HP per cooperator).
     if [[ ${BB_BBSC:-0} == 1 ]]; then
         export SHADPS4_BBSC_SCALING=${SHADPS4_BBSC_SCALING:-0}
-        # Loot once per hunter (coop_loot_re.md, Doubles): BBSC's own guest copies off, mirroring gives them.
-        export SHADPS4_BBSC_GUEST_ITEMS=${SHADPS4_BBSC_GUEST_ITEMS:-0}
     fi
     if [[ ${BB_BBSC:-0} == 1 && -f scripts/bbsc_gameserver/bbsc_gameserver.py ]]; then
         bbsc_shadnet=$("$PYTHON" scripts/online.py bbsc-local) || bbsc_shadnet=

@@ -83,10 +83,14 @@ input lock `[0x05562878]+0x2F0` is set: BBSC saw an item popup shown under it st
 
 ## The packet
 
-Relay packet "SHAD" 0x28, 72 bytes, to every BBSC peer (`SendBbscWorldFlagsToPeers`):
-`magic[4] "SHAD", u8 0x28, u8 version 1, u8 source (1 pickup, 2 enemy drop, 3 boss drop, 4 pickup
+Relay packet "SHAD" 0x28, 80 bytes, to every BBSC peer (`SendBbscWorldFlagsToPeers`):
+`magic[4] "SHAD", u8 0x28, u8 version 2, u8 source (1 pickup, 2 enemy drop, 3 boss drop, 4 pickup
 handed over by the host, 5 test), u8 count (1..6), u32 sender (random per game run), u32 sequence,
-s32 lot (boss drop, else -1), u32 packed map, then six {u32 code, u32 count}`. Each packet is sent
+s32 lot (boss drop, else -1), u32 packed map, six {u32 code, u32 count}, then s32 treasure flag (the
+MSB treasure's pickup flag, else -1) and u32 treasure item (its number << 4 | 3 in the sender's game,
+for the log)`. Version 1 (2026-10-17..24, 72 bytes, no treasure fields) is still taken and given as a
+plain pickup; a version 1 build drops version 2 packets (size check), so every hunter needs this build.
+Each packet is sent
 three times (now, after 300 ms and 1.5 s); the receiver keeps the first of each (sender, sequence).
 The signaling receive thread (`np_signaling_helpers.cpp`) hands type 0x28 to `OnBbcoopLootPacket`.
 
@@ -102,8 +106,7 @@ The signaling receive thread (`np_signaling_helpers.cpp`) hands type 0x28 to `On
   dies, so mirroring one doubled it (seen in both players' logs). BBSC's own roll for a guest
   (`NoteBbscGuestEnemyDeath`) stays skipped while mirroring is on; it would be a third copy.
 - **World state**: ItemGet sets no flag, so a mirrored item never marks the receiver's own pickup as
-  taken. A player can therefore still take the same treasure in their own world (or, in a session,
-  the copy BBSC gives every guest), and then everyone gets it again.
+  taken, except a treasure of the session's world (below), whose copy the receiver takes away.
 - **Insight and echo items** (Madman's Knowledge, Coldblood Dew and the like) are mirrored as items
   like any pickup; nothing is used up for the receiver, who decides whether to use them.
 - **Key items** are mirrored too; one the receiver already holds is handled by the game's own add
@@ -111,8 +114,8 @@ The signaling receive thread (`np_signaling_helpers.cpp`) hands type 0x28 to `On
 
 ## Test seam
 
-`SHADPS4_BBSC_MIRROR_LOOT_INJECT=<file>`: polled once a second; each line `<code> <count> [source]`
-(C numbers) becomes a packet from a made-up peer and takes the receive path; the file is deleted once
+`SHADPS4_BBSC_MIRROR_LOOT_INJECT=<file>`: polled once a second; each line `<code> <count> [source]
+[treasure flag]` (C numbers) becomes a packet from a made-up peer and takes the receive path; the file is deleted once
 read. The send side logs every packet with the number of peers it went to (0 when playing alone):
 `bbcoop loot: pickup [0x400003e8 x1] lot -1 map ... sent to 0 peer(s)`.
 
@@ -131,18 +134,63 @@ read. The send side logs every packet with the number of peers it went to (0 whe
   items, and the first item is outside the clinic, past the beast. The send side's classification is
   static analysis only (above), and its log line was not seen in game.
 
+## Treasures: first grab shares (Asad, 2026-10-24)
+
+In a BBSC session every hunter sees every treasure of the host's world: BBSC's guest items
+(`SHADPS4_BBSC_GUEST_ITEMS`, on by BBSC's default again; `run.sh`/`run.py` no longer turn it off)
+give each guest its own copy (GuestItems.SpawnOwn / CreateOwn / PlaceTreasures) next to the host's.
+Whoever picks a treasure up first gets it, every other hunter gets a copy, and their glowing copy
+goes away, taken in that world. Found 2026-10-24 in `out/eboot.elf` (objdump):
+
+- **Identity: the pickup flag.** A map item is `+0x20` number << 4 | kind, `+0x28` pickup flag
+  (ItemLotParam getItemFlagId, -1 none), `+0x48` flags (0x40 pickable, 0x80 treasure), `+0xB8` a
+  second flag. The flag is the same treasure in every game; the number is not: each game numbers its
+  items from its own counter (GuestItems.NumberKind*). BBSC's guest-items code pairs a guest's copy
+  with the host's treasure by that flag too (kind 5 groups 5AABx, `ApplyBbscGuestLootView`,
+  `LogBbscHostWorldFlagsDiff`: "taken by the host (still here for us)").
+- **Send.** The take `0x017D8570` finds the item (`0x017D81A0`) and then removes it before ItemGet
+  runs, so a hook at `0x017D85B0` (`41 0F B7 45 48 A8 40`, MOVZX EAX,[R13+0x48] / TEST AL,0x40; R13
+  the item) keeps its number and flag for the ItemGet hook. A kind 3 item with a flag goes out with
+  `treasure flag` set while the sender is the host (session state 3) or a guest in the host's world;
+  the sender also remembers the flag (one list per game run).
+- **Removal, as the game's take does it:** `0x017D6780(item man, &number, 1)` unlinks the item (its
+  glow and effect go with it) and, with the 1, sets its `+0x28` and `+0xB8` bits in the flag table.
+  A guest in the host's world skips that marking (`0x017D6ADC`), which GuestItems.MarkTaken jumps
+  over, so the guest's flag is set too. `0x017DE6E0` is the same plus, on the host, packet 0x2C
+  `{1, 2, number}` to every member; a guest's item manager (`0x017D2F30`, kind 2 in the jump table at
+  `0x017D4C10`) calls `0x017D6780(.., number, 1)` at `0x017D34D1` for it.
+- **Receive.** The receiver gives the copy (if it has the treasure already, nothing: see below), then
+  looks for its own kind 3 item with that flag in the item manager's three lists and removes it with
+  `0x017D6780(.., 1)`: on the host the flag stays set in its world like a pickup; on a guest BBSC's
+  item capture then keeps it gone for that character (taken file, own world), as when the guest takes
+  it itself. Not lying there (another block): the flag alone is set (`SetEventFlag 0x0132E5A0`).
+  Only in the session's world: the host, or a guest in the host's world with guest items on.
+- **Has it already: nothing given.** The flag is in the receiver's list (its own pickup took it this
+  run, or another hunter's copy was given for it), or the receiver is the host and the flag is set
+  (taken before the session). A guest's flag alone is no proof: the host's 0x2C kind 2 above sets it.
+
+| Case | What happens |
+|---|---|
+| Host first | Host keeps its pickup; each guest gets a copy, its copy is removed and marked taken |
+| Guest first | Guest keeps its pickup; the host gets a copy, the host's treasure is removed and its flag set in the host's world; other guests the same |
+| Both at once | Each keeps its own pickup and drops the other's packet (the flag is in its list): one each |
+| Host took it before the session | The guest still sees its copy; when it takes it the host gets nothing (flag set) |
+| Guest took it before (own world or another host's) | Its view hides the copy; when the host takes it the guest still gets a copy (its flag is no proof, above) |
+| Guest's own world, or not in a session | No treasure flag is sent; a pickup there is mirrored as before and nothing is removed |
+
 ## Doubles (what can give an item twice)
 
-- **A treasure in the host's world, in a BBSC session**: BBSC gives each guest its own copy of every
-  treasure (GuestItems.SpawnOwn / CreateOwn; the host's copy stays). Each copy taken is mirrored, so a
-  treasure both hunters take reaches each of them twice. So `run.sh`/`run.py` default
-  `SHADPS4_BBSC_GUEST_ITEMS=0` (2026-10-24): the guest sees no treasures in the host's world and gets
-  each one the host takes.
-- **The receiver's own world**: a mirrored pickup leaves the receiver's pickup flags alone (shared
-  progress does not merge kind 5 either), so the receiver can take the same treasure again at home.
+- **A treasure in the host's world, in a BBSC session**: shared first grab (above). Left: a guest
+  that took a treasure in an earlier run (its own world or another host's) gets a copy when the
+  host takes it in this session.
+- **The host's 0x2C kind 2 on a guest** (BBSC's, not new): the guest's game removes its item of the
+  host's item number, which with independent numbering can be another treasure. Not changed.
+- **The receiver's own world**: a mirrored plain pickup leaves the receiver's pickup flags alone
+  (shared progress does not merge kind 5 either), so the receiver can take the same item again at
+  home. A shared treasure's copy taken by a guest goes into its own world too (BBSC's capture).
 - **Enemy drops**: each hunter takes the one its own game drops; none is mirrored.
 - **Boss drops**: none in a BBSC session (the guest keeps BBSC's own reward and drops the mirrored
-  one); with `SHADPS4_BBSC_GUEST_ITEMS=0` the guest gets the host's.
+  one); with `SHADPS4_BBSC_GUEST_ITEMS=0` the guest gets the host's instead.
 - **Overflow**: what ItemGet cannot fit is dropped on the ground (`0x017DA960`, kind 1); picking it
   up is not mirrored again.
 
@@ -153,6 +201,8 @@ read. The send side logs every packet with the number of peers it went to (0 whe
   pickup reaches only its established peers.
 - The guest side of a pickup handed over by the host (`0x017D3E8C`).
 - Boss drops end to end, and the guest's mirrored items while BBSC's guest-items view runs.
+- Shared treasures (2026-10-24): built only. The take hook, the removal call from the game tick, the
+  guest's flag through MarkTaken and the cases in the table above have not run in a game.
 
 ## Found on the way
 
