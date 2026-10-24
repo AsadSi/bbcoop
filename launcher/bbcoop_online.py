@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -297,7 +298,11 @@ class Host:
 
     def start(self, address, name, build):
         """Starts shadNet and the game server on `address`; raises RuntimeError."""
+        self.stop_leftovers()
         self.stop()
+        for port in (GAME_PORT, SS_PORT):
+            if _answers(address, port):
+                raise RuntimeError(f"Port {port} is in use: another server runs on this computer.")
         binary = shadnet_binary(self.port_dir)
         if binary is None:
             raise RuntimeError("This build has no server (scripts/build-server.sh builds it).")
@@ -329,6 +334,7 @@ class Host:
                     cwd=script.parent, stdout=log, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, **flags)
             self.processes.append(game)
+            (self.directory / "pids").write_text(" ".join(str(p.pid) for p in self.processes))
             _wait(lambda: hello(address, 0.5) is not None, game, "The game server", 15)
         except (OSError, RuntimeError) as failure:
             self.stop()
@@ -345,3 +351,20 @@ class Host:
                     process.kill()
         self.processes = []
         self.address = ""
+        (self.directory / "pids").unlink(missing_ok=True)
+
+    def stop_leftovers(self):
+        """The servers of a launcher that was killed instead of closed: they would hold the ports."""
+        try:
+            pids = [int(pid) for pid in (self.directory / "pids").read_text().split()]
+        except (OSError, ValueError):
+            return
+        for pid in pids:
+            try:  # only ours: a reused pid runs something else
+                command = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                                         text=True, timeout=5).stdout
+                if "shadnet" in command or "bbsc_gameserver" in command:
+                    os.kill(pid, signal.SIGTERM)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        time.sleep(0.5)
