@@ -24,8 +24,10 @@ int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
     app.setApplicationName("shadnet");
 
-    // Set working directory to executable location
-    QDir::setCurrent(QCoreApplication::applicationDirPath());
+    // Set working directory to executable location; bbcoop: SHADNET_HOME instead when set (the
+    // launcher's host folder: a packaged binary's own folder is read-only).
+    const QString home = qEnvironmentVariable("SHADNET_HOME");
+    QDir::setCurrent(home.isEmpty() ? QCoreApplication::applicationDirPath() : home);
 
     qInfo() << "ShadNet Qt server version" << versionString;
 
