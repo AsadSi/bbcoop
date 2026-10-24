@@ -53,6 +53,13 @@ lamp."
 - Still not reset by design: enemies (BBSC: "the world is not reset"). Vials and bullets come from
   `BbscRestockFromStorage`.
 
+## Follow reloads keep the phantom type (2026-10-24)
+- A guest's full reload builds the character with the own-world restore type `[[0x0553B188]+4]`
+  (0 = host/solo) unless the v8 swap of a kept death is active. A follow load just after that window
+  closed made the guest type 0; the next boss kill then ran `SoloBlockClear` (`0x013859F0`, a tail
+  jump to `CSMultiPlayMan::Stop`) instead of `BlockClear2_2/_3`, and BBSC sent the guest home.
+- `TickBbscFollowHost` now arms v8 (`ArmBbscReinsertV8`) before every follow reload of a phantom.
+
 ## The load (CONFIRMED statically)
 
 **The placement choice.** The stage flow builds a load's placement in `0x01943F10`, which checks in this
