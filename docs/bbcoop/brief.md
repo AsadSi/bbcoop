@@ -108,6 +108,14 @@ Steps (each built and verified before the next):
 4. Mac `.app` zip, then the AppImage with the server and the respec tools.
 5. `docs/bbcoop/friends.md` rewritten; Mac host / Linux join and the reverse; a fresh account.
 
+Status (2026-10-25): steps 0-4 built. Verified on the Mac: hosting from the Tk launcher, the source
+tree and the packaged app (shadNet and the game server on the address, an account from another
+client, the build check, both stopped on close and after a killed launcher); the GTK page (run on
+macOS with Homebrew's GTK 4); the packaged app's game start offline (respec mod built by the frozen
+launcher, MoltenVK window, the game's code running). Not verified: the AppImage (needs Nix on Linux),
+a co-op session through Host/Join (needs two machines and Tailscale), Gatekeeper's first open of a
+downloaded zip, Windows.
+
 ## Reference values (to check against v1.09's own tables)
 
 - **Level cost above level 12:** the community model is 0.02x³ + 3.06x² + 105.6x − 895 Blood Echoes at hunter level x (Fextralife; gamerguides.com). Respec refunds should use the game's own cost function once it's located, not this formula.
@@ -211,7 +219,7 @@ Steps (each built and verified before the next):
 - **Still not verified in game:**
   - A refund with a full inventory or storage. Gems and materials then go to storage. A gem with no room anywhere stops the refund, and the weapon stays as it is.
   - Whether the messengers Asad sees vanish by the 5 m rule (`BB_MESSENGER_RADIUS`).
-  - The AppImage build does not ship `tools/respec_mod.py` or soulstruct, so the Doll's new options are missing there. Asad doesn't use the AppImage.
+  - The AppImage now ships `tools/respec_mod.py` with soulstruct (2026-10-25, `packaging/default.nix`); not built yet.
 
 - **Online in the real game (2026-10-09, US 1.09, local server):** NP sign-in, `ss.info` (`/bb-us/ss.info`), `/basic_utils/login` and `/basic_utils/sync_chara_id` (needs `PublishCharacterIdList` of `PublishCharaId`) are accepted. Next blocker: the `BloodMessSearchAdd` response (`/blood_messenger/exist_messages`) is rejected ("Failed to record note search information") even with `LostBloodMessIdList: []`; the parser takes the array (type 6) at image 0x1e84f12, so the cause is elsewhere (ResKind meaning?). Response keys are UTF-16 in the eboot at file offset 0x49d0d40. Reach it with the title, main menu Log In, then Continue (the title remembers Play Offline).
 
