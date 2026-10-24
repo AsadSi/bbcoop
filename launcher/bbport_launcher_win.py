@@ -107,10 +107,26 @@ def run_role(argv):
         except (AttributeError, ValueError):
             pass
     sys.stdout, sys.stderr = LossyStream(sys.stdout), LossyStream(sys.stderr)
+    if FROZEN:  # bbcoop: soulstruct's log lines link to their source file, which frozen code names relatively
+        import logging
+        make_record = logging.getLogRecordFactory()
+
+        def absolute_record(*args, **kwargs):
+            record = make_record(*args, **kwargs)
+            record.pathname = os.path.abspath(record.pathname)
+            return record
+        logging.setLogRecordFactory(absolute_record)
     if argv[0] == '--script':
         args = argv[1:]
-        while args and args[0].startswith('-'):  # bbcoop: run.sh's `python3 -I script` (Mac app)
+        while args and args[0].startswith('-') and args[0] != '-c':  # bbcoop: run.sh's `python3 -I script` (Mac app)
             args = args[1:]
+        if args and args[0] == '-c':  # bbcoop: run.sh's `python3 -c code args`
+            sys.argv = ['-c', *args[2:]]
+            try:
+                exec(compile(args[1], '<string>', 'exec'), {'__name__': '__main__'})
+            except SystemExit as stop:
+                return stop.code if isinstance(stop.code, int) else (0 if stop.code is None else 1)
+            return 0
         path, sys.argv = args[0], args
         sys.path.insert(0, str(Path(path).resolve().parent))  # its neighbours, as `python3 script`
     else:
@@ -205,9 +221,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 # bbcoop: Host/Join ('manual': the server fields above); the host joined.
                 'coop_mode': 'manual', 'coop_join': ''}
 # bbbridge's own app reads and writes the online_* keys above: keep their names.
-if MAC:  # bbcoop: what an M4 Air runs (CLAUDE.md, "macOS"): 30 FPS, 720p native
-    INI_DEFAULTS.update(upscaler='off', preset='0', output_res='1280x720')
-    APP_DEFAULTS.update(fps_mode='30')
+
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -215,6 +229,11 @@ UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr3', ('FSR 3.1 (every GPU)', 'FSR 3.1 (любая видеокарта)')),
              ('taa', ('TAA (native resolution anti-aliasing)', 'TAA (нативное сглаживание)')),
              ('off', ('Off', 'Выключен'))]
+if MAC:  # bbcoop: what an M4 Air runs (CLAUDE.md, "macOS"): 30 FPS, 720p native; Apple's GPUs have no DLSS or FSR 4
+    INI_DEFAULTS.update(upscaler='off', preset='0', output_res='1280x720')
+    APP_DEFAULTS.update(fps_mode='30')
+    UPSCALERS = [('off', ('Off',)), ('metalfx', ('MetalFX (Apple)',)), ('fsr3', ('FSR 3.1',)),
+                 ('taa', ('TAA (native resolution anti-aliasing)',))]
 PRESETS = [('0', ('Native AA (×1.0)',)), ('1', ('Quality (×1.5)',)), ('2', ('Balanced (×1.7)',)),
            ('3', ('Performance (×2)',)), ('4', ('Ultra Performance (×3)',))]
 OUTPUTS = [('1280x720', ('1280 × 720 (Steam Deck)',)), ('1920x1080', ('1920 × 1080',)),
@@ -379,7 +398,8 @@ def game_environment(s):
             env['BB_BBSC'] = '1'
     if MAC and FROZEN:  # bbcoop: the Mac app's prebuilt port; this executable runs its scripts
         python = str(PORT_DIR / 'bin' / 'python3')
-        env.update(BB_PREBUILT='1', BB_DATA_DIR=str(DATA_DIR), PYTHON=python, BB_RE_PYTHON=python)
+        env.update(BB_PREBUILT='1', BB_DATA_DIR=str(DATA_DIR), PYTHON=python, BB_RE_PYTHON=python,
+                   BB_MOLTENVK_ICD=str(PORT_DIR / 'bin' / 'gpu' / 'MoltenVK_icd.json'))
     env['PYTHONUNBUFFERED'] = '1'
     env['PYTHONIOENCODING'] = 'utf-8'
     return env
