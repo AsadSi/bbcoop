@@ -48,6 +48,12 @@ void bbnet_image_mapped(uint8_t *image, uint64_t image_size);
 typedef void (*BbNetStartFn)(void);
 void bbnet_start(void);
 
+/* Optional, bbcoop: the game's pad after each scePadReadState (runtime_pad.c), read only. BBSC's
+ * watch camera takes R1 / L1 and the right stick from it while you are dead in co-op. */
+typedef void (*BbNetPadReadFn)(uint32_t buttons, uint8_t right_x, uint8_t right_y, uint8_t left_x,
+                               uint8_t left_y);
+void bbnet_pad_read(uint32_t buttons, uint8_t right_x, uint8_t right_y, uint8_t left_x, uint8_t left_y);
+
 /* The module's function for an imported NID ("NID#lib#mod"), or 0. */
 typedef uintptr_t (*BbNetResolveFn)(const char *scoped_nid);
 uintptr_t bbnet_resolve(const char *scoped_nid);

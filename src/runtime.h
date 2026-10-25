@@ -96,6 +96,7 @@ uintptr_t runtime_net_resolve(const char *name);
 void runtime_net_image_ready(uintptr_t base, uint64_t size);
 void runtime_net_image_mapped(uint8_t *image, uint64_t size);
 void runtime_net_start(void);
+void runtime_net_pad_read(uint32_t buttons, uint8_t right_x, uint8_t right_y, uint8_t left_x, uint8_t left_y); /* bbcoop */
 __attribute__((noreturn)) void runtime_thread_exit(void *value);
 /* Guest threads for host code (the online module's NP threads); 0 or a positive errno value. */
 int32_t runtime_thread_spawn(void **thread, void *(ABI *entry)(void *), void *argument, uint64_t stack, const char *name);
