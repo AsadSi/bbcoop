@@ -10,6 +10,7 @@ Asad's decisions, 2026-10-24: docs/bbcoop/brief.md, "Easy online".
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import ipaddress
 import json
 import os
 import secrets
@@ -79,26 +80,45 @@ def tailscale_status():
         return None
     try:
         run = subprocess.run([cli, "status", "--json"], capture_output=True, text=True, timeout=5)
-        return json.loads(run.stdout)
+        return json.loads(run.stdout[run.stdout.find("{"):])  # a warning line may come first
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
+
+
+def tailscale_address():
+    """This computer's Tailscale IPv4 from the routing table (the route to Tailscale's own
+    100.100.100.100 leaves from it), or '': no Tailscale command needed (Taha's Mac could not read
+    its status from the app, 2026-10-25)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("100.100.100.100", 53))  # no packet is sent
+            address = probe.getsockname()[0]
+    except OSError:
+        return ""
+    return address if ipaddress.ip_address(address) in ipaddress.ip_network("100.64.0.0/10") else ""
 
 
 def connect_tailscale(timeout=20):
     """Host and Join connect Tailscale themselves (Asad, 2026-10-25): its Mac app is started in the
     background, then `tailscale up`. '' when connected, else what the player has to do."""
     cli = tailscale_cli()
+    if tailscale_address():
+        return ""
     if not cli:
         return "Tailscale is not installed: get it at tailscale.com/download and sign in."
     if (tailscale_status() or {}).get("BackendState") == "Running":
         return ""
     if sys.platform == "darwin":
         subprocess.run(["open", "-g", "-a", "Tailscale"], capture_output=True)
-    asked = False
+    asked, read = False, False
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        state = (tailscale_status() or {}).get("BackendState")
-        if state == "Running":
+        status = tailscale_status()
+        read = read or status is not None
+        state = (status or {}).get("BackendState")
+        if state == "Running" or (not read and time.monotonic() > deadline - timeout + 5):
+            # Its state unreadable from here (Taha's Mac, 2026-10-25, while connected): don't
+            # block; the host check that follows tells whether the host is reachable.
             return ""
         if state == "NeedsLogin":
             return "Sign in to Tailscale (its menu bar icon), then pick Host or Join again."
@@ -129,6 +149,8 @@ def my_address():
         address = ipv4(status.get("Self", {}).get("TailscaleIPs"))
         if address:
             return address, ""
+    if tailscale_address():
+        return tailscale_address(), ""
     note = "Tailscale is not connected: only players on your own network can join."
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -154,7 +176,7 @@ def find_hosts(timeout=1.5):
     its machine name."""
     status = tailscale_status()
     if not status or status.get("BackendState") != "Running":
-        return None
+        return [] if tailscale_address() else None  # connected, but its peers unreadable: type one
     peers = [(ipv4(peer.get("TailscaleIPs")), peer.get("HostName") or "")
              for peer in (status.get("Peer") or {}).values() if peer.get("Online")]
 
