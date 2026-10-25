@@ -9,6 +9,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mswsock.h> // bbcoop: SIO_UDP_CONNRESET
 #else
 #include <fcntl.h>
 #include <netdb.h>
@@ -92,7 +93,14 @@ void wsa_start() {
 sockfd_t sock_udp() {
     wsa_start();
     const sockfd_t fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd != INVALID_SOCKET) sock_set_nonblock(fd, true); // blocking calls wait with WSAPoll
+    if (fd != INVALID_SOCKET) {
+        sock_set_nonblock(fd, true); // blocking calls wait with WSAPoll
+        // bbcoop: as vendor/shadps4/core/net/host_net.cpp: else an ICMP port-unreachable from an
+        // earlier sendto() fails the next recvfrom() with WSAECONNRESET (BSD doesn't for UDP).
+        BOOL report = FALSE;
+        DWORD bytes = 0;
+        ::WSAIoctl(fd, SIO_UDP_CONNRESET, &report, sizeof(report), nullptr, 0, &bytes, nullptr, nullptr);
+    }
     return fd;
 }
 void sock_setopt_int(sockfd_t fd, int level, int name, int v) {

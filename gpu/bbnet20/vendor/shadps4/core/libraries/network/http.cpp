@@ -34,6 +34,7 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/network/http.h"
 #include "http_error.h"
+#include "windows_trust.h" // bbcoop: Supermedo a946924
 
 #if __has_include(<httplib.h>)
 #include <httplib.h>
@@ -892,6 +893,9 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
                          plan.scheme, plan.host);
             }
             cli.enable_server_certificate_verification(verify_server);
+            if (verify_server) {
+                bbnet::TrustWindowsRoots(cli, base_url); // bbcoop: Supermedo a946924
+            }
             if (config_disabled_verify) {
                 LOG_INFO(Lib_Http, "{}://{}: server cert verification disabled by configuration",
                          plan.scheme, plan.host);

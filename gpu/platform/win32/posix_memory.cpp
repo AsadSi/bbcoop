@@ -51,6 +51,7 @@ struct Section {
     HANDLE handle = nullptr;
     uint64_t size = 0;
     unsigned char* whole = nullptr; ///< a view of all of it (zeroing)
+    bool commit_on_map = false;     ///< bbcoop: reserved, committed as it is mapped (Commit)
 };
 std::unordered_map<int, Section> sections;
 int next_section = SectionFdBase;
@@ -70,8 +71,23 @@ bool InArena(uintptr_t a, uintptr_t b) {
     return arena_begin && a >= arena_begin && b <= arena_end;
 }
 
+// bbcoop, from Supermedo/bloodborne_pc 7c9ebcb (GPL-2.0): a section larger than Windows' commit
+// limit (RAM + page file) is reserved and committed as the game maps it (bb_section_create).
+void Commit(const Section& section, uint64_t offset, uint64_t size) {
+    if (!section.commit_on_map ||
+        VirtualAlloc(section.whole + offset, size, MEM_COMMIT, PAGE_READWRITE)) {
+        return;
+    }
+    std::fprintf(stderr, "Runtime: cannot commit %llu MiB more guest memory (Windows error %lu): "
+                         "the page file is too small for this resolution; let Windows manage its "
+                         "size, or use a lower output resolution\n",
+                 (unsigned long long)(size >> 20), GetLastError());
+    Fail("committing guest memory", reinterpret_cast<uintptr_t>(section.whole + offset), size);
+}
+
 void MapView(uintptr_t start, uintptr_t end, int fd, uint64_t offset, DWORD protect) {
     const Section& section = sections.at(fd);
+    Commit(section, offset, end - start); // bbcoop
     // A view cannot start without access; protections change after.
     const DWORD initial = protect == PAGE_NOACCESS ? PAGE_READWRITE : protect;
     if (!MapViewOfFile3(section.handle, GetCurrentProcess(), reinterpret_cast<void*>(start), offset,
@@ -179,6 +195,21 @@ int bb_section_create(unsigned long long size) {
     section.size = size;
     section.handle = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_COMMIT,
                                         DWORD(size >> 32), DWORD(size), nullptr);
+    // bbcoop (Supermedo 7c9ebcb): the pool is sized for the largest resolutions and, committed at
+    // once, can exceed RAM + page file (error 1450/1455) although the game maps much less.
+    if (!section.handle &&
+        (GetLastError() == ERROR_NO_SYSTEM_RESOURCES || GetLastError() == ERROR_COMMITMENT_LIMIT)) {
+        const DWORD error = GetLastError();
+        section.handle = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr,
+                                            PAGE_EXECUTE_READWRITE | SEC_RESERVE, DWORD(size >> 32),
+                                            DWORD(size), nullptr);
+        if (section.handle) {
+            section.commit_on_map = true;
+            std::printf("Runtime: %llu MiB of guest memory do not fit Windows' commit limit at once "
+                        "(error %lu): committed as the game maps it\n",
+                        (unsigned long long)(size >> 20), error);
+        }
+    }
     if (!section.handle) {
         std::fprintf(stderr,
                      "Runtime: cannot create %llu MiB of guest memory (Windows error %lu): is the "
@@ -223,6 +254,7 @@ int fallocate(int fd, int mode, off_t offset, off_t length) {
         errno = EINVAL;
         return -1;
     }
+    Commit(it->second, uint64_t(offset), uint64_t(length)); // bbcoop
     std::memset(it->second.whole + offset, 0, size_t(length));
     return 0;
 }
@@ -259,6 +291,8 @@ void* mmap(void* address, size_t size, int prot, int flags, int fd, off_t offset
         return address;
     }
     if (section) {
+        // bbcoop: not committed here: this is the runtime's view of the whole pool
+        // (runtime_memory.c backing_base); the game's own views commit what they map (MapView).
         void* view = MapViewOfFile3(sections.at(fd).handle, GetCurrentProcess(), fixed ? address : nullptr,
                                     uint64_t(offset), size, 0, PageProtection(prot | PROT_READ | PROT_WRITE),
                                     nullptr, 0);
