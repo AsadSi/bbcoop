@@ -30,6 +30,11 @@ class RulesTests(unittest.TestCase):
         for name in ('ab', 'a' * 17, 'a b', 'Gehrmanø', 'DeletedUser', ''):
             self.assertFalse(bbcoop_online.valid_name(name), name)
 
+    def test_join_without_host(self):
+        self.assertTrue(bbcoop_online.join_without_host({'coop_mode': 'join', 'coop_join': ' '}))
+        self.assertFalse(bbcoop_online.join_without_host({'coop_mode': 'join', 'coop_join': '100.64.0.7'}))
+        self.assertFalse(bbcoop_online.join_without_host({'coop_mode': 'host', 'coop_join': ''}))
+
     def test_server_fields(self):
         self.assertEqual(bbcoop_online.server_fields('100.64.0.7'), {
             'online_server': '100.64.0.7:31313', 'online_webapi': 'http://100.64.0.7:31315',
