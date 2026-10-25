@@ -122,6 +122,12 @@ bool BbcoopRespawnAtHostLamp() {
         LOG_INFO(Debug, "bbcoop death: the host's last lamp {} names no map - BBSC's respawn", point);
         return false;
     }
+    if (BbscMapArea(map) == BbscChaliceArea) {
+        // Chalice co-op is parked: a load there has no dungeon layout (see TickBbscFollowHost).
+        LOG_INFO(Debug, "bbcoop death: the host's last lamp {} is in a Chalice Dungeon - BBSC's respawn",
+                 point);
+        return false;
+    }
     // The placement choice (0x01943F10) must reach the respawn-point warp: no Dream placement
     // (+0x1523), no summon placement (+0x1521), and no forced warp home left over (+0x1520).
     WriteValue<u8>(global, 0x1520, 0);
@@ -389,7 +395,10 @@ void InstallBbcoopSsInfoFormat() {
 // [0x0553B130]+0x8C set to the phantom type. Solo, settled and alive for BbcoopSoloTypeSettleMs with
 // a phantom type (1, 2, 12, 13: the types 0x015C9940 restores from) in any of those or in the slot
 // (+0xA4) or character (+0x78) type, every one of them goes back to 0 (host). The game saves it
-// with the next autosave.
+// with the next autosave. Only in our own world: after a session the guest stays in the host's
+// world (still a phantom) until BBSC sends it home, and the repair fired there (2026-10-25 16:48:10,
+// ten seconds before the trip home).
+bool BbscOwnWorldNonGuest(u64 global);
 constexpr s64 BbcoopSoloTypeSettleMs = 5'000;
 
 bool BbcoopPhantomType(s32 type) {
@@ -407,6 +416,7 @@ void TickBbcoopSoloHunterType() {
     const u64 local = ReadablePointer(slots, 0x90) ? ReadValue<u64>(slots, 0x08) : 0;
     if (image_base == 0 || bbsc_v8_pending || GetSessionState() != 0 ||
         !ReadablePointer(global, 0x10) || ReadValue<u8>(global, 0x08) != 0 ||
+        !BbscOwnWorldNonGuest(global) ||
         GetBbscLocalPlayerHp() <= 0 || !ReadablePointer(record, 0x08) ||
         !ReadablePointer(local, 0xA8) || !ReadablePointer(player, 0x80)) {
         since_ms = 0;
@@ -449,7 +459,6 @@ void TickBbcoopSoloHunterType() {
 // (the soft lock of TickBbscStuckLeaveLocks, which only looks within 60 s after a session ends in the
 // same run). Solo in our own world, settled and alive, with either lock held BbcoopSoloLockMs: both
 // are released.
-bool BbscOwnWorldNonGuest(u64 global);
 void ReleaseBbscLeaveLocks(std::string_view why);
 constexpr s64 BbcoopSoloLockMs = 8'000;
 
@@ -487,4 +496,91 @@ void TickBbcoopSoloLeaveLocks() {
     ReleaseBbscLeaveLocks("alone in our own world, still locked");
     BBSC_TIMELINE("REPAIR", "alone in our own world with the leave locks on (flag 4047 {}, load wait {}) "
                             "- released", leaving, wait);
+}
+
+// ---- BB_TEST_BELLS (2026-10-25) --------------------------------------------------------------------
+// Test cheat for the free bell refund (TickBbscFreeBellRefund; throwaway profiles only). Once the
+// character stands settled and alone in its own world, each kit bell in turn - Hunt, Kin, Bloodlust -
+// is rung with the game's own item use (0x018F9720, as the responder resume rings its bell) and
+// stopped 8 s later: `blank` with the Parting Blank, `death` by dying while it rings (a load in
+// between), `both` a round of each. The next bell waits 25 s after the stop, past the refund
+// window. Each step is a TEST line in the timeline; the INSIGHT lines show any net gain.
+u64 BbscLocalEffectNode(s32 id);
+void TickBbcoopTestBells() {
+    struct Step {
+        s32 bell;
+        bool death;
+    };
+    static const std::vector<Step> steps = [] {
+        const char* value = std::getenv("BB_TEST_BELLS");
+        const std::string mode = value != nullptr ? value : "";
+        std::vector<Step> out;
+        for (const bool death : {false, true}) {
+            if (mode == "both" || mode == (death ? "death" : "blank")) {
+                for (const s32 bell : {4016, 4121, 11201}) {
+                    out.push_back({bell, death});
+                }
+            }
+        }
+        return out;
+    }();
+    static size_t index = 0;
+    static int phase = 0; // 0 settling, 1 ringing, 2 stopped
+    static s64 since_ms = 0;
+    if (index >= steps.size() || image_base == 0) {
+        return;
+    }
+    const s64 now = SteadyNowMs();
+    const Step& step = steps[index];
+    const u64 global = GetGlobalState();
+    const bool ready = GetSessionState() == 0 && ReadablePointer(global, 0x1598) &&
+                       ReadValue<u8>(global, 0x08) == 0 && BbscOwnWorldNonGuest(global) &&
+                       GetBbscLocalPlayerHp() > 0 && IsSprjLuaEventManReady();
+    using UseItem = bool PS4_SYSV_ABI (*)(u64 player, s32 goods_id, s32 argument);
+    const auto use_item = reinterpret_cast<UseItem>(image_base + UseItemNativeApplyOffset);
+    if (phase == 1) {
+        if (now - since_ms < 8'000) {
+            return;
+        }
+        const bool sign = BbscLocalEffectNode(9005) != 0 || BbscLocalEffectNode(9025) != 0;
+        const bool search = BbscLocalEffectNode(9000) != 0;
+        if (step.death) {
+            const u64 modules = ReadValue<u64>(GetLocalPlayerCharacter(), 0x3B0);
+            const u64 data = ReadablePointer(modules, 0x28) ? ReadValue<u64>(modules, 0x20) : 0;
+            if (ReadablePointer(data, 0xFC)) {
+                WriteValue<s32>(data, 0xF8, 0);
+            }
+        } else {
+            use_item(GetLocalPlayer(), 11251, BellUseArgument);
+        }
+        BBSC_TIMELINE("TEST", "test bells: goods {} stopped by {} (session state {}, search effect {}, "
+                              "sign effect {})",
+                      step.bell, step.death ? "dying" : "the Parting Blank", GetSessionState(), search,
+                      sign);
+        phase = 2;
+        since_ms = 0;
+        return;
+    }
+    if (!ready) {
+        since_ms = 0;
+        return;
+    }
+    if (since_ms == 0) {
+        since_ms = now;
+    }
+    if (now - since_ms < (phase == 0 ? 10'000 : 25'000)) {
+        return;
+    }
+    if (phase == 2) {
+        ++index;
+        phase = 0;
+        since_ms = now;
+        BBSC_TIMELINE("TEST", "test bells: {} of {} done", index, steps.size());
+        return;
+    }
+    const bool rung = use_item(GetLocalPlayer(), step.bell, BellUseArgument);
+    BBSC_TIMELINE("TEST", "test bells: goods {} rung (item use {}), {} next", step.bell, rung,
+                  step.death ? "a death" : "the Parting Blank");
+    phase = 1;
+    since_ms = now;
 }
