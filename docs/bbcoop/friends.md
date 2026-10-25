@@ -19,6 +19,8 @@ needs a server, an account on a website or an in-game password.
   it: the game is an Intel program.
 - **Linux / Steam Deck:** download `Bloodborne-bbport-x86_64.AppImage`, make it executable
   (`chmod +x`) and run it.
+- **Windows:** download `bbcoop-windows.zip`, extract it to `C:\` and run `Bloodborne.exe` in it
+  (SmartScreen: More info, Run anyway). When Windows Firewall asks, allow Private and Public networks.
 
 On the first start the launcher asks for your Bloodborne folder (the one with `eboot.bin` in it) and your
 hunter name, the name your friends see (3 to 16 letters, digits, - or _). That is your account: a password
@@ -30,7 +32,8 @@ Launcher, **Online co-op**:
   "<your name> — hosting". Keep the launcher open while anyone plays.
 - **Join a game:** pick the host from the list (or type their address, 100.x.y.z), then Play.
 
-In the game, the host rings the Beckoning Bell, the guests the Small Resonant Bell. Any level can join.
+In the game the bells ring by themselves (the host's Beckoning Bell, the guests' Small Resonant Bell):
+load your character and the guest arrives in the host's world. Any level can join.
 
 Everyone needs the same download: the launcher refuses to join a host on another build and says which
 builds you both have.

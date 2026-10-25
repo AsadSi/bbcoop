@@ -138,8 +138,13 @@ Runtime mods (`src/`):
   `dist/bbcoop-windows.zip` (`Bloodborne.exe`, no Python needed).
 - The online module (gen 20) is linked into `bb-probe.exe` there (`src/runtime_net.c`, `gpu/bbnet20/CMakeLists.txt`).
 - Red-zone sites (`patches/redzone.json`, `scripts/link_modules.py`) are on only on Windows (`BB_RED_ZONE=0/1`).
-- From the Mac: `bash scripts/windows/cross-build.sh` (llvm-mingw + MSYS2 packages) checks that the Windows
-  executables still compile and link. Run it after changes that touch Windows code or after an upstream merge.
+- From the Mac: `bash scripts/windows/cross-build.sh` (llvm-mingw + MSYS2 packages) builds the Windows
+  executables and `shadnet.exe`. Run it after changes that touch Windows code or after an upstream merge.
+- The zip for players comes from the Mac (2026-10-25): `bash packaging/windows/package.sh` there runs
+  `package-cross.sh` (cross-built executables, their DLLs, python.org's Windows Python with soulstruct, a
+  `Bloodborne.exe` stub, `BUILD`), so it matches the Mac app's commit. PC steps and logs: `windows.md`.
+- Windows calls C with the Microsoft ABI: anything the game's code calls, or that calls the game's code,
+  is `ABI` (`sysv_abi`, `src/runtime.h`), and asm stubs that call C go through it too.
 
 ## Running and testing
 - `./build.sh`, then `./run.sh` (or `python3 launcher/bbport_launcher.py --play`), with your own decrypted v1.09 dump.
