@@ -7,6 +7,8 @@
 # (python.org; WINPYTHON overrides) and a private venv in out/pyenv.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
+# bbcoop: on a Mac or Linux PC the cross-built package (no PyInstaller there).
+case $(uname -s) in MINGW*|MSYS*) ;; *) exec bash packaging/windows/package-cross.sh ;; esac
 source ./msys2-env.sh
 [[ -f out/bb-probe.exe && -f out/bb-gpu-capabilities.exe && -f out/bb-play.exe ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
 
