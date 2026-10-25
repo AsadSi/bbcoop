@@ -4997,6 +4997,22 @@ void TickBbscFollowHost() {
         shared_host_map = host.packed_map;
         return; // same map as the host: nothing to follow
     }
+    // bbcoop: no follow into a Chalice Dungeon (area 29; their co-op is parked, Asad 2026-10-25).
+    // The follow load sends the map only, not the dungeon's layout (its glyph): the guest landed in
+    // an empty grey map and died (1b63c18, 16:18:51). The guest stays where it is meanwhile.
+    static bool host_in_chalice = false;
+    if ((host.packed_map >> 24) == 29) {
+        if (!host_in_chalice) {
+            host_in_chalice = true;
+            LOG_INFO(Debug, "BBSC warp together: host went into a Chalice Dungeon (map {:#x}) - "
+                            "not following, we stay in {:#x}", host.packed_map, here);
+            BBSC_TIMELINE("FOLLOW", "warp together: host went into a Chalice Dungeon (map {:#x}) - "
+                            "not following, we stay in {:#x}", host.packed_map, here);
+        }
+        mismatch_since_ms = 0;
+        return;
+    }
+    host_in_chalice = false;
     // Report 2026-09-28: a loading screen every time the host walked into the next area. When the
     // host's map is loaded in our game too and the host did not get there by a load (lamp, death
     // reload), the host walked across - so do we, no reload.
@@ -15796,23 +15812,50 @@ void TickBbscFreeBell() {
 // 45 s of the next run's first character load when the game was left while still ringing (a marker
 // file per shadPS4 user, <mod>\bell-pending\<user>.txt - the save slot is not known that early).
 // Insight = [[0x0553B130]+8]+0x84 (CONFIRMED statically: GetHeroPoint 0x01338670 reads it).
+// bbcoop 2026-10-25 (Asad: ring a bell and cancel it, +1 Insight every time; his timeline showed
+// "INSIGHT +1" right after three loads, none taken back, and no hosting state at all): the refund
+// also follows the Kin and Bloodlust Bells, a bell stopped before any hosting state, and a session
+// that ended without a boss kill, and it can land just after a load (death, lamp, the trip home)
+// while the old tick dropped its baseline there. So a bell is out while the player carries one of
+// the bells' SpEffects (BbscBellEffectIds: the kit bells use the vanilla rows' effects) or hosts
+// alone; when it ends unanswered, or a session ends without a boss kill, an exact +1 within
+// BbscBellRefundWindowMs is taken back, and a load in that time opens the window again once it is
+// over, measured from the Insight before the load. Real Insight is left alone: not while a boss
+// bar is up or was moments ago (meeting a boss), and not right after another item was used
+// (Madman's Knowledge; NoteBbscGoodsUsed). The refund's own site was not found (static search
+// 2026-10-25: none of the eboot's direct +1 writers of +0x84 is on that path, and text 30/100300
+// is looked up by computed id).
 constexpr size_t PlayerInsightOffset = 0x84;
-constexpr s64 BbscBellRefundWindowMs = 10'000;
+constexpr s64 BbscBellRefundWindowMs = 15'000;
 constexpr s64 BbscBellRefundLoadWindowMs = 45'000;
+constexpr s64 BbscRealInsightGraceMs = 5'000;
+constexpr s32 BbscBellEffectIds[] = {9000, 9005, 9025}; // Hunt (search), Kin and Bloodlust (signs)
+constexpr s32 BbscBellGoods[] = {4016, 4121, 11201, 4313, 11251, 200, 205, 225, 111};
+std::atomic<s64> bbsc_other_goods_used_ms{0};
+
+// Item use (TraceEntry): every goods but the bells and blanks, for TickBbscFreeBellRefund.
+void NoteBbscGoodsUsed(s32 goods) {
+    if (goods > 0 && std::ranges::find(BbscBellGoods, goods) == std::end(BbscBellGoods)) {
+        bbsc_other_goods_used_ms.store(SteadyNowMs(), std::memory_order_relaxed);
+    }
+}
 
 void TickBbscFreeBellRefund() {
     static const bool enabled = EnvFlagEnabled("SHADPS4_BBSC_FREE_BELL");
     static s64 last_ms = 0;
-    static s32 last_insight = -1;
-    static bool alone_hosting = false;   // hosting, nobody has joined yet
-    static s64 ended_unanswered_ms = 0;  // an unanswered bell just ended
+    static s32 last_insight = -1;         // kept across loads: the refund can come right after one
+    static u32 bells = 0;                 // the bells out, nobody has answered: a bit per effect, 8 hosting
+    static bool in_session = false;       // hosting with a member, or a guest
+    static s64 session_since_ms = 0;
+    static bool window_after_load = false; // the window opens again when the load is over
+    static s64 ended_unanswered_ms = 0;   // a bell (or a session) just ended without a reward
     static s64 loaded_with_marker_ms = 0; // first character of this run, the last run left a bell
     static bool marker_checked = false;
     if (!enabled || image_base == 0) {
         return;
     }
     const s64 now = SteadyNowMs();
-    if (now - last_ms < 500) {
+    if (now - last_ms < 250) {
         return;
     }
     last_ms = now;
@@ -15821,16 +15864,51 @@ void TickBbscFreeBellRefund() {
         Common::FS::GetUserPath(Common::FS::PathType::CapturesDir).parent_path() / "bell-pending" /
         fmt::format("{}.txt", BbscProcessUserId().empty() ? std::string("default")
                                                           : BbscProcessUserId());
+    const s32 state = GetSessionState();
     const u64 local = GetPlayerSlotData();
     const u64 global = GetGlobalState();
     const bool loading = !ReadablePointer(global, 0x10) || ReadValue<u8>(global, 0x08) != 0;
+    // While loading the member count is not readable: a host's session stays as it was.
+    const bool session = state == 4 || state == 6 ||
+                         (state == 3 && (loading ? in_session : GetBbscSessionMemberCount(global) > 1));
+    const auto drop_marker = [&] {
+        std::error_code ec;
+        fs::remove(marker, ec);
+    };
+    // The marker stays until the refund is taken back or its window is over: a quit to the title
+    // while ringing, then closing the game, leaves it for the next run.
+    const auto end_bell = [&](bool unanswered) {
+        bells = 0;
+        if (unanswered) {
+            ended_unanswered_ms = now;
+        } else {
+            drop_marker();
+        }
+    };
+    if (session != in_session) {
+        in_session = session;
+        if (session) {
+            session_since_ms = now;
+            end_bell(false); // answered
+        } else if (bbsc_boss_killed_ms < session_since_ms) {
+            ended_unanswered_ms = now; // over without a boss kill: the game may refund the bell
+        }
+    }
     if (local == 0 || loading) {
-        last_insight = -1;
-        return;
+        if (bells != 0) {
+            end_bell(true); // a load stops the bell
+        }
+        if (ended_unanswered_ms != 0) {
+            window_after_load = true;
+            ended_unanswered_ms = 0;
+        }
+        return; // last_insight stays
+    }
+    if (window_after_load) {
+        window_after_load = false;
+        ended_unanswered_ms = now;
     }
     const s32 insight = ReadValue<s32>(local, PlayerInsightOffset);
-    const s32 state = GetSessionState();
-    const s32 members = GetBbscSessionMemberCount(global);
     if (!marker_checked) {
         marker_checked = true;
         std::error_code ec;
@@ -15843,42 +15921,50 @@ void TickBbscFreeBellRefund() {
                             "watching for the game's Insight refund");
         }
     }
-    // Hosting alone = a bell that nobody has answered yet; a marker while it lasts.
-    if (state == 3 && members <= 1) {
-        if (!alone_hosting) {
-            alone_hosting = true;
-            std::error_code ec;
-            fs::create_directories(marker.parent_path(), ec);
-            std::ofstream(marker) << "bell rang, nobody joined yet\n";
+    // Each bell on its own: ringing another one ends a Hunt Bell (test 2026-10-25: the refund came
+    // when the Kin Bell rang, the Hunt Bell's search 9000 still on after a Parting Blank).
+    u32 ringing = 0;
+    if (!session) {
+        ringing = state == 3 ? 8u : 0u;
+        for (size_t i = 0; i < std::size(BbscBellEffectIds); ++i) {
+            ringing |= BbscLocalEffectNode(BbscBellEffectIds[i]) != 0 ? 1u << i : 0u;
         }
-    } else if (alone_hosting) {
-        const bool answered = state == 3 && members > 1;
-        alone_hosting = false;
-        if (!answered) {
-            ended_unanswered_ms = now;
-        }
-        std::error_code ec;
-        fs::remove(marker, ec);
     }
+    if ((bells & ~ringing) != 0) {
+        end_bell(!session);
+    }
+    if (ringing != 0 && bells == 0) {
+        std::error_code ec;
+        fs::create_directories(marker.parent_path(), ec);
+        std::ofstream(marker) << "bell rang, nobody answered yet\n";
+    }
+    bells = ringing;
     const bool in_window =
         (ended_unanswered_ms != 0 && now - ended_unanswered_ms < BbscBellRefundWindowMs) ||
         (loaded_with_marker_ms != 0 && now - loaded_with_marker_ms < BbscBellRefundLoadWindowMs);
-    if (last_insight >= 0 && insight == last_insight + 1 && in_window) {
+    const bool real = BossFightActive() ||
+                      (bbsc_boss_bar_seen_ms != 0 && now - bbsc_boss_bar_seen_ms < BbscRealInsightGraceMs) ||
+                      now - bbsc_other_goods_used_ms.load(std::memory_order_relaxed) < BbscRealInsightGraceMs;
+    if (last_insight >= 0 && insight == last_insight + 1 && in_window && !real) {
         WriteValue<s32>(local, PlayerInsightOffset, last_insight);
         LOG_INFO(Debug, "BBSC free bell: +1 Insight right after an unanswered bell ({}) - the game's "
                         "refund for a bell that cost nothing, taken back ({} -> {})",
-                 ended_unanswered_ms != 0 ? "session ended" : "after the reload", insight,
+                 ended_unanswered_ms != 0 ? "bell or session ended" : "after the reload", insight,
                  last_insight);
         BBSC_TIMELINE("INSIGHT", "free bell: +1 Insight right after an unanswered bell ({}) - the game's "
                         "refund for a bell that cost nothing, taken back ({} -> {})",
-                 ended_unanswered_ms != 0 ? "session ended" : "after the reload", insight,
+                 ended_unanswered_ms != 0 ? "bell or session ended" : "after the reload", insight,
                  last_insight);
         ended_unanswered_ms = 0;
         loaded_with_marker_ms = 0;
+        drop_marker();
         return; // last_insight stays
     }
     if (ended_unanswered_ms != 0 && now - ended_unanswered_ms >= BbscBellRefundWindowMs) {
         ended_unanswered_ms = 0;
+        if (bells == 0) {
+            drop_marker();
+        }
     }
     if (loaded_with_marker_ms != 0 && now - loaded_with_marker_ms >= BbscBellRefundLoadWindowMs) {
         loaded_with_marker_ms = 0;
@@ -16095,6 +16181,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbcoopLoot(); // bbcoop: mirrored loot
         TickBbcoopSoloHunterType(); // bbcoop: a phantom type left in a solo save
         TickBbcoopSoloLeaveLocks(); // bbcoop: leave locks left in a solo save
+        TickBbcoopTestBells(); // bbcoop: BB_TEST_BELLS
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();
@@ -16213,6 +16300,9 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
                 return;
             }
         }
+    }
+    if (site.kind == TraceKind::UseItemExecution || site.kind == TraceKind::GoodsActionSubmit) {
+        NoteBbscGoodsUsed(GetUseItemExecutionGoods(site, *registers)); // bbcoop: real Insight items
     }
     if ((site.kind == TraceKind::UseItemExecution || site.kind == TraceKind::GoodsActionSubmit) &&
         !IsTrackedGoods(GetUseItemExecutionGoods(site, *registers))) {
@@ -16813,8 +16903,10 @@ void OnBbscProgressPacket(const std::uint32_t* flags, std::size_t count) {
             if (flags[i] >= 9800 && flags[i] <= 9802) {
                 time_bits |= 0x80 >> (flags[i] - 9800);
             }
-            if (known(flags[i]) && std::ranges::find(bbsc_progress_host_flags, flags[i]) ==
-                                       bbsc_progress_host_flags.end()) {
+            // bbcoop: collected only for shared progress (off: run.sh/run.py); the time bits always.
+            if (BbscSharedProgressEnabled() && known(flags[i]) &&
+                std::ranges::find(bbsc_progress_host_flags, flags[i]) ==
+                    bbsc_progress_host_flags.end()) {
                 bbsc_progress_host_flags.push_back(flags[i]);
                 ++added;
             }

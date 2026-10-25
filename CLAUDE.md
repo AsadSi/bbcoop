@@ -89,6 +89,8 @@ Runtime mods (`src/`):
     saves backed up first.
   - `BB_TEST_STATS=<level>,<vit>,<end>,<str>,<skl>,<blt>,<arc>`: sets the loaded character's stats (any name) on the
     run's first load, saves backed up first. Level = sum of stats − 50.
+  - `BB_TEST_BELLS=blank|death|both` (online, BBSC): rings the Hunt, Kin and Bloodlust Bells in turn by the game's
+    item use and stops each with the Parting Blank or by dying, 25 s apart; TEST and INSIGHT lines in the timeline.
   - `BB_TEST_LOADOUT=<list>`: fills a character named TEST once (stats 99, every weapon +10 Uncanny/Lost, all armor,
     stacks, gems); list `mods/bbcoop-respec/test-loadout.txt`; launcher `~/.local/bin/bloodborne-testchar.sh`.
 - **Frame rate and camera:**
