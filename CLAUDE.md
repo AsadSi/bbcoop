@@ -18,6 +18,7 @@ Everything else in the tree is upstream's. bbcoop's own files sit beside it so m
 | Mac build pieces | `scripts/mac-deps.sh`, `scripts/mac/` (MoltenVK and mimalloc patches) |
 | Windows build pieces | `docs/bbcoop/windows.md`, `run.py`, `msys2-env.sh`, `launcher/bbport_launcher_win.py`, `packaging/windows/` |
 | Host/Join, Mac app | `launcher/bbcoop_online.py`, `packaging/macos/package.sh` |
+| Launchers' icon = the player's dump `sce_sys/icon0.png` (blood moon until a game folder is chosen) | `launcher/bbcoop_icon.py` |
 | Docker tests, server image | `scripts/docker-test.sh`, `scripts/docker-shell.nix`, `scripts/build-server.sh`, `scripts/server.Dockerfile` |
 | Tests | `tests/test_*.c`, `tests/test_*.py` |
 

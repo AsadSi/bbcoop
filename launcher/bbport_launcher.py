@@ -47,6 +47,7 @@ from mods import discover as discover_mods  # noqa: E402
 import game_check  # noqa: E402
 import online  # noqa: E402  (the online module: addresses and the connection test)
 import bbcoop_online  # noqa: E402  (bbcoop: Host and Join)
+import bbcoop_icon  # noqa: E402  (bbcoop: the dump's own icon)
 from patches import external_patches  # noqa: E402
 # Packaged (AppImage): generated files, saves and bbport.ini live in BB_DATA_DIR.
 PACKAGED = bool(os.environ.get("BB_PREBUILT"))
@@ -1123,6 +1124,24 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.game_status.set_from_icon_name("object-select-symbolic" if ok and not problem else "dialog-warning-symbolic")
         self.game_status.set_tooltip_text(tooltip)
         self.launch_button.set_sensitive(ok or self.process is not None)
+        self.update_icon()
+
+    def update_icon(self):
+        """bbcoop: the window's and the menu entry's icon is the dump's own (bbcoop_icon)."""
+        dump = bbcoop_icon.dump_icon(self.settings["game_dir"] and self.game_dir())
+        icon = dump or PORT_DIR / "launcher" / "bloodborne.png"
+        if icon == getattr(self, "icon_path", None):
+            return
+        self.icon_path = icon
+        theme = Gtk.IconTheme.get_for_display(self.get_display())
+        if str(icon.parent) not in (theme.get_search_path() or []):
+            theme.add_search_path(str(icon.parent))  # an unthemed icon: its file name is its name
+        self.set_icon_name(icon.stem)
+        if dump or not PACKAGED:  # a package's blood moon is in its mount, gone once it exits
+            try:
+                bbcoop_icon.update_menu_entry(icon, appimage=dump and os.environ.get("APPIMAGE"))
+            except OSError:
+                pass
 
     def on_choose_game(self, _button):
         def chosen(path):
