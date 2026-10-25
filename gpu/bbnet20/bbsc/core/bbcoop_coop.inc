@@ -380,3 +380,65 @@ void InstallBbcoopSsInfoFormat() {
                   SsInfoParserOffset);
     }
 }
+
+// ---- Alone, a hunter again (2026-10-25) ----------------------------------------------------------
+// Report (Asad, 2026-10-25): after a co-op session he loaded his own world as a phantom - nothing in
+// the Dream could be used (headstones, the Doll, doors), and BBSC's head count said "1 cooperator"
+// while alone. The game left a guest's phantom type in his save: the window was closed during a
+// session, while the v8 swap (ArmBbscReinsertV8) had the own-world restore type [[0x0553B188]+4] and
+// [0x0553B130]+0x8C set to the phantom type. Solo, settled and alive for BbcoopSoloTypeSettleMs with
+// a phantom type (1, 2, 12, 13: the types 0x015C9940 restores from) in any of those or in the slot
+// (+0xA4) or character (+0x78) type, every one of them goes back to 0 (host). The game saves it
+// with the next autosave.
+constexpr s64 BbcoopSoloTypeSettleMs = 5'000;
+
+bool BbcoopPhantomType(s32 type) {
+    return type == 1 || type == 2 || type == 12 || type == 13;
+}
+
+void TickBbcoopSoloHunterType() {
+    static s64 since_ms = 0;
+    const s64 now = SteadyNowMs();
+    const u64 global = GetGlobalState();
+    const u64 slots = ReadValue<u64>(image_base + PlayerSlotManagerPointerOffset, 0);
+    const u64 record = ReadValue<u64>(image_base + 0x0553B188, 0);
+    const u64 world_chr = ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0);
+    const u64 player = ReadablePointer(world_chr, 0x68) ? ReadValue<u64>(world_chr, 0x60) : 0;
+    const u64 local = ReadablePointer(slots, 0x90) ? ReadValue<u64>(slots, 0x08) : 0;
+    if (image_base == 0 || bbsc_v8_pending || GetSessionState() != 0 ||
+        !ReadablePointer(global, 0x10) || ReadValue<u8>(global, 0x08) != 0 ||
+        GetBbscLocalPlayerHp() <= 0 || !ReadablePointer(record, 0x08) ||
+        !ReadablePointer(local, 0xA8) || !ReadablePointer(player, 0x80)) {
+        since_ms = 0;
+        return;
+    }
+    const s32 restore = ReadValue<s32>(record, 4);
+    const s32 queued = ReadValue<s32>(slots, 0x8C);
+    const s32 slot = ReadValue<s32>(local, 0xA4);
+    const s32 chr = ReadValue<s32>(player, 0x78);
+    if (!BbcoopPhantomType(restore) && !BbcoopPhantomType(queued) && !BbcoopPhantomType(slot) &&
+        !BbcoopPhantomType(chr)) {
+        since_ms = 0;
+        return;
+    }
+    if (since_ms == 0) {
+        since_ms = now;
+    }
+    if (now - since_ms < BbcoopSoloTypeSettleMs) {
+        return;
+    }
+    since_ms = 0;
+    const auto reset = [](u64 base, u64 offset, s32 type) {
+        if (BbcoopPhantomType(type) && HasMemoryAccess(base + offset, 4, MemoryProt::CpuWrite)) {
+            WriteValue<s32>(base, offset, 0);
+        }
+    };
+    reset(record, 4, restore);
+    reset(slots, 0x8C, queued);
+    reset(local, 0xA4, slot);
+    reset(player, 0x78, chr);
+    LOG_WARNING(Debug, "bbcoop: alone with a phantom type (restore {}, queued {}, slot {}, character {}) "
+                       "- back to a hunter (0)", restore, queued, slot, chr);
+    BBSC_TIMELINE("REPAIR", "alone with a phantom type (restore {}, queued {}, slot {}, character {}) - "
+                            "back to a hunter (0)", restore, queued, slot, chr);
+}
