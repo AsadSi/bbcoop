@@ -152,6 +152,8 @@ INTEL_TONEMAP='Intel Black Tonemap Fix'
 def intel_cpu(cpuinfo='/proc/cpuinfo'):
     if sys.platform == 'darwin' and cpuinfo == '/proc/cpuinfo':
         return True  # bbcoop: Rosetta 2 shows the game a GenuineIntel CPU
+    if sys.platform == 'win32' and cpuinfo == '/proc/cpuinfo':  # bbcoop: no /proc there
+        return 'GenuineIntel' in os.environ.get('PROCESSOR_IDENTIFIER', '')
     try:
         with open(cpuinfo) as f:
             return any(line.startswith('vendor_id') and 'GenuineIntel' in line for line in f)

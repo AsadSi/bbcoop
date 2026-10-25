@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -281,7 +282,8 @@ void WriteToyPad(const char* path, const std::vector<ToyPadFigure>& figures,
         std::fprintf(file, "%d %u  # %s\n", f.zone, f.id, ToyPadLabel(names, f.id).c_str());
     }
     std::fclose(file);
-    std::rename(temp.c_str(), path);
+    std::error_code renamed; // bbcoop: replaces the old file on Windows too (std::rename keeps it there)
+    std::filesystem::rename(temp, path, renamed);
 }
 
 void ToyPadSection() {

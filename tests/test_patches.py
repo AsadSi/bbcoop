@@ -432,5 +432,17 @@ class GxCommandHeapTests(unittest.TestCase):
         self.assertEqual(writes, expected)
 
 
+
+class IntelCpuTests(unittest.TestCase):
+    def test_windows_reads_processor_identifier(self):
+        """bbcoop: Windows has no /proc/cpuinfo; its Intel PCs need the black tone-map fix too."""
+        from unittest import mock
+        for identifier, intel in (('Intel64 Family 6 Model 158 Stepping 10, GenuineIntel', True),
+                                  ('AMD64 Family 25 Model 33 Stepping 0, AuthenticAMD', False)):
+            with mock.patch.object(patches.sys, 'platform', 'win32'), \
+                    mock.patch.dict(patches.os.environ, {'PROCESSOR_IDENTIFIER': identifier}):
+                self.assertIs(patches.intel_cpu(), intel)
+
+
 if __name__ == '__main__':
     unittest.main()

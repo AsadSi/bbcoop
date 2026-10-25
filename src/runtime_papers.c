@@ -19,6 +19,7 @@
  * Every site's bytes are checked before anything is written; any mismatch leaves the game vanilla. */
 #define _GNU_SOURCE
 #include "hooks.h"
+#include "runtime.h"
 #include "runtime_papers.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,9 +39,9 @@
 #define SPEFFECT_STATE_INFO 0x156 /* u16 */
 
 typedef struct { uint32_t id, table; const unsigned char *row; uint64_t extra[5]; } Found;
-typedef void (*FindEffect)(Found *out, int32_t id);
-typedef void (*FindAtk)(Found *out, int32_t table, int32_t id);
-typedef void (*FindWeapon)(Found *out, int32_t id);
+typedef void (ABI *FindEffect)(Found *out, int32_t id); /* the game's code: System V (Windows' C calls are not) */
+typedef void (ABI *FindAtk)(Found *out, int32_t table, int32_t id);
+typedef void (ABI *FindWeapon)(Found *out, int32_t id);
 
 typedef struct {
     int32_t id;          /* SpEffectParam row */
