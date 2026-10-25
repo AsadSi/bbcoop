@@ -454,7 +454,7 @@ def game_environment(s):
     if s["vk_validation"]:
         env["BB_VK_VALIDATION"] = "1"
     pool = "huntersdream" if s.get("online_pool") == "huntersdream" else "seamless"
-    if s.get("online") and online_module(pool):
+    if s.get("online") and online_module(pool) and not bbcoop_online.join_without_host(s):  # bbcoop: no host: offline
         server = s["online_server"].strip() or online.SHADNET_SERVER
         community = online.community_address(s["online_community"])
         env["BB_ONLINE"] = "1"
@@ -1834,10 +1834,6 @@ class LauncherWindow(Adw.ApplicationWindow):
             self.alert("Bloodborne", "Hunter name: 3 to 16 letters, digits, - or _.")
             self.stack.set_visible_child_name("online")
             return
-        if mode == "join" and not address:
-            self.alert("Bloodborne", "Pick a host to join (Online).")
-            self.stack.set_visible_child_name("online")
-            return
         if not self.password_row.get_text():
             self.password_row.set_text(bbcoop_online.new_password())
         secret = self.password_row.get_text()
@@ -1968,7 +1964,8 @@ class LauncherWindow(Adw.ApplicationWindow):
 
     def start_game(self, prepared=False):
         mode = combo_value(self.mode_row)
-        if not prepared and self.online_row.get_active() and mode in ("host", "join"):
+        if not prepared and self.online_row.get_active() and mode in ("host", "join") and \
+                not bbcoop_online.join_without_host({"coop_mode": mode, "coop_join": self.join_row.get_text()}):
             self.prepare_coop(mode)  # bbcoop: then start_game(prepared=True)
             return
         if self.online_row.get_active() and "@" in self.npid_row.get_text() and mode == "manual":

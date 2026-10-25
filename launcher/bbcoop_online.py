@@ -138,6 +138,11 @@ def find_hosts(timeout=1.5):
     return sorted(found, key=lambda host: host[1].lower())
 
 
+def join_without_host(settings):
+    """Join picked but no host: the game starts offline (Asad, 2026-10-25), as a first start does."""
+    return settings.get("coop_mode") == "join" and not str(settings.get("coop_join") or "").strip()
+
+
 def server_fields(address):
     """The launcher's three server settings for a host address."""
     return {"online_server": f"{address}:{GAME_PORT}", "online_webapi": f"http://{address}:{WEB_PORT}",

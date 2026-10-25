@@ -375,7 +375,7 @@ def game_environment(s):
         if '=' in item:
             key, value = item.split('=', 1)
             env[key] = value
-    if s.get('online'):
+    if s.get('online') and not bbcoop_online.join_without_host(s):  # bbcoop: no host: offline
         # bbcoop: as the Linux launcher: Seamless Hunt (BBSC) or The Hunter's Dream, shadPS4 0.20's module.
         server = str(s['online_server']).strip() or online.SHADNET_SERVER
         community = online.community_address(s['online_community'])
@@ -1210,10 +1210,6 @@ class Launcher:
             self.messagebox.showwarning('Bloodborne', _('Hunter name: 3 to 16 letters, digits, - or _.'))
             self.show('online')
             return
-        if mode == 'join' and not address:
-            self.messagebox.showwarning('Bloodborne', _('Pick a host to join (Online co-op).'))
-            self.show('online')
-            return
         if not password.get():
             password.set(bbcoop_online.new_password())
         secret = password.get()
@@ -1388,8 +1384,9 @@ class Launcher:
             state = _("Online (The Hunter's Dream)")
         mode = self.var('coop_mode', 'app').get()  # bbcoop
         if self.var('online', 'app').get() and mode in ('host', 'join'):
-            state = _('Hosting') if mode == 'host' else _('Joining {}').format(
-                self.var('coop_join', 'app').get().strip() or '?')
+            join = self.var('coop_join', 'app').get().strip()
+            state = _('Hosting') if mode == 'host' else _('Joining {}').format(join) if join else \
+                _('Offline (no host picked)')
         return f'{_(*fps)}   ·   {upscaler}   ·   {output}   ·   {state}'
 
     def detect_gpu(self):
@@ -1595,7 +1592,7 @@ class Launcher:
                                                       'Выберите папку игры с eboot.bin (CUSA03173).'))
             self.show('game')
             return
-        if playing_online.get() and mode in ('host', 'join'):
+        if playing_online.get() and mode in ('host', 'join') and not bbcoop_online.join_without_host(self.app):
             self.prepare_coop(mode)  # then launch()
             return
         self.launch()
