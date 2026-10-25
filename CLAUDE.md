@@ -51,7 +51,8 @@ Runtime mods (`src/`):
   hash). `scripts/game_check.py` rejects anything else. Never commit game files, dumps or saves.
 
 ## Online and co-op
-- BBSC is 0.0.2 (Classmg22/BBSC 4f11faf, merged 2026-10-25 into both copies; `bbsc_relay_client` and the Discord status
+- BBSC is 0.0.2 (Classmg22/BBSC 4f11faf, merged 2026-10-25 into both copies and `scripts/bbsc_gameserver/`, which now
+  stores Chalice Dungeons and glyphs; `bbsc_relay_client` and the Discord status
   left out: bbnet20 has its own relay). Every run writes `<user>/log/bbsc-timeline-*.txt`: read it first after a session.
 - Online is upstream's module: since 0.6 (merged 2026-10-19) `gpu/bbnet20` (`libbbnet20`, shadPS4 0.20, the
   default), `BB_NET_GEN=19` the older `gpu/bbnet` (not on Windows); `BB_ONLINE=1`, `src/runtime_net.c` is
