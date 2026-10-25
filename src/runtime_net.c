@@ -54,6 +54,7 @@ static void *module_symbol(const char *name) {
     if (!strcmp(name,"bbnet_image_ready")) return (void *)bbnet_image_ready;
     if (!strcmp(name,"bbnet_image_mapped")) return (void *)bbnet_image_mapped;
     if (!strcmp(name,"bbnet_start")) return (void *)bbnet_start;
+    if (!strcmp(name,"bbnet_pad_read")) return (void *)bbnet_pad_read;
     return NULL;
 }
 #else
@@ -79,6 +80,15 @@ void runtime_net_start(void) {
     if (!module_handle) return;
     const BbNetStartFn start=(BbNetStartFn)module_symbol("bbnet_start");
     if (start) start();
+}
+
+/* bbcoop: each pad read (runtime_pad.c) goes to the module too: BBSC's watch camera. */
+void runtime_net_pad_read(uint32_t buttons, uint8_t right_x, uint8_t right_y, uint8_t left_x, uint8_t left_y) {
+    static BbNetPadReadFn pad_read;
+    static int looked;
+    if (!module_handle) return;
+    if (!looked) { looked=1; pad_read=(BbNetPadReadFn)module_symbol("bbnet_pad_read"); }
+    if (pad_read) pad_read(buttons,right_x,right_y,left_x,left_y);
 }
 
 /* The module: BB_NET_MODULE, else gpu/libbbnet.so beside bb-probe (where libbbgpu.so is). */

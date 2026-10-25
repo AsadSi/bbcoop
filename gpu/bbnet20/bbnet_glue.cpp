@@ -610,6 +610,12 @@ namespace Libraries::Np::NpManager {
 void InitializeRuntime();
 }
 
+// bbcoop: the controller for BBSC's watch camera (upstream BBSC reads it in shadPS4's pad library).
+BBNET_EXPORT void bbnet_pad_read(uint32_t buttons, uint8_t right_x, uint8_t right_y, uint8_t left_x,
+                                 uint8_t left_y) {
+    Core::Bbsc::CinematicPadRead(buttons, right_x, right_y, left_x, left_y);
+}
+
 BBNET_EXPORT void bbnet_start(void) {
     // The online session starts with the game (not at registration: the account and the
     // game's SDK version are known only now).

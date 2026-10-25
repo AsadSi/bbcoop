@@ -1262,6 +1262,7 @@ static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
         }
     }
     runtime_re_watch_tick(data,(uint64_t)reads);
+    runtime_net_pad_read(data->buttons,data->right_x,data->right_y,data->left_x,data->left_y); /* bbcoop */
     return 0;
 }
 /* Buffered read: the port samples once per call, so one entry is returned. */

@@ -14,6 +14,9 @@ void bbgpu_filter_pad(uint32_t *buttons, const uint8_t *sticks) { (void)buttons;
 int bbgpu_pointer_wanted(void) { return 0; } /* bbcoop: stubs for 0.6's runtime_pad.c */
 int bbgpu_free_camera(void) { return 0; }
 void runtime_re_watch_tick(const void *pad_buffer, uint64_t reads) { (void)pad_buffer; (void)reads; }
+void runtime_net_pad_read(uint32_t buttons, uint8_t right_x, uint8_t right_y, uint8_t left_x, uint8_t left_y) {
+    (void)buttons; (void)right_x; (void)right_y; (void)left_x; (void)left_y; /* bbcoop: the watch camera */
+}
 uintptr_t runtime_libc_base;
 uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *name) {
     (void)table; (void)count; (void)name;
