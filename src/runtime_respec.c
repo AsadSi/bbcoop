@@ -15,7 +15,10 @@
  *                      Dream. For testing an area (its frame rate) without playing to it.
  *   BB_TEST_GIVE=<id>,.. (bbcoop) once in game, the weapons (final ids, e.g. 27001000 Rakuyo +10) the
  *                      character doesn't hold yet, on any character; goods:<id>:<count> tops goods up
- *                      to count (goods:1400:99, Bold Hunter's Mark); armor:<id> gives a piece not held. */
+ *                      to count (goods:1400:99, Bold Hunter's Mark); armor:<id> gives a piece not held.
+ *   BB_TEST_PROGRESS=bsb (bbcoop) once per save: a new character made to look like one that has just
+ *                      beaten the Blood-starved Beast (Asad, 2026-10-25): bosses, lamps, drops, level 25,
+ *                      Kirkhammer. */
 #define _GNU_SOURCE
 #include "hooks.h"
 #include "runtime.h"
@@ -73,6 +76,7 @@
 #define FLAG_ENDGAME_GIVEN 72100902 /* BB_TEST_ENDGAME ran on this save */
 #define FLAG_LOADOUT_GIVEN 72100903 /* BB_TEST_LOADOUT filled this character */
 #define FLAG_TOOLS_GIVEN 72100904   /* BB_TEST_LOADOUT gave this character the Workshop tools */
+#define FLAG_PROGRESS_GIVEN 72100905 /* BB_TEST_PROGRESS ran on this save */
 #define DREAM_AREA  0x15       /* m21_xx: the Hunter's Dream */
 #define SESSION_HOST 3
 #define SESSION_CLIENT 6
@@ -127,6 +131,7 @@ int respec_text_hook_installed(void) { return text_hook_installed; }
 static const char *test_loadout; /* BB_TEST_LOADOUT: the item list for a character named TEST */
 static const char *test_give;    /* BB_TEST_GIVE: weapon ids */
 static const char *test_stats;   /* BB_TEST_STATS: level,vit,end,str,skl,blt,arc for the loaded character */
+static int test_progress;        /* BB_TEST_PROGRESS=bsb */
 /* Refund mode, from the workbench's writes of flag 72100901, which is never stored: a stored flag is saved
  * and would outlive a game quit with her menu open, into the Workshop's own Fortify menu. */
 static int refund_requested;
@@ -562,6 +567,33 @@ static void give_weapons(uint64_t pgd, const char *ids) {
     }
 }
 
+/* BB_TEST_PROGRESS=bsb. The boss events' own flags and what they set when the boss dies (m24_01:
+ * Cleric Beast 12411700, Father Gascoigne 12411800; m23_00: Blood-starved Beast 12301800; read with
+ * BBSC's tools/gamedata emevd.py), their item lots (50000010, 31000, 80000000), and the lamps up to
+ * the Church of the Good Chalice (the Dream's headstones read 1AAB78x0, the maps 1AAB78x0 too). */
+static void make_bsb_progress(uint64_t pgd) {
+    static const int32_t flags[] = {
+        12411700, 2411, 9456,                     /* Cleric Beast */
+        12411800, 2412, 9457, 5910,               /* Father Gascoigne */
+        12301800, 2300, 9453, 72400512,           /* Blood-starved Beast */
+        12417800, 12417810, 12417820, 12417830, 12417840, 12417850, 12417860, 12417870, /* Central Yharnam */
+        12407800, 12407810, 12407811,             /* Cathedral Ward */
+        12307800, 12307810, 12307820, 12307830,   /* Old Yharnam, Church of the Good Chalice */
+    };
+    static const RespecStats stats = {25, {15, 12, 16, 13, 9, 10}}; /* Asad: level 25 */
+    char where[1200];
+    printf("Respec: BB_TEST_PROGRESS: %d save files backed up in %s\n", backup_saves(where, sizeof(where)), where);
+    for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) set_flag(flags[i], 1);
+    give_weapons(pgd, "8000400,14000300,goods:1000:20,goods:900:20,goods:1200:5,goods:1230:3,goods:200:1,"
+                      "goods:205:1,goods:111:1,goods:3000:2,goods:4114:1,goods:4000:1,goods:6109:1");
+    apply_stats(&stats);
+    fill_hp(pgd);
+    write_s32(pgd, PGD_INSIGHT, 5);
+    write_s32(pgd, PGD_INSIGHT_COPY, 5);
+    printf("Respec: BB_TEST_PROGRESS: Blood-starved Beast save, level %d; to the Dream\n", read_s32(pgd, PGD_LEVEL));
+    wake_dream_and_warp();
+}
+
 static void make_test_loadout(uint64_t pgd, const char *path) {
     FILE *list = fopen(path, "r");
     if (!list) {
@@ -825,6 +857,14 @@ static void frame_update(HookRegs *regs) {
         give_checked = 1;
         give_weapons(pgd, test_give);
     }
+    if (test_progress && !endgame_done && in_game(&pgd)) {
+        endgame_done = 1;
+        if (!get_flag(FLAG_PROGRESS_GIVEN)) {
+            set_flag(FLAG_PROGRESS_GIVEN, 1);
+            make_bsb_progress(pgd);
+        }
+        return;
+    }
     if (!(test_endgame || test_warp) || endgame_done || !in_game(&pgd)) return;
     endgame_done = 1;
     if (test_endgame && !get_flag(FLAG_ENDGAME_GIVEN)) {
@@ -946,6 +986,7 @@ const char *respec_install(unsigned char *image, uint64_t size) {
     test_loadout = (env = getenv("BB_TEST_LOADOUT")) && *env ? env : NULL;
     test_give = (env = getenv("BB_TEST_GIVE")) && *env ? env : NULL;
     test_stats = (env = getenv("BB_TEST_STATS")) && *env ? env : NULL;
+    test_progress = (env = getenv("BB_TEST_PROGRESS")) && !strcmp(env, "bsb");
     trace = (env = getenv("BB_RESPEC_TRACE")) && !strcmp(env, "1");
     const char *failure = hooks_init(image, size);
     for (size_t i = 0; !failure && i < count; ++i)
