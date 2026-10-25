@@ -10822,25 +10822,12 @@ void TickBbscGuestDrops() {
     }
 }
 
-// ---- Shared progress, merge mode (2026-10-07) ----------------------------------------------------
-// The user: the guest's own world takes over everything the host has done, except NPC quests; a
-// merge only ever ADDS (a boss dead for either player is dead for both, an open shortcut or a lit
-// lamp stays open / lit), never removes, and the character (stats, items, equipment, echoes,
-// Insight) is never touched.
+// ---- The host's progress packet (2026-10-07) -----------------------------------------------------
+// The host sends the boss defeated flags it has on and its time of night (relay "SHAD" 0x26) every
+// 5 s while hosting. bbcoop: a guest uses the time of night only - shared progress (merging the
+// host's progress into the guest's own world) is removed (Asad, 2026-10-25: co-op as in vanilla).
 //   * Bosses: the global "boss defeated" flags - every flag a boss defeat event sets below 100000
-//     (2003[02] next to a 945x counter, all event files; tools/gamedata/emevd.py). The night-phase
-//     flags 999 / 1000..1440 / 1082 are left out: only one of them is on at a time, an OR would set
-//     two. The host sends the ones it has on (relay "SHAD" 0x26) every 5 s while hosting.
-//   * The world: kind 1 groups (1AABxxxx: the map block's events - bosses, doors, shortcuts, lamps
-//     lit, cutscenes seen) of every block the host sent during the session (the world snapshots of
-//     "World state when warping together"). Kinds 5 (item pickups), 6 and 7 (NPC and object states)
-//     are not merged.
-// While the guest plays, BBSC only collects. Once the guest is home again (own world, not loading,
-// alive) the saves are backed up (BackupBbscSaves) and the collected flags are OR-ed into the live
-// flag table, which the game then saves as usual. The Hunter's Dream groups wait until BBSC has put
-// the guest's own Dream state back. Nothing is kept on disk: quitting the game while still a guest
-// skips the merge (it runs on the next trip home with the same host's data only in the same run).
-// Switch SHADPS4_BBSC_SHARED_PROGRESS (Mods tab, on).
+//     (2003[02] next to a 945x counter, all event files; tools/gamedata/emevd.py).
 constexpr std::array<u32, 49> BbscProgressFlags{
     2200, 2300, 2301, 2400, 2401, 2402, 2411, 2412, 2420, 2421, 2500, 2600, 2601,
     2700, 2701, 2800, 3200, 3300, 3400, 3401, 3402, 3403, 3510, 3511, 3512, 3517,
@@ -10854,72 +10841,6 @@ constexpr std::array<u32, 49> BbscProgressFlags{
 // Every map's lighting event branches on them (e.g. m24_00 12400300); no event sets them.
 constexpr std::array<u32, 8> BbscProgressFlagsMore{9466, 9467, 9468, 9469, 9471, 9800, 9801, 9802};
 constexpr s64 BbscProgressSendMs = 5'000;
-constexpr s64 BbscProgressSettleMs = 4'000;    // home, loaded and alive this long before merging
-constexpr s64 BbscProgressHomeLimitMs = 180'000; // a session that ended longer ago is dropped
-
-bool BbscSharedProgressEnabled() {
-    static const bool enabled = EnvFlagEnabled("SHADPS4_BBSC_SHARED_PROGRESS");
-    return enabled;
-}
-
-bool BackupBbscSaves(); // see "The BBSC hunter's kit"
-
-std::mutex bbsc_progress_mutex;
-std::vector<u32> bbsc_progress_host_flags;                         // guest: host's boss flags seen
-std::map<u32, std::array<u8, BbscWorldGroupBytes>> bbsc_progress_groups; // guest: kind 1, OR-ed
-bool bbsc_progress_was_guest = false;
-s64 bbsc_progress_left_ms = 0;  // when we stopped being a guest
-s64 bbsc_progress_home_ms = 0;  // home and settled since
-bool bbsc_progress_merged_at_load = false; // merged during the trip home (checked once settled)
-bool bbsc_progress_backed_up = false;      // saves backed up for this trip home
-
-// OR the collected host progress into the live flag table (own world). Returns the boss flags and
-// world flags it newly set, or {-1, 0} when there was nothing to merge. Keeps what it merged, so a
-// second call only reports what did not stick. Game thread.
-std::pair<s64, size_t> MergeBbscSharedProgress(std::string_view when) {
-    std::vector<u32> flags;
-    std::map<u32, std::array<u8, BbscWorldGroupBytes>> groups;
-    {
-        std::scoped_lock lock{bbsc_progress_mutex};
-        flags = bbsc_progress_host_flags;
-        groups = bbsc_progress_groups;
-    }
-    if (flags.empty() && groups.empty()) {
-        return {-1, 0};
-    }
-    if (!bbsc_progress_backed_up) {
-        bbsc_progress_backed_up = BackupBbscSaves();
-    }
-    using SetEventFlag = u64 PS4_SYSV_ABI (*)(u64 unused, u32 flag, u8 value);
-    const auto set = reinterpret_cast<SetEventFlag>(image_base + 0x0132E5A0);
-    s64 bosses = 0;
-    for (const u32 flag : flags) {
-        if (!BbscEventFlag(flag)) {
-            set(0, flag, 1);
-            ++bosses;
-        }
-    }
-    size_t group_count = 0;
-    size_t bits = 0;
-    for (const auto& [key, bytes] : groups) {
-        const u64 storage = BbscFlagGroupStorage(key);
-        if (storage == 0) {
-            continue;
-        }
-        auto* live = reinterpret_cast<u8*>(storage);
-        for (size_t b = 0; b < BbscWorldGroupBytes; ++b) {
-            bits += std::popcount(static_cast<u8>(bytes[b] & ~live[b]));
-            live[b] = static_cast<u8>(live[b] | bytes[b]);
-        }
-        ++group_count;
-    }
-    LOG_INFO(Debug,
-             "BBSC shared progress ({}): merged into our own world - {} boss flag(s) newly set (of "
-             "{} the host has), {} world flag(s) newly set in {} group(s); saves backed up first: {}",
-             when, bosses, flags.size(), bits, group_count, bbsc_progress_backed_up);
-    return {bosses, bits};
-}
-
 template <size_t N>
 void ForEachProgressFlag(const std::array<u32, N>& list, auto&& fn) {
     for (const u32 flag : list) {
@@ -10927,9 +10848,8 @@ void ForEachProgressFlag(const std::array<u32, N>& list, auto&& fn) {
     }
 }
 
-// Host: tell the guests which boss flags we have on - and our time of night. Sent whatever our own
-// Shared Progress switch says (2026-10-19): a guest needs our night to see our world as it is, and
-// whether it merges our progress at home is its own switch.
+// Host: tell the guests which boss flags we have on - and our time of night: a guest needs our night
+// to see our world as it is.
 void TickBbscProgressBroadcast() {
     static s64 last_ms = 0;
     const s64 now = SteadyNowMs();
@@ -10951,317 +10871,6 @@ void TickBbscProgressBroadcast() {
     ForEachProgressFlag(BbscProgressFlagsMore, add);
     Libraries::Np::NpSignaling::Helpers::SendBbscWorldFlagsToPeers(
         packet.data(), static_cast<u32>(packet.size()));
-}
-
-// ---- Shared progress on disk (2026-10-07) ---------------------------------------------------------
-// The user: "can we make the shared progress realtime, crashes will be deadly this way". What the
-// host did lived only in memory until the trip home, so a crash or a quit lost it. Writing straight
-// into the guest's own world is not possible while it is away: its save takes the event flags from
-// the LIVE table (0x01399DE0 writes SprjEventFlagMan +0x28, no own-world copy), so the collected
-// progress goes to a file instead, every BbscProgressFileMs while a guest, and is merged as before
-// once home. When the game ends before that, the file stays, and the next time that character is
-// home (in any later run) it is merged then. The character is the save slot the game writes: the
-// newest userdata00NN (0..9) of the user's CUSA00207\SPRJ0005 folder, written during this run.
-constexpr s64 BbscProgressFileMs = 10'000;
-constexpr s64 BbscProgressRecoverMs = 15'000;
-constexpr u32 BbscProgressFileMagic = 0x50534242; // "BBSP"
-
-std::optional<BbscSaveSlot> bbsc_progress_slot; // the character the collected progress is for
-
-std::filesystem::path BbscPendingProgressPath(const BbscSaveSlot& slot) {
-    return Common::FS::GetUserPath(Common::FS::PathType::CapturesDir).parent_path() /
-           "shared-progress" / fmt::format("pending-{}-{}.bin", slot.user, slot.slot);
-}
-
-// Memory -> file (the whole collection, rewritten). Game thread.
-void WriteBbscPendingProgress() {
-    if (!bbsc_progress_slot.has_value()) {
-        return;
-    }
-    std::vector<u8> out;
-    const auto put32 = [&out](u32 v) {
-        const size_t at = out.size();
-        out.resize(at + 4);
-        std::memcpy(out.data() + at, &v, 4);
-    };
-    {
-        std::scoped_lock lock{bbsc_progress_mutex};
-        if (bbsc_progress_host_flags.empty() && bbsc_progress_groups.empty()) {
-            return;
-        }
-        put32(BbscProgressFileMagic);
-        put32(static_cast<u32>(BbscWorldGroupBytes));
-        put32(static_cast<u32>(bbsc_progress_host_flags.size()));
-        for (const u32 flag : bbsc_progress_host_flags) {
-            put32(flag);
-        }
-        put32(static_cast<u32>(bbsc_progress_groups.size()));
-        for (const auto& [key, bytes] : bbsc_progress_groups) {
-            put32(key);
-            out.insert(out.end(), bytes.begin(), bytes.end());
-        }
-    }
-    std::error_code ec;
-    const auto path = BbscPendingProgressPath(*bbsc_progress_slot);
-    std::filesystem::create_directories(path.parent_path(), ec);
-    const auto temp = std::filesystem::path(path).concat(".tmp");
-    {
-        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
-        file.write(reinterpret_cast<const char*>(out.data()), static_cast<std::streamsize>(out.size()));
-        if (!file) {
-            return;
-        }
-    }
-    std::filesystem::rename(temp, path, ec); // replaces the previous one in one step
-}
-
-// File -> memory, OR-ed into whatever is collected already. True when a file was read.
-bool LoadBbscPendingProgress(const BbscSaveSlot& slot) {
-    std::ifstream file(BbscPendingProgressPath(slot), std::ios::binary);
-    if (!file) {
-        return false;
-    }
-    const auto get32 = [&file](u32& v) {
-        return static_cast<bool>(file.read(reinterpret_cast<char*>(&v), 4));
-    };
-    u32 magic = 0;
-    u32 group_bytes = 0;
-    u32 count = 0;
-    if (!get32(magic) || magic != BbscProgressFileMagic || !get32(group_bytes) ||
-        group_bytes != BbscWorldGroupBytes || !get32(count) || count > 10'000) {
-        return false;
-    }
-    std::vector<u32> flags(count);
-    for (u32& flag : flags) {
-        if (!get32(flag)) {
-            return false;
-        }
-    }
-    if (!get32(count) || count > 10'000) {
-        return false;
-    }
-    std::map<u32, std::array<u8, BbscWorldGroupBytes>> groups;
-    for (u32 i = 0; i < count; ++i) {
-        u32 key = 0;
-        std::array<u8, BbscWorldGroupBytes> bytes{};
-        if (!get32(key) || !file.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) {
-            return false;
-        }
-        groups[key] = bytes;
-    }
-    std::scoped_lock lock{bbsc_progress_mutex};
-    for (const u32 flag : flags) {
-        if (std::ranges::find(bbsc_progress_host_flags, flag) == bbsc_progress_host_flags.end()) {
-            bbsc_progress_host_flags.push_back(flag);
-        }
-    }
-    for (const auto& [key, bytes] : groups) {
-        auto& merged = bbsc_progress_groups[key];
-        for (size_t b = 0; b < BbscWorldGroupBytes; ++b) {
-            merged[b] |= bytes[b];
-        }
-    }
-    LOG_INFO(Debug, "BBSC shared progress: {} boss flag(s) and {} world group(s) from the file of "
-                    "user {} slot {} (an earlier session that did not get home)",
-             flags.size(), groups.size(), slot.user, slot.slot);
-    BBSC_TIMELINE("WORLD", "shared progress: {} boss flag(s) and {} world group(s) from the file of "
-                    "user {} slot {} (an earlier session that did not get home)",
-             flags.size(), groups.size(), slot.user, slot.slot);
-    return true;
-}
-
-// After a merge: the file is kept as ".merged" (the last one only), not deleted.
-void FinishBbscPendingProgress() {
-    if (!bbsc_progress_slot.has_value()) {
-        return;
-    }
-    std::error_code ec;
-    const auto path = BbscPendingProgressPath(*bbsc_progress_slot);
-    if (std::filesystem::exists(path, ec)) {
-        std::filesystem::rename(path, std::filesystem::path(path).concat(".merged"), ec);
-    }
-}
-
-// Guest: collect while in the session; merge once home.
-void TickBbscSharedProgress() {
-    static s64 last_ms = 0;
-    const s64 now = SteadyNowMs();
-    if (!BbscSharedProgressEnabled() || image_base == 0 || now - last_ms < 1'000) {
-        return;
-    }
-    last_ms = now;
-    const s32 state = GetSessionState();
-    const u64 global = GetGlobalState();
-    const bool own_world = ReadablePointer(global, 0x1598) && ReadValue<u8>(global, 0x1592) != 0;
-    static s64 file_written_ms = 0;
-    static s64 recover_checked_ms = 0;
-    // Test 2026-10-08 (cls_amg invaded hardwater's world): an invader is in session state 6 too,
-    // and went home with the host's progress merged into its world. Only a co-op guest (player
-    // type 1) collects; an invader (2) or a character not built yet (-1) does not.
-    if (state == 6 && GetLocalPlayerType() != 1) {
-        static bool logged = false;
-        if (!logged && GetLocalPlayerType() == 2) {
-            logged = true;
-            LOG_INFO(Debug, "BBSC shared progress: we are an invader here - nothing is collected");
-            BBSC_TIMELINE("WORLD", "shared progress: we are an invader here - nothing is collected");
-        }
-        return;
-    }
-    if (state == 6) {
-        // Which character this is, and what an earlier session left for it (once per session).
-        if (!bbsc_progress_slot.has_value()) {
-            bbsc_progress_slot = BbscActiveSaveSlot();
-            if (bbsc_progress_slot.has_value()) {
-                LoadBbscPendingProgress(*bbsc_progress_slot);
-            }
-        }
-        if (now - file_written_ms >= BbscProgressFileMs) {
-            file_written_ms = now;
-            WriteBbscPendingProgress();
-        }
-        bbsc_progress_was_guest = true;
-        bbsc_progress_left_ms = 0;
-        bbsc_progress_home_ms = 0;
-        bbsc_progress_merged_at_load = false;
-        bbsc_progress_backed_up = false;
-        // Kind 1 groups (indices 0..9) of every block snapshot the host sent.
-        std::vector<BbscWorldSnapshot> blocks;
-        {
-            std::scoped_lock lock{bbsc_world_mutex};
-            for (const auto& [map, snap] : bbsc_world_blocks) {
-                if (snap.complete_ms != 0) {
-                    blocks.push_back(snap);
-                }
-            }
-        }
-        std::scoped_lock lock{bbsc_progress_mutex};
-        for (const BbscWorldSnapshot& snap : blocks) {
-            // Not the Hunter's Dream (report 2026-10-07: "guest does not have the starter items in
-            // the Hunter's Dream"): its groups hold the messengers' starter weapons, the Doll and
-            // the workshop - the guest's own story. The host's Dream is only shown while the guest
-            // is in it (ApplyBbscHostDreamState) and put back after (RestoreBbscOwnDreamState).
-            if (snap.map == BbscDreamStateMap) {
-                continue;
-            }
-            for (size_t i = 0; i < 10; ++i) {
-                if ((snap.present & (u64{1} << i)) == 0) {
-                    continue;
-                }
-                auto& merged = bbsc_progress_groups[BbscWorldGroupKey(snap.map, i)];
-                for (size_t b = 0; b < BbscWorldGroupBytes; ++b) {
-                    merged[b] |= snap.groups[i][b];
-                }
-            }
-        }
-        return;
-    }
-    if (!bbsc_progress_was_guest) {
-        // A file an earlier session left (crash, quit while a guest): merged once this character
-        // is home and settled, the same way as after a session.
-        const u64 me = GetLocalPlayerCharacter();
-        if (own_world && me != 0 && GetCharacterHp(me) > 0 && ReadValue<u8>(global, 0x08) == 0 &&
-            now - recover_checked_ms >= BbscProgressRecoverMs) {
-            recover_checked_ms = now;
-            if (const auto slot = BbscActiveSaveSlot(); slot.has_value()) {
-                RecoverBbscOwnWorldFile(*slot); // our own world back before the host's is added
-                if (LoadBbscPendingProgress(*slot)) {
-                    bbsc_progress_slot = slot;
-                    bbsc_progress_was_guest = true;
-                    bbsc_progress_left_ms = now;
-                    bbsc_progress_home_ms = 0;
-                    bbsc_progress_backed_up = false;
-                }
-            }
-        }
-        return;
-    }
-    if (bbsc_progress_left_ms == 0) {
-        bbsc_progress_left_ms = now;
-        WriteBbscPendingProgress(); // the session just ended: the newest state to disk
-    }
-    if (now - bbsc_progress_left_ms > BbscProgressHomeLimitMs) {
-        std::scoped_lock lock{bbsc_progress_mutex};
-        LOG_WARNING(Debug, "BBSC shared progress: not home within {} s of the session end (quit to "
-                           "the title?) - {} boss flag(s) and {} world group(s) kept in the file, "
-                           "merged the next time this character is home",
-                    BbscProgressHomeLimitMs / 1000, bbsc_progress_host_flags.size(),
-                    bbsc_progress_groups.size());
-        BBSC_TIMELINE("WORLD", "shared progress: not home within {} s of the session end (quit to "
-                           "the title?) - {} boss flag(s) and {} world group(s) kept in the file, "
-                           "merged the next time this character is home",
-                    BbscProgressHomeLimitMs / 1000, bbsc_progress_host_flags.size(),
-                    bbsc_progress_groups.size());
-        bbsc_progress_host_flags.clear();
-        bbsc_progress_groups.clear();
-        bbsc_progress_was_guest = false;
-        bbsc_progress_slot.reset();
-        return;
-    }
-    const u64 player = GetLocalPlayerCharacter();
-    const bool ready = own_world && ReadValue<u8>(global, 0x08) == 0 && player != 0 &&
-                       GetCharacterHp(player) > 0 && bbsc_dream_own.held == 0 &&
-                       ReadValue<u64>(image_base + 0x0553B0D8, 0) != 0 &&
-                       ReadValue<u64>(image_base + EventFlagManPointerOffset, 0) != 0;
-    if (!ready) {
-        bbsc_progress_home_ms = 0;
-        return;
-    }
-    if (bbsc_progress_home_ms == 0) {
-        bbsc_progress_home_ms = now;
-    }
-    if (now - bbsc_progress_home_ms < BbscProgressSettleMs) {
-        return;
-    }
-    bbsc_progress_was_guest = false;
-    const bool at_load = bbsc_progress_merged_at_load;
-    bbsc_progress_merged_at_load = false;
-    RestoreBbscOwnWorld("before the shared progress merge");
-    const auto [bosses, bits] = MergeBbscSharedProgress("after the home load");
-    {
-        std::scoped_lock lock{bbsc_progress_mutex};
-        bbsc_progress_host_flags.clear();
-        bbsc_progress_groups.clear();
-    }
-    FinishBbscPendingProgress(); // merged: the file is done
-    bbsc_progress_slot.reset();
-    if (bosses < 0) {
-        LOG_INFO(Debug, "BBSC shared progress: home again, nothing from the host to merge");
-        BBSC_TIMELINE("WORLD", "shared progress: home again, nothing from the host to merge");
-        return;
-    }
-    if (at_load && bosses == 0 && bits == 0) {
-        LOG_INFO(Debug, "BBSC shared progress: the merge made during the home load is all there");
-        BBSC_TIMELINE("WORLD", "shared progress: the merge made during the home load is all there");
-        BbscAnnounce(u"Shared progress saved:\nthe host's progress is now in your world.",
-                     "shared progress merged at the home load");
-        return;
-    }
-    // Test 2026-10-07: merged into a map that was already running, Cleric Beast's bar came up
-    // and doors stayed shut until the game was reloaded - the map's events had read the old flags.
-    // They are saved all the same; the next load (a lamp, a death, the title) shows them.
-    BbscAnnounce(u"Shared progress saved.\nRest at a lamp to see all of it.",
-                 "shared progress merged after the load");
-}
-
-// Shared progress, during the trip home (2026-10-07): the respawn point of the load home is resolved
-// before the map's objects and events start. Once that load is in our own world, the merge goes in
-// there, so the map comes up with the host's progress already in it. The tick above checks again
-// once we are settled (and merges whatever did not stick, should the own-world table come later).
-void ApplyBbscSharedProgressAtLoad() {
-    if (!BbscSharedProgressEnabled() || image_base == 0 || !bbsc_progress_was_guest ||
-        bbsc_progress_merged_at_load) {
-        return;
-    }
-    const s32 state = GetSessionState();
-    const u64 global = GetGlobalState();
-    if (state == 4 || state == 6 || !ReadablePointer(global, 0x1598) ||
-        ReadValue<u8>(global, 0x1592) == 0 || bbsc_dream_own.held != 0 ||
-        ReadValue<u64>(image_base + EventFlagManPointerOffset, 0) == 0) {
-        return; // not home yet, or our own Dream state still to be put back (the tick merges then)
-    }
-    RestoreBbscOwnWorldAtLoad(); // our own world first, then the host's progress on top
-    const auto [bosses, bits] = MergeBbscSharedProgress("during the home load");
-    bbsc_progress_merged_at_load = bosses >= 0;
 }
 
 u8 bbsc_dream_type_skip = 0;
@@ -16153,7 +15762,6 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
     }
     if (site.offset == 0x01938F65) { // Warp.RespawnPoint.Resolve: a load picks its spawn point
         RestoreBbscOwnWorldAtLoad();
-        ApplyBbscSharedProgressAtLoad();
     }
     if (site.offset == 0x01332C1B) { // SummonedPlacement.SelectMap: a load picks its map
         GuardBbscStrayForcedWarp(*registers);
@@ -16182,6 +15790,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbcoopSoloHunterType(); // bbcoop: a phantom type left in a solo save
         TickBbcoopSoloLeaveLocks(); // bbcoop: leave locks left in a solo save
         TickBbcoopTestBells(); // bbcoop: BB_TEST_BELLS
+        TickBbcoopBellStop();  // bbcoop: a kit bell used again stops it
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();
@@ -16190,7 +15799,6 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbscProgressBroadcast();
         TickBbscOwnWorld();
         TickBbscEchoCounter();
-        TickBbscSharedProgress();
         TickBbscSpectate();
         TickBbscFollowBroadcast();
         TickBbscWorldFlagsBroadcast();
@@ -16303,6 +15911,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
     }
     if (site.kind == TraceKind::UseItemExecution || site.kind == TraceKind::GoodsActionSubmit) {
         NoteBbscGoodsUsed(GetUseItemExecutionGoods(site, *registers)); // bbcoop: real Insight items
+        NoteBbcoopBellUse(GetUseItemExecutionGoods(site, *registers));  // bbcoop: a bell used again
     }
     if ((site.kind == TraceKind::UseItemExecution || site.kind == TraceKind::GoodsActionSubmit) &&
         !IsTrackedGoods(GetUseItemExecutionGoods(site, *registers))) {
@@ -16887,40 +16496,21 @@ void OnBbscHostBossPacket(std::int32_t boss) {
     bbsc_host_boss_ms = SteadyNowMs();
 }
 
+// Guest: the host's time of night from its progress packet (its boss flags are not used: shared
+// progress is removed).
 void OnBbscProgressPacket(const std::uint32_t* flags, std::size_t count) {
     if (flags == nullptr || bbsc_relay_session_state.load() != 6) {
         return;
     }
-    const auto known = [](u32 flag) {
-        return std::ranges::find(BbscProgressFlags, flag) != BbscProgressFlags.end() ||
-               std::ranges::find(BbscProgressFlagsMore, flag) != BbscProgressFlagsMore.end();
-    };
-    size_t added = 0;
     s32 time_bits = 0; // the packet holds every listed flag the host has on, so absent = off
-    {
-        std::scoped_lock lock{bbsc_progress_mutex};
-        for (size_t i = 0; i < count; ++i) {
-            if (flags[i] >= 9800 && flags[i] <= 9802) {
-                time_bits |= 0x80 >> (flags[i] - 9800);
-            }
-            // bbcoop: collected only for shared progress (off: run.sh/run.py); the time bits always.
-            if (BbscSharedProgressEnabled() && known(flags[i]) &&
-                std::ranges::find(bbsc_progress_host_flags, flags[i]) ==
-                    bbsc_progress_host_flags.end()) {
-                bbsc_progress_host_flags.push_back(flags[i]);
-                ++added;
-            }
+    for (size_t i = 0; i < count; ++i) {
+        if (flags[i] >= 9800 && flags[i] <= 9802) {
+            time_bits |= 0x80 >> (flags[i] - 9800);
         }
     }
     // None of the three: a host on an older BBSC (it does not send them) - unknown, not "no night".
     bbsc_host_time_bits = time_bits != 0 ? time_bits : -1;
     bbsc_host_time_ms = SteadyNowMs();
-    if (added != 0) {
-        LOG_INFO(Debug, "BBSC shared progress: the host has {} more boss flag(s) for our world",
-                 added);
-        BBSC_TIMELINE("WORLD", "shared progress: the host has {} more boss flag(s) for our world",
-                 added);
-    }
 }
 
 void NoteBbscRelayHost(std::uint32_t sender, std::uint32_t packed_map, float x, float y, float z) {
