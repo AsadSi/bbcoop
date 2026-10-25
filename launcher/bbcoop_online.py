@@ -28,6 +28,10 @@ GAME_PORT, STUN_PORT, WEB_PORT, SS_PORT = 31313, 31314, 31315, 20443
 SUMMON_POLL_S = 5  # fast join: the games look for and re-post signs every 5 s (vanilla 35 / 30)
 HELLO = "/bbcoop/hello"
 TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+TAILSCALE_WINDOWS = r"C:\Program Files\Tailscale\tailscale.exe"
+# Windows: helper programs without a console window each (the launcher has none; the 10 s host
+# watcher and Join's list run them often).
+QUIET = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 # shadNet's errors (server/src/protocol.h) that the account step explains.
 INVALID_INPUT, ALREADY_LOGGED_IN, INVALID_PASSWORD, EXISTING_USERNAME, UNAUTHORIZED = 3, 6, 8, 11, 23
 
@@ -41,10 +45,10 @@ def build_id(port_dir):
     try:
         git = ["git", "-C", str(port_dir)]
         commit = subprocess.run(git + ["rev-parse", "--short=12", "HEAD"], capture_output=True,
-                                text=True, timeout=5, check=True).stdout.strip()
+                                text=True, timeout=5, check=True, **QUIET).stdout.strip()
         changed = subprocess.run(git + ["status", "--porcelain", "--untracked-files=no",
                                         "--ignore-submodules"], capture_output=True, text=True,
-                                 timeout=10).stdout.strip()
+                                 timeout=10, **QUIET).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
     return commit + ("+" if changed else "")
@@ -72,7 +76,8 @@ def new_password():
 
 
 def tailscale_cli():
-    return next((cli for cli in (shutil.which("tailscale"), TAILSCALE_APP) if cli and Path(cli).exists()), None)
+    return next((cli for cli in (shutil.which("tailscale"), TAILSCALE_APP, TAILSCALE_WINDOWS)
+                 if cli and Path(cli).exists()), None)
 
 
 def tailscale_status():
@@ -81,7 +86,7 @@ def tailscale_status():
     if not cli:
         return None
     try:
-        run = subprocess.run([cli, "status", "--json"], capture_output=True, text=True, timeout=5)
+        run = subprocess.run([cli, "status", "--json"], capture_output=True, text=True, timeout=5, **QUIET)
         return json.loads(run.stdout[run.stdout.find("{"):])  # a warning line may come first
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -98,6 +103,9 @@ def tailscale_address():
     except OSError:
         return ""
     return address if ipaddress.ip_address(address) in ipaddress.ip_network("100.64.0.0/10") else ""
+
+
+ICON = "its icon by the clock" if sys.platform == "win32" else "its menu bar icon"
 
 
 def connect_tailscale(timeout=20):
@@ -123,21 +131,22 @@ def connect_tailscale(timeout=20):
             # block; the host check that follows tells whether the host is reachable.
             return ""
         if state == "NeedsLogin":
-            return "Sign in to Tailscale (its menu bar icon), then pick Host or Join again."
+            return f"Sign in to Tailscale ({ICON}), then pick Host or Join again."
         if state == "Stopped" and not asked:  # turned off in Tailscale: on again
             asked = True
             try:
-                up = subprocess.run([cli, "up", "--timeout=10s"], capture_output=True, text=True, timeout=15)
+                up = subprocess.run([cli, "up", "--timeout=10s"], capture_output=True, text=True,
+                                    timeout=15, **QUIET)
                 # Refused when settings differ from the defaults (accept routes, ...): Tailscale
                 # prints the command that states them all, so nothing changes but on/off.
                 again = next((line.split()[1:] for line in up.stderr.splitlines()
                               if line.strip().startswith("tailscale up ")), None)
                 if up.returncode and again:
-                    subprocess.run([cli, *again], capture_output=True, timeout=15)
+                    subprocess.run([cli, *again], capture_output=True, timeout=15, **QUIET)
             except (OSError, subprocess.SubprocessError):
                 pass
         time.sleep(0.5)
-    return "Tailscale did not connect: connect it (its menu bar icon), then pick Host or Join again."
+    return f"Tailscale did not connect: connect it ({ICON}), then pick Host or Join again."
 
 
 def ipv4(addresses):
@@ -306,7 +315,9 @@ def shadnet_binary(port_dir):
     port_dir = Path(port_dir)
     for candidate in (port_dir / "bin" / "shadnet.app" / "Contents" / "MacOS" / "shadnet",
                       port_dir / "bin" / "shadnet", port_dir / "server" / "build-mac" / "shadnet",
-                      port_dir / "server" / "build-linux" / "shadnet"):
+                      port_dir / "server" / "build-linux" / "shadnet",
+                      port_dir / "bin" / "shadnet" / "shadnet.exe",  # Windows: with its Qt DLLs
+                      port_dir / "server" / "build-windows" / "shadnet.exe"):
         if candidate.is_file():
             return candidate
     return None
@@ -339,6 +350,28 @@ def _wait(check, process, what, timeout):
             return
         time.sleep(0.2)
     raise RuntimeError(f"{what} did not start")
+
+
+_JOB = None
+
+
+def _end_with_launcher(process):
+    """Windows: the process is killed when this launcher ends, closed or killed (a job object that
+    closes with it). Elsewhere stop_leftovers finds them by their command (Windows has no `ps`)."""
+    global _JOB
+    if sys.platform != "win32":
+        return
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    if _JOB is None:
+        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+        _JOB = kernel32.CreateJobObjectW(None, None)
+        # JOBOBJECT_EXTENDED_LIMIT_INFORMATION (144 bytes on x64), LimitFlags at 16:
+        # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; class 9 = JobObjectExtendedLimitInformation.
+        info = ctypes.create_string_buffer(144)
+        struct.pack_into("<I", info, 16, 0x2000)
+        kernel32.SetInformationJobObject(ctypes.c_void_p(_JOB), 9, info, len(info))
+    kernel32.AssignProcessToJobObject(ctypes.c_void_p(_JOB), ctypes.c_void_p(int(process._handle)))
 
 
 def _answers(address, port):
@@ -391,6 +424,7 @@ class Host:
                                            env={**os.environ, "SHADNET_HOME": str(server)},
                                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
             self.processes.append(shadnet)
+            _end_with_launcher(shadnet)
             _wait(lambda: _answers(address, GAME_PORT), shadnet, "The shadNet server", 15)
             script = self.port_dir / "scripts" / "bbsc_gameserver" / "bbsc_gameserver.py"
             with open(logs / "gameserver-console.log", "ab") as log:
@@ -402,6 +436,7 @@ class Host:
                     cwd=script.parent, stdout=log, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, **flags)
             self.processes.append(game)
+            _end_with_launcher(game)
             (self.directory / "pids").write_text(" ".join(str(p.pid) for p in self.processes))
             _wait(lambda: hello(address, 0.5) is not None, game, "The game server", 15)
         except (OSError, RuntimeError) as failure:
