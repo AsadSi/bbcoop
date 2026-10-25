@@ -14,8 +14,7 @@ namespace Core::Bbsc {
 // any environment variable, so the build runs straight from a launcher. Everything still only
 // applies to CUSA03173 01.09 (checked where each feature installs). Experimental switches stay
 // off, and so is the boot intro (SHADPS4_BBSC_INTRO=1 brings it back). Setting a variable always wins: "0" turns a default off, any other value turns it on.
-inline constexpr std::array<std::string_view, 38> DefaultOnSwitches{ // bbcoop: 35 + 3
-    "SHADPS4_BBSC_SHARED_PROGRESS",     // merge the host's progress into the guest's world (adds only)
+inline constexpr std::array<std::string_view, 37> DefaultOnSwitches{ // bbcoop: 35 + 3, shared progress removed
     "SHADPS4_BBSC_WARP_TOGETHER",        // the guest follows the host through a lamp warp
     "SHADPS4_BBSC_WORLD_SYNC",           // ...and loads the host's map with the host's world flags
     "SHADPS4_BBSC_LOAD_COVER",           // the guest's summon/follow loads behind a smooth black fade

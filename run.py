@@ -182,10 +182,8 @@ def online_setup(env, user_dir, probe_done):
         env['BB_SHADNET_WEBAPI'] = 'http://' + env['BB_SHADNET_SERVER'].rsplit(':', 1)[0] + ':31315'
     if env.get('BB_BBSC') == '1':
         # bbcoop: vanilla co-op difficulty (docs/bbcoop/brief.md, Asad 2026-10-24): BBSC's scaling off,
-        # which also lifts its patch-out of the game's own boss-only buff (Lua_MultiDoping). A guest plays
-        # in the host's world as in vanilla co-op: nothing of it is merged into its own world (2026-10-25).
+        # which also lifts its patch-out of the game's own boss-only buff (Lua_MultiDoping).
         env.setdefault('SHADPS4_BBSC_SCALING', '0')
-        env.setdefault('SHADPS4_BBSC_SHARED_PROGRESS', '0')
         bbsc_game_server(env, user_dir, probe_done)
     if env.get('BB_NET_BACKEND') == 'thd':
         # The Hunter's Dream (bbhost's protocol): the account comes from the launcher's Discord sign-in.

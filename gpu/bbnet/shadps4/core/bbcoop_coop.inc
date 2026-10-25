@@ -498,14 +498,65 @@ void TickBbcoopSoloLeaveLocks() {
                             "- released", leaving, wait);
 }
 
+// ---- A kit bell used again stops it (2026-10-25) ---------------------------------------------------
+// Asad: ring a bell and stop it. A vanilla bell, while its effect is on, is shown and used as its
+// "silence" form (EquipParamGoods 200 -> 201 by SpEffect 9000, 205 -> 206 by 9005, 225 -> 226 by
+// 9025). The kit rows have no such form (see "The BBSC hunter's kit"), so a ringing kit bell could
+// not be stopped: the Parting Blank leaves a Hunt Bell's search on, and using the bell again only
+// rang it again (test 2026-10-25, inventory). The vanilla forms used through the item use do not
+// stop it either (test: 201 cost 1 Insight and the search went on). What ends a bell is its effect
+// going - as when another bell is rung. So a kit bell used again while it has rung for
+// BbcoopBellStopAfterMs has its effect taken off (BbscEraseLocalEffect); the game's Insight refund
+// that follows is taken back by TickBbscFreeBellRefund.
+u64 BbscLocalEffectNode(s32 id);
+bool BbscEraseLocalEffect(s32 id);
+struct BbcoopBellStop {
+    s32 bell;
+    s32 effect;
+};
+constexpr BbcoopBellStop BbcoopBellStops[] = {{4016, 9000}, {4121, 9005}, {11201, 9025}};
+constexpr s64 BbcoopBellStopAfterMs = 1'500;
+std::array<s64, std::size(BbcoopBellStops)> bbcoop_bell_on_since{}; // game thread
+std::atomic<s32> bbcoop_bell_stop_effect{0};
+
+// Item use (TraceEntry): a kit bell that already rings is to be stopped.
+void NoteBbcoopBellUse(s32 goods) {
+    const s64 now = SteadyNowMs();
+    for (size_t i = 0; i < std::size(BbcoopBellStops); ++i) {
+        if (goods == BbcoopBellStops[i].bell && bbcoop_bell_on_since[i] != 0 &&
+            now - bbcoop_bell_on_since[i] >= BbcoopBellStopAfterMs) {
+            bbcoop_bell_stop_effect.store(BbcoopBellStops[i].effect);
+        }
+    }
+}
+
+void TickBbcoopBellStop() {
+    if (image_base == 0) {
+        return;
+    }
+    const s64 now = SteadyNowMs();
+    for (size_t i = 0; i < std::size(BbcoopBellStops); ++i) {
+        const bool on = BbscLocalEffectNode(BbcoopBellStops[i].effect) != 0;
+        bbcoop_bell_on_since[i] = on ? (bbcoop_bell_on_since[i] != 0 ? bbcoop_bell_on_since[i] : now) : 0;
+    }
+    const s32 effect = bbcoop_bell_stop_effect.exchange(0);
+    if (effect == 0) {
+        return;
+    }
+    const bool stopped = BbscEraseLocalEffect(effect);
+    LOG_INFO(Debug, "bbcoop bells: a ringing kit bell used again - its SpEffect {} taken off ({})", effect,
+             stopped ? "stopped" : "STILL ON");
+    BBSC_TIMELINE("BELL", "a ringing kit bell used again - its SpEffect {} taken off ({})", effect,
+                  stopped ? "stopped" : "STILL ON");
+}
+
 // ---- BB_TEST_BELLS (2026-10-25) --------------------------------------------------------------------
 // Test cheat for the free bell refund (TickBbscFreeBellRefund; throwaway profiles only). Once the
 // character stands settled and alone in its own world, each kit bell in turn - Hunt, Kin, Bloodlust -
 // is rung with the game's own item use (0x018F9720, as the responder resume rings its bell) and
-// stopped 8 s later: `blank` with the Parting Blank, `death` by dying while it rings (a load in
-// between), `both` a round of each. The next bell waits 25 s after the stop, past the refund
+// stopped 8 s later: `again` by using it again (as a player stops it), `death` by dying while it
+// rings (a load in between), `both` a round of each. The next bell waits 25 s after the stop, past the refund
 // window. Each step is a TEST line in the timeline; the INSIGHT lines show any net gain.
-u64 BbscLocalEffectNode(s32 id);
 void TickBbcoopTestBells() {
     struct Step {
         s32 bell;
@@ -516,7 +567,7 @@ void TickBbcoopTestBells() {
         const std::string mode = value != nullptr ? value : "";
         std::vector<Step> out;
         for (const bool death : {false, true}) {
-            if (mode == "both" || mode == (death ? "death" : "blank")) {
+            if (mode == "both" || mode == (death ? "death" : "again")) {
                 for (const s32 bell : {4016, 4121, 11201}) {
                     out.push_back({bell, death});
                 }
@@ -551,11 +602,11 @@ void TickBbcoopTestBells() {
                 WriteValue<s32>(data, 0xF8, 0);
             }
         } else {
-            use_item(GetLocalPlayer(), 11251, BellUseArgument);
+            use_item(GetLocalPlayer(), step.bell, BellUseArgument);
         }
         BBSC_TIMELINE("TEST", "test bells: goods {} stopped by {} (session state {}, search effect {}, "
                               "sign effect {})",
-                      step.bell, step.death ? "dying" : "the Parting Blank", GetSessionState(), search,
+                      step.bell, step.death ? "dying" : "using it again", GetSessionState(), search,
                       sign);
         phase = 2;
         since_ms = 0;
@@ -580,7 +631,7 @@ void TickBbcoopTestBells() {
     }
     const bool rung = use_item(GetLocalPlayer(), step.bell, BellUseArgument);
     BBSC_TIMELINE("TEST", "test bells: goods {} rung (item use {}), {} next", step.bell, rung,
-                  step.death ? "a death" : "the Parting Blank");
+                  step.death ? "a death" : "using it again");
     phase = 1;
     since_ms = now;
 }
