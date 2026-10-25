@@ -90,6 +90,12 @@ def build_ss_info(local=False, quiet=False, bbhost=False):
         print = real_print
 
 
+def this_pc():
+    """bbcoop: where this PC's game reaches this server: 127.0.0.1, or --host when that is one address
+    (the launcher's Host binds the Tailscale address only, so nothing listens on 127.0.0.1)."""
+    return "127.0.0.1" if ARGS.host in ("0.0.0.0", "::", "127.0.0.1", "localhost") else ARGS.host
+
+
 def _build_ss_info(local, bbhost=False):
     with open(TEMPLATE, "r", encoding="utf-8") as handle:
         xml = handle.read().strip()
@@ -106,7 +112,7 @@ def _build_ss_info(local, bbhost=False):
 
     # 2. everything else -> this process. The template ships pointing at 127.0.0.1:20443; if we
     #    are listening somewhere else, move them with it.
-    here = "http://127.0.0.1:{}".format(ARGS.port) if local else \
+    here = "http://{}:{}".format(this_pc(), ARGS.port) if local else \
         "http://{}:{}".format(ARGS.advertise or ARGS.host, ARGS.port)
     if here != "http://127.0.0.1:20443":
         xml = xml.replace("http://127.0.0.1:20443", here)
@@ -1031,7 +1037,7 @@ class QuietHTTPServer(ThreadingHTTPServer):
 def _bbhost_ss_info(b64, local):
     """build_ss_info points bbhost summons at 127.0.0.1:20443; move them to where this server is."""
     xml = base64.b64decode(b64).decode("utf-8")
-    here = "http://127.0.0.1:{}".format(ARGS.port) if local else \
+    here = "http://{}:{}".format(this_pc(), ARGS.port) if local else \
         "http://{}:{}".format(ARGS.advertise or ARGS.host, ARGS.port)
     return base64.b64encode(xml.replace("http://127.0.0.1:20443", here).encode("utf-8"))
 
