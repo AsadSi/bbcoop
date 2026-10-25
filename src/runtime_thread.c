@@ -15,6 +15,9 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#ifdef _WIN32
+#include <windows.h> /* bbcoop: SetThreadPriority */
+#endif
 #if !defined(_WIN32) && !defined(__APPLE__)
 #include <sys/syscall.h>
 #include <asm/prctl.h>
@@ -268,10 +271,24 @@ static void run_guest(void *p) {
     GuestThread *t=p;
     if (!setjmp(t->exit_jump)) t->result=t->entry(t->argument);
 }
+/* bbcoop, from Supermedo/bloodborne_pc 08df6af (GPL-2.0): guest priorities run 256 (highest) to 767;
+ * the game's are 700 except FMOD's (256-265). Host threads all ran at normal priority, so on 6-core
+ * CPUs the draw workers and game threads delayed FMOD's mixer and output threads: underruns heard
+ * as crackling. BB_THREAD_PRIORITY=0 keeps every thread at normal priority. */
+static void set_host_priority(int prio) {
+#ifdef _WIN32
+    static int enabled=-1;
+    if (enabled<0) { const char *e=getenv("BB_THREAD_PRIORITY"); enabled=!e || e[0]!='0'; }
+    if (enabled && prio<400) SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_HIGHEST);
+#else
+    (void)prio;
+#endif
+}
 static void *host_start(void *p) {
     GuestThread *t=p;
     attach(t);
     set_host_name(t->name);
+    set_host_priority(t->attr.prio); /* bbcoop */
 #ifdef _WIN32
     /* winpthreads ignores a given stack: the guest runs on its low one, fully committed (the
      * game's frames skip Windows' guard pages). */
