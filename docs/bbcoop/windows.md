@@ -4,6 +4,46 @@ Since 2026-10-21 (Asad: cross-play tests on Linux, macOS and Windows). A native 
 in MSYS2 CLANG64 on Windows. It plays online with Linux and macOS bbcoop: everyone is on the shadPS4 0.20
 module (gen 20).
 
+## Play on the Windows PC, step by step
+For Asad's PC (no Claude there). The zip is made on the Mac (below), so the PC builds nothing and
+nothing has to be pushed. The Mac app and the zip must come from the same commit, or Join refuses.
+
+**On the Mac**
+1. `bash packaging/windows/package.sh` makes `dist/bbcoop-windows.zip`; it prints the build, e.g.
+   `Build 8c1435db25bf`. Rebuild the Mac app from the same commit (`bash packaging/macos/package.sh`).
+2. Send the zip to the PC over Tailscale: `tailscale file cp dist/bbcoop-windows.zip <pc-name>:`
+   (`tailscale status` lists the PC's name). A USB stick or a cloud drive works too.
+
+**On the PC, once**
+1. Install Tailscale (tailscale.com/download), sign in to the same tailnet as the Mac. A file sent
+   from the Mac shows up in Tailscale's icon by the clock (or in Downloads).
+2. Right-click the zip, Extract All…, to `C:\` (you get `C:\bbcoop-windows`). Not under Program Files.
+3. Double-click `C:\bbcoop-windows\Bloodborne.exe`. SmartScreen ("Windows protected your PC"): More
+   info, Run anyway. It asks for the Bloodborne folder (with `eboot.bin`) and a hunter name.
+4. Press PLAY once offline. The first start builds the respec mod and the shader cache: a few minutes.
+   Close the game window once you reach the title screen or your character.
+
+**Play together**
+1. Mac and PC: Tailscale on. In the launcher, Online co-op: one picks **Host a game**, the other
+   **Join a game** and picks the host from the list (or types its 100.x.y.z address). Then PLAY.
+2. Windows Firewall asks once each for `python`, `shadnet` (when hosting) and `bb-probe`: tick
+   **Private and Public** and click Allow. If you clicked away the question, Windows Security, Firewall &
+   network protection, Allow an app through firewall, and tick both boxes for those.
+3. Load your character. The bells ring by themselves; the guest arrives in the host's world. Try both
+   ways: the PC hosting, then the Mac hosting.
+
+**Logs to send back** (all inside `C:\bbcoop-windows`):
+- `user\last_run.log`: the game's output for the last start.
+- `user\log\bbsc-timeline-*.txt`: the newest one, co-op events.
+- `host\logs\shadnet.log`, `host\logs\gameserver-console.log` and the rest of `host\logs`: when the
+  PC hosted.
+- `out\respec_mod.log`: when the launcher said the respec mod was not built.
+- For a crash or a black screen: the launcher's Log page, copied in full.
+
+For the browser AI on the PC: say it is "a Windows port of a PS4 game with its own launcher; I unzipped
+it to C:\bbcoop-windows", paste the error and the end of `user\last_run.log`. Don't let it make you
+install Visual C++, DirectX or Python: the package has what it needs.
+
 ## Where it comes from
 - **Upstream 0.6:** the Win32 layer (`gpu/platform/win32/`, a POSIX subset over Win32) and the `WIN32`
   branch of `gpu/CMakeLists.txt` (a static libbbgpu linked into `bb-probe.exe` with the runtime).
@@ -54,7 +94,7 @@ The fix is on only on Windows (`BB_RED_ZONE=0/1` overrides). Checked on the Mac 
 In PowerShell, with Git for Windows (`winget install Git.Git`); the repo is public:
 
 ```powershell
-git -c core.autocrlf=false -c core.longpaths=true clone -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop; cd C:\bbcoop
+git -c core.autocrlf=false -c core.longpaths=true clone -b main https://github.com/AsadSi/bbcoop.git C:\bbcoop; cd C:\bbcoop
 powershell -ExecutionPolicy Bypass -File install.ps1   # asks for your Bloodborne folder; -GameDir D:\Games\CUSA00900 skips the picker
 ```
 
@@ -69,7 +109,7 @@ the package. Clone it from PowerShell with Git for Windows (`winget install Git.
 ```powershell
 git config --global core.longpaths true
 git config --global core.autocrlf false   # LF endings: bash scripts and the FSR-Vulkan patches need them
-git clone --recursive -b windows https://github.com/AsadSi/bbcoop.git C:\bbcoop   # --recursive pulls a large server submodule too; install.ps1 needs only 3
+git clone --recursive -b main https://github.com/AsadSi/bbcoop.git C:\bbcoop   # --recursive pulls a large server submodule too; install.ps1 needs only 3
 ```
 
 Then, in the **MSYS2 CLANG64** shell:
@@ -101,6 +141,26 @@ The package freezes the launcher with PyInstaller into `Bloodborne.exe`, with so
 mod. Players need no Python. `run.py` takes the same variables as `run.sh`. From source, the respec mod
 needs soulstruct in the Python that runs `run.py`, or in `BB_RE_PYTHON`.
 
+## The package from the Mac
+`bash packaging/windows/package.sh` on macOS or Linux runs `package-cross.sh`:
+- the executables from `scripts/windows/cross-build.sh`, including `shadnet.exe` (server/, cross-built
+  with MSYS2's Qt 6.12 and Homebrew's Qt tools and the Mac server build's protoc) in `bin/shadnet/`;
+- every DLL they load, followed through the DLLs' imports in the MSYS2 sysroot and llvm-mingw; it
+  stops if one is neither there nor Windows' own;
+- PyInstaller cannot freeze for Windows from a Mac, so the package carries python.org's Windows Python
+  3.13 (its MSIs unpacked with `msiextract`, `brew install msitools`) with soulstruct 2.6.0 and the
+  Mac respec Python's versions of its wheels; `Bloodborne.exe` is `packaging/windows/launcher.c`,
+  which runs `python\python.exe -s -E launcher\bbport_launcher_win.py` without a console.
+  Mrsuss60/bloodborne_pc_windows_port ships a Python the same way;
+- `BUILD` with the commit, as the Mac app.
+The MSYS2 path (`package.sh` in MSYS2, `install.ps1`) still freezes with PyInstaller.
+
+Checked under Wine 10 (Debian's, in an x86-64 Docker container; Homebrew's Wine is disabled):
+`shadnet.exe` starts and creates an account through `bbcoop_online.make_account`; `bb-probe.exe` and
+`bb-gpu-capabilities.exe` load every DLL; the launcher window opens from `Bloodborne.exe`; tkinter,
+soulstruct and the launcher's modules import. numpy stops in Wine's own `ucrtbase` (no `crealf`), so the
+respec tool is not checked there; real Windows has it.
+
 ## Checking from the Mac
 `bash scripts/windows/cross-build.sh` builds `bb-probe.exe`, `bb-gpu-capabilities.exe` and `bb-play.exe` with
 llvm-mingw against the MSYS2 CLANG64 packages, which it unpacks into `out/windows-cross/`. It takes about
@@ -125,7 +185,32 @@ The only warnings in the runtime are 3 old unused-variable ones in upstream code
 import is in MSYS2 CLANG64 or Windows. `bb-probe.exe` is a GUI-subsystem program (SDL3's `-mwindows`, as in
 Supermedo's), so `run.py` passes it the standard handles for its log.
 
+## Fixed before the first run (2026-10-25)
+Found by reading the code paths that differ on Windows; all marked `bbcoop`, the Mac and Linux unchanged:
+- `src/runtime_context_lock.c`: its asm calls `enter`/`leave` System V style; on Windows they took the
+  Microsoft ABI, so the render thread's frame job crashed. Now `sysv_abi`.
+- `src/runtime_papers.c`: the game's param lookups were called with the Microsoft ABI.
+- `gpu/bbnet20/bbnet_glue.cpp`: BBSC's code pages are made writable with VirtualQuery/VirtualProtect
+  (only `/proc/self/maps` before: BBSC's first code write faulted).
+- `gpu/shim/bbport_settings.cpp`, `bbport_overlay.cpp`: `std::rename` does not replace a file on
+  Windows: in-game menu changes were never saved.
+- `src/runtime_respec.c`: old respec backup folders are removed (Windows' `remove()` keeps folders).
+- `scripts/patches.py`: Intel CPUs are found through `PROCESSOR_IDENTIFIER` (no `/proc/cpuinfo`), so
+  they get the black tone-map fix.
+- From Supermedo/bloodborne_pc: guest memory committed as the game maps it when the pool exceeds the
+  commit limit (7c9ebcb, in `gpu/platform/win32/posix_memory.cpp`), Windows certificate trust for HTTPS
+  (a946924, `gpu/bbnet20/include/windows_trust.h`), FMOD threads above normal priority (08df6af).
+- The Hunter's Dream's UDP sockets ignore ICMP port unreachable, as the vendored `host_net.cpp`.
+- Host/Join: Tailscale in Program Files, no console windows, the servers end with the launcher (a job
+  object), `shadnet.exe`.
+Not taken: Mrsuss60's 7c0e5f0 crash workarounds (another tree layout, not Windows-specific).
+Left as is: BBSC looks for a save under `%APPDATA%\shadPS4` before the port's save folder exists; only
+saves written during the run count, so it never picks one.
+
 ## Open
-- Not yet run on Windows: the game itself, online, the launcher and the package. Those need the PC.
+- Not yet run on Windows: the game itself, online and the package. Those need the PC.
 - The C tests (`build.sh --test`) have no Windows path.
+- BBSC's memory scan on Windows skips pages the port keeps without access (Linux reads them through
+  `/proc/self/mem`): the first co-op timeline from the PC must show the kit given and the param tables
+  found.
 - Cross-play is not tested: Windows↔Mac and Windows↔Linux, with the Windows PC hosting and joining.
