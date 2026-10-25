@@ -161,6 +161,7 @@ import bbport_lang  # noqa: E402
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 import online  # noqa: E402
 import bbcoop_online  # noqa: E402
+import bbcoop_icon  # noqa: E402  (bbcoop: the dump's own icon)
 
 LANG = 'en'
 
@@ -453,16 +454,19 @@ class Launcher:
         return int(size * self.dpi)
 
     def set_icon(self):
-        try:
-            self.root.iconbitmap(default=str(PORT_DIR / 'launcher' / 'bloodborne.ico'))
-            return
-        except self.tk.TclError:
-            pass
-        for icon in (PORT_DIR / 'launcher' / 'bloodborne.png', Path(self.app['game_dir']) / 'sce_sys' / 'icon0.png'):
+        # bbcoop: the dump's own icon (window, taskbar, Dock); the blood moon until a game folder is chosen
+        dump = bbcoop_icon.dump_icon(self.app['game_dir'])
+        if not dump:
+            try:
+                self.root.iconbitmap(default=str(PORT_DIR / 'launcher' / 'bloodborne.ico'))
+                return
+            except self.tk.TclError:
+                pass
+        for icon in filter(None, (dump, PORT_DIR / 'launcher' / 'bloodborne.png')):
             try:
                 self.icon = self.tk.PhotoImage(file=str(icon))
-                if self.icon.width() > 128:
-                    self.icon = self.icon.subsample(self.icon.width() // 64)
+                if self.icon.width() > 256:
+                    self.icon = self.icon.subsample(-(-self.icon.width() // 256))
                 self.root.iconphoto(True, self.icon)
                 return
             except (self.tk.TclError, OSError):
@@ -1749,6 +1753,7 @@ class Launcher:
             pythonw = Path(sys.executable).with_name('pythonw.exe')
             target = str(pythonw if pythonw.exists() else sys.executable)
             arguments, icon = Path(__file__).resolve(), PORT_DIR / 'launcher' / 'bloodborne.ico'
+        icon = self.dump_ico() or icon  # bbcoop
         script = ('$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath("Desktop")'
                   '+"\\Bloodborne.lnk");'
                   f'$s.TargetPath="{target}";$s.WorkingDirectory="{PORT_DIR}";$s.IconLocation="{icon}";'
@@ -1759,6 +1764,24 @@ class Launcher:
             self.messagebox.showinfo('Bloodborne', _('Shortcut created on the desktop.', 'Ярлык создан на рабочем столе.'))
         else:
             self.messagebox.showerror('Bloodborne', result.stderr.decode(errors='replace')[:400])
+
+    def dump_ico(self):
+        """bbcoop: the dump's icon as an .ico (a PNG inside, at most 256 px) for shortcuts, or None."""
+        dump = bbcoop_icon.dump_icon(self.app['game_dir'])
+        if not dump:
+            return None
+        try:
+            image = self.tk.PhotoImage(file=str(dump))
+            if image.width() > 256:
+                image = image.subsample(-(-image.width() // 256))
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            png = CONFIG_DIR / 'game-icon.png'
+            image.write(str(png), format='png')
+            ico = CONFIG_DIR / 'game-icon.ico'
+            ico.write_bytes(bbcoop_icon.ico_from_png(png.read_bytes()))
+            return ico
+        except (self.tk.TclError, OSError, ValueError):
+            return None
 
     def add_to_steam(self):
         """Bloodborne in the Steam library (a non-Steam game that starts Play Bloodborne.exe)."""
@@ -1792,7 +1815,7 @@ class Launcher:
         try:
             for config in configs:
                 bbport_steam.add_shortcut(config / 'shortcuts.vdf', 'Bloodborne', str(exe), str(PORT_DIR),
-                                          str(exe), options)
+                                          str(bbcoop_icon.dump_icon(self.app['game_dir']) or exe), options)  # bbcoop
         except (OSError, ValueError) as error:
             self.messagebox.showerror('Bloodborne', _('Could not add the game to Steam: {}').format(error))
             return
