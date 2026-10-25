@@ -267,6 +267,10 @@ if (WIN32)
     add_executable(bb-play WIN32 ../packaging/windows/play.c ../packaging/windows/play.rc)
     target_compile_options(bb-play PRIVATE -municode)
     target_link_options(bb-play PRIVATE -municode)
+    # bbcoop: the package made on a Mac or Linux PC starts its launcher with this (packaging/windows/launcher.c).
+    add_executable(bb-launch WIN32 ../packaging/windows/launcher.c ../packaging/windows/play.rc)
+    target_compile_options(bb-launch PRIVATE -municode)
+    target_link_options(bb-launch PRIVATE -municode)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.

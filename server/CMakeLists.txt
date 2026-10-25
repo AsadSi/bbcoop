@@ -25,17 +25,26 @@ add_subdirectory(externals)
 set(PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/proto_gen")
 file(MAKE_DIRECTORY "${PROTO_OUT}")
 
+# bbcoop: a cross build (scripts/windows/cross-build.sh) runs this machine's protoc, built from the
+# same protobuf (SHADNET_PROTOC), since the target's cannot run here.
+if(SHADNET_PROTOC)
+    set(SHADNET_PROTOC_TARGET "")
+else()
+    set(SHADNET_PROTOC $<TARGET_FILE:protoc>)
+    set(SHADNET_PROTOC_TARGET protoc)
+endif()
+
 add_custom_command(
     OUTPUT
         "${PROTO_OUT}/shadnet.pb.cc"
         "${PROTO_OUT}/shadnet.pb.h"
-    COMMAND $<TARGET_FILE:protoc>
+    COMMAND ${SHADNET_PROTOC}
         "--proto_path=${CMAKE_CURRENT_SOURCE_DIR}/src"
         "--cpp_out=${PROTO_OUT}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet.proto"
     DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet.proto"
-        protoc
+        ${SHADNET_PROTOC_TARGET}
     COMMENT "Generating shadnet protobuf sources"
     VERBATIM
 )

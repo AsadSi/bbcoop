@@ -18,7 +18,7 @@ with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
             for p in fields.get('PROVIDES', []):
                 provides[re.split('[<>=]', p)[0]] = name
 # The cross toolchain (llvm-mingw) brings its own C runtime, headers and C++ library.
-SKIP = re.compile(P + r'(crt|headers|libc\+\+|libunwind|libwinpthread|winpthreads|compiler-rt|clang|llvm|lld|gcc|python|cmake|ninja|pkgconf|tcl|tk|ncurses|readline|gettext|libiconv-?$)')
+SKIP = re.compile(P + r'(crt|headers|libc\+\+|libunwind|libwinpthread|winpthreads|compiler-rt|clang|llvm|lld|gcc|python|cmake|ninja|pkgconf|tcl|tk|ncurses|readline|gettext-tools)')
 order, seen = [], set()
 def add(dep):
     name = re.split('[<>=]', dep)[0]
