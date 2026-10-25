@@ -55,7 +55,8 @@ def build_problem(ours, theirs, host):
         return None
     if ours.rstrip("+") != theirs.rstrip("+"):
         return (f"{host} runs build {theirs}, this is {ours}. Co-op needs the same build on both "
-                "sides (packets change between builds): get the same download as the host.")
+                "sides: install the host's download. If you both already have it, the host picks "
+                "Host again in their launcher.")
     return None
 
 
