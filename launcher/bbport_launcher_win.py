@@ -1752,8 +1752,9 @@ class Launcher:
 
     def shortcut(self):
         """Bloodborne.lnk on the desktop."""
-        if FROZEN:
-            target, arguments, icon = sys.executable, '', f'{sys.executable},0'
+        exe = PORT_DIR / 'Bloodborne.exe'  # bbcoop: the package's, frozen or its Python's stub
+        if exe.is_file():
+            target, arguments, icon = str(exe), '', f'{exe},0'
         else:  # a source tree: the launcher script with the windowless Python
             pythonw = Path(sys.executable).with_name('pythonw.exe')
             target = str(pythonw if pythonw.exists() else sys.executable)
@@ -1796,7 +1797,7 @@ class Launcher:
         if not configs:
             self.messagebox.showerror('Bloodborne', _('Steam was not found on this PC (or nobody has signed in to it yet).'))
             return
-        if FROZEN:
+        if (PORT_DIR / 'Play Bloodborne.exe').is_file():  # bbcoop: any package, frozen or not
             exe, options = PORT_DIR / 'Play Bloodborne.exe', ''
         else:
             pythonw = Path(sys.executable).with_name('pythonw.exe')

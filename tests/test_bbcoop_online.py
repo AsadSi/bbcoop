@@ -45,6 +45,14 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(bbcoop_online._strings('abc', ''), b'\x0a\x03abc\x12\x00')
         self.assertEqual(bbcoop_online._varint(300), b'\xac\x02')
 
+    def test_windows_server_binary(self):
+        """bbcoop: the Windows package keeps shadnet.exe beside its Qt DLLs in bin/shadnet/."""
+        with tempfile.TemporaryDirectory() as directory:
+            exe = Path(directory) / 'bin' / 'shadnet' / 'shadnet.exe'
+            exe.parent.mkdir(parents=True)
+            exe.write_bytes(b'MZ')
+            self.assertEqual(bbcoop_online.shadnet_binary(directory), exe)
+
     def test_server_config(self):
         with tempfile.TemporaryDirectory() as directory:
             bbcoop_online.write_config(Path(directory), '100.64.0.7')
