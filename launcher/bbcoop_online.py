@@ -356,6 +356,7 @@ class Host:
         self.python = python
         self.processes = []
         self.address = ""
+        self.build = ""  # what its hello answers
 
     def running(self):
         return bool(self.processes) and all(process.poll() is None for process in self.processes)
@@ -403,7 +404,7 @@ class Host:
         except (OSError, RuntimeError) as failure:
             self.stop()
             raise RuntimeError(str(failure)) from failure
-        self.address = address
+        self.address, self.build = address, build
 
     def stop(self):
         for process in reversed(self.processes):
@@ -414,7 +415,7 @@ class Host:
                 except subprocess.TimeoutExpired:
                     process.kill()
         self.processes = []
-        self.address = ""
+        self.address, self.build = "", ""
         (self.directory / "pids").unlink(missing_ok=True)
 
     def stop_leftovers(self):

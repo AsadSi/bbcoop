@@ -72,6 +72,7 @@ class HostTests(unittest.TestCase):
     def test_host(self):
         self.assertTrue(self.host.running())
         self.assertEqual(bbcoop_online.hello('127.0.0.1'), {'name': 'Eileen', 'build': 'abc'})
+        self.assertEqual(self.host.build, 'abc')  # the launchers restart it when the build changes
         self.assertEqual(bbcoop_online.prepare_join('127.0.0.1', 'Djura', 'pw1', 'abc'), 'created')
         self.assertEqual(bbcoop_online.prepare_join('127.0.0.1', 'Djura', 'pw1', 'abc+'), 'exists')
         with self.assertRaisesRegex(ValueError, 'taken'):
@@ -81,6 +82,7 @@ class HostTests(unittest.TestCase):
         processes = list(self.host.processes)
         self.host.stop()
         self.assertTrue(all(process.poll() is not None for process in processes))
+        self.assertEqual((self.host.address, self.host.build), ('', ''))
         with self.assertRaisesRegex(ValueError, 'Nobody is hosting'):
             bbcoop_online.prepare_join('127.0.0.1', 'Alfred', 'pw', 'abc')
 
