@@ -116,6 +116,15 @@ launcher, MoltenVK window, the game's code running). Not verified: the AppImage 
 a co-op session through Host/Join (needs two machines and Tailscale), Gatekeeper's first open of a
 downloaded zip, Windows.
 
+Fast join (Asad, 2026-10-25: "one-press join", the most common Bloodborne co-op complaint is the bell
+dance): picking Host or Join is all a player does. The game rings the host's Hunt Bell and the guest's
+Kin Bell by itself when the character stands alone in its own world outside a boss fight, and again after
+a session ends or the game restarts (the rejoin); the host's server polls signs every 5 s. Verified with
+two games on one Mac against a local server, both in Old Yharnam: the guest's bell rang 6 s after it
+loaded, the host found it 29 s later, the guest stood beside the host 34 s after that, session kept
+7 minutes. Not verified: two machines, different areas, the rejoin after a session end, the pause after
+a bell stopped by hand.
+
 ## Reference values (to check against v1.09's own tables)
 
 - **Level cost above level 12:** the community model is 0.02x³ + 3.06x² + 105.6x − 895 Blood Echoes at hunter level x (Fextralife; gamerguides.com). Respec refunds should use the game's own cost function once it's located, not this formula.

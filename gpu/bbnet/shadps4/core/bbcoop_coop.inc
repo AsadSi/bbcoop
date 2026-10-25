@@ -518,6 +518,7 @@ constexpr BbcoopBellStop BbcoopBellStops[] = {{4016, 9000}, {4121, 9005}, {11201
 constexpr s64 BbcoopBellStopAfterMs = 1'500;
 std::array<s64, std::size(BbcoopBellStops)> bbcoop_bell_on_since{}; // game thread
 std::atomic<s32> bbcoop_bell_stop_effect{0};
+bool bbcoop_auto_bell_paused = false; // see "Fast join"
 
 // Item use (TraceEntry): a kit bell that already rings is to be stopped.
 void NoteBbcoopBellUse(s32 goods) {
@@ -544,10 +545,94 @@ void TickBbcoopBellStop() {
         return;
     }
     const bool stopped = BbscEraseLocalEffect(effect);
+    bbcoop_auto_bell_paused = true; // stopped by hand: the bells do not ring themselves until a load
     LOG_INFO(Debug, "bbcoop bells: a ringing kit bell used again - its SpEffect {} taken off ({})", effect,
              stopped ? "stopped" : "STILL ON");
     BBSC_TIMELINE("BELL", "a ringing kit bell used again - its SpEffect {} taken off ({})", effect,
                   stopped ? "stopped" : "STILL ON");
+}
+
+// ---- Fast join: the bells ring themselves (2026-10-25) ----------------------------------------------
+// Asad picked one-press join: the launcher's Host or Join (BB_COOP_ROLE=host|join) is all a player
+// does. Whenever the character stands settled and alive in its own world outside a boss fight, the
+// host's Hunt Bell (search, SpEffect 9000) or the guest's Kin Bell (sign, 9005) rings by itself,
+// again after a session ends or the game is restarted - that is the rejoin. A host rings while it
+// has room for another hunter; a guest only while alone. Not while any bell already rings, and not
+// after the player stopped one by hand (until the next load). The ring is the bell's effect added
+// the way Lua_MultiDoping adds 7500 (as TickBbscInvadable adds 9020): no animation, no item.
+// BB_COOP_AUTO_BELL=0: off.
+constexpr s64 BbcoopAutoBellSettleMs = 5'000;
+constexpr s64 BbcoopAutoBellRetryMs = 20'000;
+constexpr s32 BbcoopAutoBellMaxHunters = 4;
+
+void TickBbcoopAutoBell() {
+    static const char* const role = [] {
+        const char* value = std::getenv("BB_COOP_ROLE");
+        const char* auto_bell = std::getenv("BB_COOP_AUTO_BELL");
+        if (value == nullptr || (auto_bell != nullptr && auto_bell[0] == '0')) {
+            return static_cast<const char*>(nullptr);
+        }
+        return std::string_view(value) == "host" ? "host"
+               : std::string_view(value) == "join" ? "join"
+                                                   : static_cast<const char*>(nullptr);
+    }();
+    static s64 last_ms = 0;
+    static s64 settled_since_ms = 0;
+    static s64 rung_ms = 0;
+    if (role == nullptr || image_base == 0) {
+        return;
+    }
+    const s64 now = SteadyNowMs();
+    if (now - last_ms < 1'000) {
+        return;
+    }
+    last_ms = now;
+    const bool host = role[0] == 'h';
+    const s32 state = GetSessionState();
+    const u64 global = GetGlobalState();
+    const u64 player = GetLocalPlayerCharacter();
+    const bool loading = !ReadablePointer(global, 0x1598) || ReadValue<u8>(global, 0x08) != 0;
+    if (loading) {
+        bbcoop_auto_bell_paused = false;
+    }
+    const bool ready = !loading && BbscOwnWorldNonGuest(global) && GetCharacterHp(player) > 0 &&
+                       IsSprjLuaEventManReady() && !BossFightActive() &&
+                       (state == 0 || (host && state == 3));
+    if (!ready) {
+        settled_since_ms = 0;
+        return;
+    }
+    if (settled_since_ms == 0) {
+        settled_since_ms = now;
+    }
+    if (now - settled_since_ms < BbcoopAutoBellSettleMs || now - rung_ms < BbcoopAutoBellRetryMs ||
+        bbcoop_auto_bell_paused) {
+        return;
+    }
+    for (const s32 id : {9000, 9005, 9025}) {
+        if (BbscLocalEffectNode(id) != 0) {
+            return; // a bell rings already
+        }
+    }
+    const s32 members = GetBbscSessionMemberCount(global);
+    if (host && state == 3 && members >= BbcoopAutoBellMaxHunters) {
+        return; // full
+    }
+    const u64 vtable = ReadValue<u64>(player, 0);
+    const u64 add = ReadablePointer(vtable, 0x3F8) ? ReadValue<u64>(vtable, 0x3F0) : 0;
+    if (!IsEbootCodeAddress(add)) {
+        return;
+    }
+    const s32 effect = host ? 9000 : 9005;
+    using AddSpEffect = void PS4_SYSV_ABI (*)(u64 chr, s32 id, u64 source, s32, s32, s32, float, float,
+                                              float, float, float, s32);
+    reinterpret_cast<AddSpEffect>(add)(player, effect, player, 0, 0, 0, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0);
+    rung_ms = now;
+    const bool on = BbscLocalEffectNode(effect) != 0;
+    LOG_INFO(Debug, "bbcoop fast join: the {} rings by itself (SpEffect {} {}, session state {}, {} hunter(s))",
+             host ? "Hunt Bell" : "Kin Bell", effect, on ? "on" : "NOT ON", state, members);
+    BBSC_TIMELINE("AUTOBELL", "the {} rings by itself (SpEffect {} {}, session state {}, {} hunter(s))",
+                  host ? "Hunt Bell" : "Kin Bell", effect, on ? "on" : "NOT ON", state, members);
 }
 
 // ---- BB_TEST_BELLS (2026-10-25) --------------------------------------------------------------------
