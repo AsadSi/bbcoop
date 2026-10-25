@@ -64,8 +64,10 @@ static uint64_t now_ns(void) {
 }
 
 /* Tokens: 0 = nothing to release (timed out), 1 = taken, 2 = taken again by its holder. */
-uint64_t bbcoop_context_lock_enter(Hook *hook);
-uint64_t bbcoop_context_lock_enter(Hook *hook) {
+/* System V on every platform: the asm below passes rdi/rsi (Windows' C calls take rcx/rdx). */
+#define LOCK_ABI __attribute__((sysv_abi))
+LOCK_ABI uint64_t bbcoop_context_lock_enter(Hook *hook);
+LOCK_ABI uint64_t bbcoop_context_lock_enter(Hook *hook) {
     atomic_fetch_add_explicit(&hook->calls, 1, memory_order_relaxed);
     pthread_t self = pthread_self();
     pthread_mutex_lock(&lock_mutex);
@@ -119,8 +121,8 @@ uint64_t bbcoop_context_lock_enter(Hook *hook) {
     return token;
 }
 
-void bbcoop_context_lock_leave(Hook *hook, uint64_t token);
-void bbcoop_context_lock_leave(Hook *hook, uint64_t token) {
+LOCK_ABI void bbcoop_context_lock_leave(Hook *hook, uint64_t token);
+LOCK_ABI void bbcoop_context_lock_leave(Hook *hook, uint64_t token) {
     (void)hook;
     if (!token) return;
     pthread_mutex_lock(&lock_mutex);

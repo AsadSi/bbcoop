@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -431,7 +432,12 @@ void Save() {
     FILE* file = std::fopen(temporary.c_str(), "w");
     bool ok = file && std::fwrite(out.data(), 1, out.size(), file) == out.size();
     ok = file && std::fclose(file) == 0 && ok;
-    if (!ok || std::rename(temporary.c_str(), Path()) != 0) {
+    // bbcoop: std::filesystem::rename replaces the old file on Windows too (std::rename keeps it there).
+    std::error_code renamed;
+    if (ok) {
+        std::filesystem::rename(temporary, Path(), renamed);
+    }
+    if (!ok || renamed) {
         std::printf("Settings: cannot write %s\n", Path());
     }
 }

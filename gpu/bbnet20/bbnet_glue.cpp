@@ -557,6 +557,27 @@ BBNET_EXPORT void bbnet_image_ready(uint64_t base, uint64_t size) {
             std::printf("BBSC: code %#llx-%#llx writable\n", start, end);
         }
     }
+#elif defined(_WIN32) // bbcoop: no /proc; the executable regions come from VirtualQuery
+    constexpr DWORD Executable = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                                 PAGE_EXECUTE_WRITECOPY;
+    MEMORY_BASIC_INFORMATION info{};
+    for (unsigned long long at = base; at < base + size &&
+         VirtualQuery(reinterpret_cast<void*>(at), &info, sizeof(info)) != 0;) {
+        const unsigned long long start = std::max<unsigned long long>(
+            reinterpret_cast<unsigned long long>(info.BaseAddress), base);
+        const unsigned long long end = std::min<unsigned long long>(
+            reinterpret_cast<unsigned long long>(info.BaseAddress) + info.RegionSize, base + size);
+        if (end <= at) {
+            break;
+        }
+        at = end;
+        DWORD old = 0;
+        if (info.State == MEM_COMMIT && (info.Protect & Executable) != 0 && start < end) {
+            writable += VirtualProtect(reinterpret_cast<void*>(start), end - start,
+                                       PAGE_EXECUTE_READWRITE, &old) != 0;
+            std::printf("BBSC: code %#llx-%#llx writable\n", start, end);
+        }
+    }
 #else
     if (FILE* maps = std::fopen("/proc/self/maps", "r")) {
         char line[512];

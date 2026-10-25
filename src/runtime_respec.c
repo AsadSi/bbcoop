@@ -32,6 +32,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Globals (pointers in the image). */
 #define LUA_EVENT_MAN   0x0553B0C8
@@ -233,8 +234,8 @@ static int copy_file(const char *from, const char *to) {
 }
 
 static int remove_entry(const char *path, const struct stat *st, int type, struct FTW *ftw) {
-    (void)st; (void)type; (void)ftw;
-    return remove(path);
+    (void)st; (void)ftw;
+    return type == FTW_DP ? rmdir(path) : remove(path); /* Windows' remove() deletes no folders */
 }
 static int compare_names(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
