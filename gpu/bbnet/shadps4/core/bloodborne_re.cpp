@@ -16093,6 +16093,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbscBossRewards();
         TickBbscGuestDrops();
         TickBbcoopLoot(); // bbcoop: mirrored loot
+        TickBbcoopSoloHunterType(); // bbcoop: a phantom type left in a solo save
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();
