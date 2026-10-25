@@ -430,7 +430,6 @@ class Launcher:
         self.mod_order, self.mod_vars, self.patch_vars = [], {}, {}
         # bbcoop: Host/Join (launcher/bbcoop_online.py): the server while hosting, this build.
         self.host = bbcoop_online.Host(PORT_DIR, DATA_DIR, python_command())
-        self.build_id = bbcoop_online.build_id(PORT_DIR)
         self.hosts_found, self.host_lock, self.host_note = [], threading.Lock(), ''
         root.title('Bloodborne — bbcoop')
         root.configure(bg=BG)
@@ -1154,8 +1153,11 @@ class Launcher:
         games it follows that address: started before Tailscale connected, it moves there."""
         with self.host_lock:
             address, self.host_note = bbcoop_online.my_address()
-            if not self.host.running() or (address != self.host.address and not self.process):
-                self.host.start(address, name, self.build_id)
+            # bbcoop: the build as installed now (a rebuild or a new download while this window is open)
+            build = bbcoop_online.build_id(PORT_DIR)
+            if not self.host.running() or ((address, build) != (self.host.address, self.host.build)
+                                           and not self.process):
+                self.host.start(address, name, build)
             return self.host.address
 
     def watch_host(self):
@@ -1201,8 +1203,9 @@ class Launcher:
     def show_hosts(self, hosts, problem=''):
         self.host_list.delete(0, 'end')
         self.hosts_found = hosts or []
+        ours = bbcoop_online.build_id(PORT_DIR)
         for address, name, build in self.hosts_found:
-            other = bbcoop_online.build_problem(self.build_id, build, name)
+            other = bbcoop_online.build_problem(ours, build, name)
             self.host_list.insert('end', f'{name} — hosting' + (_('  (another build)') if other else ''))
             if address == self.var('coop_join', 'app').get().strip():
                 self.host_list.selection_set('end')
@@ -1241,7 +1244,7 @@ class Launcher:
                     bbcoop_online.make_account(where, name, secret)
                 else:
                     where = address
-                    bbcoop_online.prepare_join(where, name, secret, self.build_id)
+                    bbcoop_online.prepare_join(where, name, secret, bbcoop_online.build_id(PORT_DIR))
             except (RuntimeError, ValueError) as error:
                 self.ui_calls.put(lambda e=error: self.coop_failed(str(e)))
                 return

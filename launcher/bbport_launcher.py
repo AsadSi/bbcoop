@@ -647,7 +647,6 @@ class LauncherWindow(Adw.ApplicationWindow):
         # bbcoop: Host/Join: the server while hosting, this build, the hosts found.
         self.host = bbcoop_online.Host(PORT_DIR, DATA_DIR, [sys.executable])
         self.host_lock, self.host_note, self.hosts_found = threading.Lock(), "", []
-        self.build_id = bbcoop_online.build_id(PORT_DIR)
         GLib.timeout_add_seconds(10, self.watch_host)  # bbcoop
         self.ini_edits = {}  # bbcoop: control bindings set here, kept by store()
         self.build()
@@ -1790,8 +1789,11 @@ class LauncherWindow(Adw.ApplicationWindow):
         games it follows that address: started before Tailscale connected, it moves there."""
         with self.host_lock:
             address, self.host_note = bbcoop_online.my_address()
-            if not self.host.running() or (address != self.host.address and not self.process):
-                self.host.start(address, name, self.build_id)
+            # bbcoop: the build as installed now (a rebuild or a new download while this window is open)
+            build = bbcoop_online.build_id(PORT_DIR)
+            if not self.host.running() or ((address, build) != (self.host.address, self.host.build)
+                                           and not self.process):
+                self.host.start(address, name, build)
             return self.host.address
 
     def watch_host(self):
@@ -1844,8 +1846,9 @@ class LauncherWindow(Adw.ApplicationWindow):
         if note:
             self.host_rows.append(Adw.ActionRow(title=note))
         group = None
+        ours = bbcoop_online.build_id(PORT_DIR)
         for address, name, build in self.hosts_found:
-            other = bbcoop_online.build_problem(self.build_id, build, name)
+            other = bbcoop_online.build_problem(ours, build, name)
             row = Adw.ActionRow(title=GLib.markup_escape_text(f"{name} — hosting"),
                                 subtitle=GLib.markup_escape_text(address + ("  (another build)" if other else "")))
             check = Gtk.CheckButton(group=group, active=address == self.join_row.get_text().strip())
@@ -1897,7 +1900,7 @@ class LauncherWindow(Adw.ApplicationWindow):
                     bbcoop_online.make_account(where, name, secret)
                 else:
                     where = address
-                    bbcoop_online.prepare_join(where, name, secret, self.build_id)
+                    bbcoop_online.prepare_join(where, name, secret, bbcoop_online.build_id(PORT_DIR))
             except (RuntimeError, ValueError) as error:
                 GLib.idle_add(done, "", str(error))
                 return
