@@ -1155,6 +1155,13 @@ bool HandleEvent(const SDL_Event& event) {
         }
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
         return true;
+    case SDL_EVENT_QUIT:
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        // bbcoop: the game ends with the menu open (its "Quit game", the window's close button):
+        // closed first, so its changes are saved (Asad, 2026-10-25: Skip intro, ticked just before
+        // quitting, was lost). The window still handles the event.
+        SetOpen(false);
+        return false;
     default:
         return false;
     }
