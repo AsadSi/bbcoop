@@ -446,6 +446,7 @@ class Launcher:
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.drain_output)
         root.after(300, self.first_start)
+        root.after(10000, self.watch_host)  # bbcoop
         threading.Thread(target=self.detect_gpu, daemon=True).start()
 
     def px(self, size):
@@ -1145,22 +1146,31 @@ class Launcher:
         self.refresh_status()
 
     def ensure_host(self, name):
-        """The server on this computer's address (helper threads); returns the address."""
+        """The server on this computer's address (helper threads); returns the address. Between
+        games it follows that address: started before Tailscale connected, it moves there."""
         with self.host_lock:
-            if not self.host.running():
-                address, self.host_note = bbcoop_online.my_address()
+            address, self.host_note = bbcoop_online.my_address()
+            if not self.host.running() or (address != self.host.address and not self.process):
                 self.host.start(address, name, self.build_id)
             return self.host.address
 
+    def watch_host(self):
+        """Every 10 s: a server whose address is no longer this computer's moves (ensure_host)."""
+        self.root.after(10000, self.watch_host)
+        if self.host.running() and not self.process and not self.host_lock.locked():
+            threading.Thread(target=lambda: bbcoop_online.my_address()[0] != self.host.address and
+                             self.ui_calls.put(self.start_hosting), daemon=True).start()
+
     def start_hosting(self):
         name = self.var('online_npid', 'app').get().strip() or 'Hunter'
-        self.host_label.configure(text=_('Starting the server…'))
+        self.host_label.configure(text=_('Connecting Tailscale and starting the server…'))
 
         def work():
+            problem = bbcoop_online.connect_tailscale()
             try:
                 address = self.ensure_host(name)
                 text = _('Your address: {0}. Friends pick "{1} — hosting" in Join, or type this '
-                         'address.').format(address, name) + (f'\n{self.host_note}' if self.host_note else '')
+                         'address.').format(address, name) + (f'\n{problem or self.host_note}' if problem or self.host_note else '')
             except RuntimeError as error:
                 text = _('The server did not start: {}').format(error)
             self.ui_calls.put(lambda: self.host_label.configure(text=text))
@@ -1179,11 +1189,12 @@ class Launcher:
         self.host_list.insert('end', _('Looking for hosts on Tailscale…'))
 
         def work():
+            problem = bbcoop_online.connect_tailscale()
             hosts = bbcoop_online.find_hosts()
-            self.ui_calls.put(lambda: self.show_hosts(hosts))
+            self.ui_calls.put(lambda: self.show_hosts(hosts, problem))
         threading.Thread(target=work, daemon=True).start()
 
-    def show_hosts(self, hosts):
+    def show_hosts(self, hosts, problem=''):
         self.host_list.delete(0, 'end')
         self.hosts_found = hosts or []
         for address, name, build in self.hosts_found:
@@ -1192,7 +1203,7 @@ class Launcher:
             if address == self.var('coop_join', 'app').get().strip():
                 self.host_list.selection_set('end')
         if hosts is None:
-            self.host_list.insert('end', _('Tailscale is not connected: open Tailscale and connect.'))
+            self.host_list.insert('end', problem or _('Tailscale is not connected: open Tailscale and connect.'))
         elif not hosts:
             self.host_list.insert('end', _('Nobody is hosting right now. Refresh, or type an address.'))
 
@@ -1218,6 +1229,9 @@ class Launcher:
 
         def work():
             try:
+                problem = bbcoop_online.connect_tailscale()
+                if problem:
+                    raise ValueError(problem)
                 if mode == 'host':
                     where = self.ensure_host(name)
                     bbcoop_online.make_account(where, name, secret)

@@ -647,6 +647,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.host = bbcoop_online.Host(PORT_DIR, DATA_DIR, [sys.executable])
         self.host_lock, self.host_note, self.hosts_found = threading.Lock(), "", []
         self.build_id = bbcoop_online.build_id(PORT_DIR)
+        GLib.timeout_add_seconds(10, self.watch_host)  # bbcoop
         self.ini_edits = {}  # bbcoop: control bindings set here, kept by store()
         self.build()
         self.connect("close-request", self.on_close)
@@ -1766,22 +1767,32 @@ class LauncherWindow(Adw.ApplicationWindow):
             self.find_hosts()
 
     def ensure_host(self, name):
-        """The server on this computer's address (helper threads); returns the address."""
+        """The server on this computer's address (helper threads); returns the address. Between
+        games it follows that address: started before Tailscale connected, it moves there."""
         with self.host_lock:
-            if not self.host.running():
-                address, self.host_note = bbcoop_online.my_address()
+            address, self.host_note = bbcoop_online.my_address()
+            if not self.host.running() or (address != self.host.address and not self.process):
                 self.host.start(address, name, self.build_id)
             return self.host.address
 
+    def watch_host(self):
+        """Every 10 s: a server whose address is no longer this computer's moves (ensure_host)."""
+        if self.host.running() and not self.process and not self.host_lock.locked():
+            threading.Thread(target=lambda: bbcoop_online.my_address()[0] != self.host.address and
+                             GLib.idle_add(self.start_hosting), daemon=True).start()
+        return True  # GLib.timeout_add_seconds keeps calling
+
     def start_hosting(self):
         name = self.hunter_row.get_text().strip() or "Hunter"
-        self.host_row.set_subtitle("Starting the server…")
+        self.host_row.set_subtitle("Connecting Tailscale and starting the server…")
 
         def work():
+            problem = bbcoop_online.connect_tailscale()
             try:
                 address = self.ensure_host(name)
+                note = problem or self.host_note
                 text = (f'Your address: {address}. Friends pick "{name} — hosting" in Join, or type '
-                        "this address." + (f"\n{self.host_note}" if self.host_note else ""))
+                        "this address." + (f"\n{note}" if note else ""))
             except RuntimeError as error:
                 text = f"The server did not start: {error}"
             GLib.idle_add(self.host_row.set_subtitle, GLib.markup_escape_text(text))
@@ -1799,8 +1810,9 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.show_hosts([], "Looking for hosts on Tailscale…")
 
         def work():
+            problem = bbcoop_online.connect_tailscale()
             hosts = bbcoop_online.find_hosts()
-            GLib.idle_add(self.show_hosts, hosts)
+            GLib.idle_add(self.show_hosts, hosts, problem if hosts is None else None)
         threading.Thread(target=work, daemon=True).start()
 
     def show_hosts(self, hosts, note=None):
@@ -1858,6 +1870,9 @@ class LauncherWindow(Adw.ApplicationWindow):
 
         def work():
             try:
+                problem = bbcoop_online.connect_tailscale()
+                if problem:
+                    raise ValueError(problem)
                 if mode == "host":
                     where = self.ensure_host(name)
                     bbcoop_online.make_account(where, name, secret)

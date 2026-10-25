@@ -68,17 +68,54 @@ def new_password():
     return secrets.token_urlsafe(18)
 
 
+def tailscale_cli():
+    return next((cli for cli in (shutil.which("tailscale"), TAILSCALE_APP) if cli and Path(cli).exists()), None)
+
+
 def tailscale_status():
-    """`tailscale status --json`, or None without Tailscale."""
-    for cli in (shutil.which("tailscale"), TAILSCALE_APP):
-        if cli and Path(cli).exists():
+    """`tailscale status --json`, or None without Tailscale (or while its service is not up)."""
+    cli = tailscale_cli()
+    if not cli:
+        return None
+    try:
+        run = subprocess.run([cli, "status", "--json"], capture_output=True, text=True, timeout=5)
+        return json.loads(run.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def connect_tailscale(timeout=20):
+    """Host and Join connect Tailscale themselves (Asad, 2026-10-25): its Mac app is started in the
+    background, then `tailscale up`. '' when connected, else what the player has to do."""
+    cli = tailscale_cli()
+    if not cli:
+        return "Tailscale is not installed: get it at tailscale.com/download and sign in."
+    if (tailscale_status() or {}).get("BackendState") == "Running":
+        return ""
+    if sys.platform == "darwin":
+        subprocess.run(["open", "-g", "-a", "Tailscale"], capture_output=True)
+    asked = False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = (tailscale_status() or {}).get("BackendState")
+        if state == "Running":
+            return ""
+        if state == "NeedsLogin":
+            return "Sign in to Tailscale (its menu bar icon), then pick Host or Join again."
+        if state == "Stopped" and not asked:  # turned off in Tailscale: on again
+            asked = True
             try:
-                run = subprocess.run([cli, "status", "--json"], capture_output=True, text=True,
-                                     timeout=5)
-                return json.loads(run.stdout)
-            except (OSError, subprocess.SubprocessError, ValueError):
-                return None
-    return None
+                up = subprocess.run([cli, "up", "--timeout=10s"], capture_output=True, text=True, timeout=15)
+                # Refused when settings differ from the defaults (accept routes, ...): Tailscale
+                # prints the command that states them all, so nothing changes but on/off.
+                again = next((line.split()[1:] for line in up.stderr.splitlines()
+                              if line.strip().startswith("tailscale up ")), None)
+                if up.returncode and again:
+                    subprocess.run([cli, *again], capture_output=True, timeout=15)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        time.sleep(0.5)
+    return "Tailscale did not connect: connect it (its menu bar icon), then pick Host or Join again."
 
 
 def ipv4(addresses):
