@@ -317,8 +317,11 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     # the game below) is gone. Messages and bloodstains are then this PC's only.
     # bbcoop: vanilla co-op difficulty (docs/bbcoop/brief.md, Asad 2026-10-24): BBSC's scaling off, which
     # also lifts its patch-out of the game's own boss-only buff (Lua_MultiDoping, +50% HP per cooperator).
+    # A guest plays in the host's world as in vanilla co-op: nothing of it is merged into the guest's
+    # own world afterwards (Asad 2026-10-25).
     if [[ ${BB_BBSC:-0} == 1 ]]; then
         export SHADPS4_BBSC_SCALING=${SHADPS4_BBSC_SCALING:-0}
+        export SHADPS4_BBSC_SHARED_PROGRESS=${SHADPS4_BBSC_SHARED_PROGRESS:-0}
     fi
     if [[ ${BB_BBSC:-0} == 1 && -f scripts/bbsc_gameserver/bbsc_gameserver.py ]]; then
         bbsc_shadnet=$("$PYTHON" scripts/online.py bbsc-local) || bbsc_shadnet=

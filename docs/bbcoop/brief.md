@@ -17,7 +17,6 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 - Our own runtime or recompiler. bbport already runs the game's x86-64 code natively, and forking it gives us full control.
 - A public server, matchmaking with strangers, or any connection to real PSN.
 - PvP or invasions.
-- Chalice Dungeon co-op.
 - Support for any game version other than v1.09 of CUSA03173 (EU) or CUSA00900 (US).
 
 ## Decisions made
@@ -30,7 +29,8 @@ A private fork of bbport (deadinside28/bloodborne_pc) that adds seamless co-op f
 | Party size | Host plus 2 guests (the game's own limit) | Going above the native limit means more RE and more desync | Asad |
 | Guest death | Respawns at the host's last lamp and is re-inserted | Seamless Co-op model | Asad |
 | Host death | The host respawns at their lamp and guests stay where they are, with no reset for them | Asad: the host dying must not send everyone back | Asad |
-| Progress | Boss kills, lamps and shortcuts are copied into each guest's own save | Seamless Co-op model | Claude |
+| Progress | A guest plays in the host's world as in vanilla co-op: every area runs on the host's flags (doors, bosses, items taken, time of night; BBSC 0.0.2's WORLD_SYNC_ALL), and nothing of it is merged into the guest's own world (`SHADPS4_BBSC_SHARED_PROGRESS=0` in run.sh/run.py). On top of vanilla: warp together, no kick, shared pickups. Replaces copying boss kills, lamps and shortcuts into the guest's save | "Join his world like the usual Bloodborne online"; a host's door showed shut for the guest, and the guest's own doors opened in the host's world | Asad, 2026-10-25 |
+| Chalice Dungeons | In scope (was "Not building"): the session drops when the host enters one. BBSC leaves area 29 out (all dungeons share the map ids); the guest needs the host's dungeon (glyph/layout), not its own. Next: a traced session (the BBSC timeline) to see where it drops | "Yes add it" | Asad, 2026-10-25 |
 | Non-co-op online traffic | Public servers allowed: the game's own server traffic (messages, bloodstains, ghosts) may go to The Hunter's Dream, accounts and summons to srv.shadps4.net or the group's own shadNet server. Replaces "private only" | "It doesn't have to be private, just make online work" | Asad, 2026-10-12 |
 | Online code | shadp2p's C++ NP, Net and Http libraries (about 25k lines), adapted into a C++ library linked like the GPU library, with no rewrite into C. Tested by a fake-game client that makes Bloodborne's online calls against the real server | A C rewrite would take 7-9k lines plus a protobuf C port, for no gain | Claude |
 | Loot | Every player gets every pickup, enemy drop and boss drop once. Treasures in the host's world are first grab shares (2026-10-24): every hunter sees each one (BBSC's guest copies on); whoever picks it up first gets it, every other hunter gets a copy and their glowing copy disappears, taken in that world (`coop_loot_re.md`, Doubles). Other pickups are mirrored; enemy drops come from each player's own game (mirroring them doubled them, 2026-10-24); a guest's boss drop is BBSC's own reward | "Fair for co-op"; "nobody misses loot, nothing doubles" | Asad, 2026-10-24 |
