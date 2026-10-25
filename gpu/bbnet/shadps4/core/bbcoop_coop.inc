@@ -442,3 +442,49 @@ void TickBbcoopSoloHunterType() {
     BBSC_TIMELINE("REPAIR", "alone with a phantom type (restore {}, queued {}, slot {}, character {}) - "
                             "back to a hunter (0)", restore, queued, slot, chr);
 }
+
+// Same report: still nothing usable in the Dream once the type was back to 0. The leave scripts set
+// event flag 4047 ("leaving") and the Lua load wait (+0x8D) before the trip home, which clears them;
+// the window closed mid-session, so 4047 stayed on in the save and every later load is locked
+// (the soft lock of TickBbscStuckLeaveLocks, which only looks within 60 s after a session ends in the
+// same run). Solo in our own world, settled and alive, with either lock held BbcoopSoloLockMs: both
+// are released.
+bool BbscOwnWorldNonGuest(u64 global);
+void ReleaseBbscLeaveLocks(std::string_view why);
+constexpr s64 BbcoopSoloLockMs = 8'000;
+
+void TickBbcoopSoloLeaveLocks() {
+    static s64 since_ms = 0;
+    static s64 last_ms = 0;
+    const s64 now = SteadyNowMs();
+    if (image_base == 0 || now - last_ms < 1'000) {
+        return;
+    }
+    last_ms = now;
+    const u64 global = GetGlobalState();
+    const u64 lua_man = ReadValue<u64>(image_base + 0x0553B0C8, 0);
+    const u64 lua = ReadablePointer(lua_man, 0x10) ? ReadValue<u64>(lua_man, 8) : 0;
+    if (bbsc_v8_pending || GetSessionState() != 0 || !BbscOwnWorldNonGuest(global) ||
+        ReadValue<u8>(global, 0x08) != 0 || GetBbscLocalPlayerHp() <= 0 ||
+        ReadValue<u64>(image_base + WorldFlagManPointerOffset, 0) == 0) {
+        since_ms = 0;
+        return;
+    }
+    const bool leaving = BbscEventFlag(4047);
+    const bool wait = ReadablePointer(lua, 0x90) && ReadValue<u8>(lua, 0x8D) != 0;
+    if (!leaving && !wait) {
+        since_ms = 0;
+        return;
+    }
+    if (since_ms == 0) {
+        since_ms = now;
+        return;
+    }
+    if (now - since_ms < BbcoopSoloLockMs) {
+        return;
+    }
+    since_ms = 0;
+    ReleaseBbscLeaveLocks("alone in our own world, still locked");
+    BBSC_TIMELINE("REPAIR", "alone in our own world with the leave locks on (flag 4047 {}, load wait {}) "
+                            "- released", leaving, wait);
+}
