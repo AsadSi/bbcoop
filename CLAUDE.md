@@ -74,6 +74,11 @@ Runtime mods (`src/`):
   lists the tailnet's hosts, makes the account (shadNet's Create) and refuses another build (the game server's
   `/bbcoop/hello`; a build is its commit, or the package's `BUILD`). Both launchers use it: GTK on Linux, Tk
   (`bbport_launcher_win.py`) on Windows and macOS. Tests: `tests/test_bbcoop_online.py`.
+- Fast join (Asad 2026-10-25): Host/Join tell the game its role (`BB_COOP_ROLE=host|join`) and the bells ring by
+  themselves - the host's Hunt Bell, the guest's Kin Bell, again after a session ends or a restart
+  (`bbcoop_coop.inc`, "Fast join"; `BB_COOP_AUTO_BELL=0` off). The host's game server polls signs every 5 s
+  (`SUMMON_POLL_S`, vanilla 35/30). A ringing kit bell used again stops it. Two games on one Mac: `BB_P2P_PORT=3659`
+  on the second.
 - Mac app: `bash packaging/macos/package.sh` -> `dist/bbcoop-mac.zip` (Tk launcher frozen with PyInstaller, port in
   `Contents/Resources/port`, ad hoc signed; data in `~/Library/Application Support/bbcoop`).
 - Old vendored shadp2p networking is at tag `bbcoop-online-0.4`.

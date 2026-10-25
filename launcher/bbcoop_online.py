@@ -25,6 +25,7 @@ from pathlib import Path
 import urllib.request
 
 GAME_PORT, STUN_PORT, WEB_PORT, SS_PORT = 31313, 31314, 31315, 20443
+SUMMON_POLL_S = 5  # fast join: the games look for and re-post signs every 5 s (vanilla 35 / 30)
 HELLO = "/bbcoop/hello"
 TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 # shadNet's errors (server/src/protocol.h) that the account step explains.
@@ -396,7 +397,8 @@ class Host:
                 game = subprocess.Popen(
                     [*self.python, str(script), "--shadnet", address, "--host", address,
                      "--advertise", address, "--data", str(self.directory / "online-data.json"),
-                     "--log-dir", str(logs), "--bbcoop-name", name, "--bbcoop-build", build],
+                     "--log-dir", str(logs), "--bbcoop-name", name, "--bbcoop-build", build,
+                     "--summon-interval", str(SUMMON_POLL_S)],
                     cwd=script.parent, stdout=log, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, **flags)
             self.processes.append(game)
