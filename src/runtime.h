@@ -50,6 +50,11 @@ void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size);
 void runtime_memory_prepare_cpu_write(uintptr_t address, uint64_t size);
 /* bbport (frame stats): a guest thread was blocked `ns` in the runtime (0 cond, 1 mutex, 2 sema, 3 sleep). */
 void runtime_wait_note(int kind, uint64_t ns);
+#ifdef _WIN32
+/* bbcoop: a sleep of about ns on a high-resolution timer (runtime_kernel.c); Windows' own sleeps round
+ * up to its timer period (~15.6 ms by default). */
+void runtime_precise_sleep_ns(uint64_t ns);
+#endif
 void runtime_wait_report(double frames);
 void runtime_guest_call_sites(uint64_t out[3]);
 /* bbport: times the game's heap asked for more memory (posix_mmap): a sign it leaks. */
