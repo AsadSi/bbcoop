@@ -32,6 +32,23 @@ bool whole_only = false; // the driver's dma-buf maps at offset 0 only: a chunk 
 enum class Mode { DmaBuf, HostImport };
 Mode mode = Mode::DmaBuf;
 std::atomic<u64> chunk_bytes{0};
+// bbcoop: a chunk is one buffer: none larger than the device's largest (maxBufferSize; AMD's Windows
+// driver: 2 GiB, and the game's 2287 MiB allocation was imported whole there anyway, 2026-10-26).
+u64 max_chunk = ~u64{0};
+
+bool TooLarge(u64 phys, u64 size) {
+    if (size <= max_chunk) {
+        return false;
+    }
+    static std::atomic<int> told{0};
+    if (told.fetch_add(1) < 4) {
+        std::printf("Guest memory: direct memory %#llx+%llu MiB is larger than the GPU's largest "
+                    "buffer (%llu MiB): it stays in the memfd\n",
+                    (unsigned long long)phys, (unsigned long long)(size >> 20),
+                    (unsigned long long)(max_chunk >> 20));
+    }
+    return true;
+}
 // BB_GUEST_UNCACHED=1 (Instance::IsGuestUncached): only memory types the GPU reads past its caches.
 bool uncached = false;
 
@@ -99,6 +116,9 @@ void RegisterChunk(Chunk* chunk) {
 
 /// The runtime's chunk allocator: a dma-buf fd of `size` bytes of GPU-visible memory, or -1.
 int AllocChunk(u64 phys, u64 size) {
+    if (TooLarge(phys, size)) { // bbcoop
+        return -1;
+    }
     {
         std::scoped_lock lk{mutex};
         if (chunk_count == MaxChunks) {
@@ -274,6 +294,9 @@ bool ImportHost(void* pointer, u64 size, vk::Buffer& buffer, vk::DeviceMemory& m
 /// The runtime's chunk allocator in host import mode: CHUNK_IMPORTED (-3, the chunk stays in the
 /// memfd) once its backing view is imported, or -1.
 int AllocImported(u64 phys, u64 size) {
+    if (TooLarge(phys, size)) { // bbcoop
+        return -1;
+    }
     {
         std::scoped_lock lk{mutex};
         if (chunk_count == MaxChunks) {
@@ -779,6 +802,7 @@ void Install(const Vulkan::Instance& instance) {
         return;
     }
     const bool host = mode == Mode::HostImport;
+    max_chunk = instance.GetMaxBufferSize(); // bbcoop
     // One chunk per direct allocation where the dma-buf maps at offset 0 only, and with the
     // layer's memory module (a mapping then lies whole in one chunk buffer).
     runtime_memory_set_guest_chunk_whole(LayerMemory() || (!host && whole_only) ? 1 : 0);
