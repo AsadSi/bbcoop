@@ -66,6 +66,9 @@ void SetErrnoFromWin32() {
     case ERROR_DISK_FULL:
         errno = ENOSPC;
         break;
+    case ERROR_NOACCESS: // bbcoop: a read into a page protected meanwhile (runtime_file.c retries EFAULT)
+        errno = EFAULT;
+        break;
     default:
         errno = EIO;
         break;
