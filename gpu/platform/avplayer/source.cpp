@@ -205,7 +205,10 @@ bool Source::Open(const AvPlayerInitData& init, std::string_view path) {
                                   &SeekFileCallback);
         format->pb = avio;
         format->flags |= AVFMT_FLAG_CUSTOM_IO;
-        if (avformat_open_input(&format, nullptr, nullptr, nullptr) < 0) {
+        if (const int result = avformat_open_input(&format, nullptr, nullptr, nullptr); result < 0) {
+            // bbcoop: said, not silent (the game tears the movie down: Windows, 2026-10-26)
+            LOG_ERROR(Lib_AvPlayer, "could not open {} through the game's files: {}", guest_path,
+                      AvError(result));
             return false; // the context is freed on failure
         }
         return true;
@@ -218,11 +221,19 @@ bool Source::Open(const AvPlayerInitData& init, std::string_view path) {
         return false;
     }
     LOG_INFO(Lib_AvPlayer, "playing {} ({})", guest_path, host);
-    return avformat_open_input(&format, host, nullptr, nullptr) >= 0;
+    const int result = avformat_open_input(&format, host, nullptr, nullptr);
+    if (result < 0) { // bbcoop: said, not silent
+        LOG_ERROR(Lib_AvPlayer, "could not open {}: {}", host, AvError(result));
+    }
+    return result >= 0;
 }
 
 bool Source::FindStreams() {
-    if (!format || avformat_find_stream_info(format, nullptr) < 0) {
+    if (!format) {
+        return false;
+    }
+    if (const int result = avformat_find_stream_info(format, nullptr); result < 0) {
+        LOG_ERROR(Lib_AvPlayer, "no stream information: {}", AvError(result)); // bbcoop
         return false;
     }
     for (u32 i = 0; i < format->nb_streams; ++i) {
@@ -307,6 +318,7 @@ bool Source::OpenDecoder(Track& track) {
     const AVStream& stream = *format->streams[track.ffmpeg_index];
     const AVCodec* decoder = avcodec_find_decoder(stream.codecpar->codec_id);
     if (!decoder) {
+        LOG_ERROR(Lib_AvPlayer, "FFmpeg has no decoder for stream {}", track.ffmpeg_index); // bbcoop
         return false;
     }
     track.codec = avcodec_alloc_context3(decoder);

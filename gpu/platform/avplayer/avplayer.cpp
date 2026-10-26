@@ -92,6 +92,7 @@ s32 PS4_SYSV_ABI sceAvPlayerClose(Handle player) {
     if (!player) {
         return ErrorInvalidParams;
     }
+    LOG_INFO(Lib_AvPlayer, "the game closes the player"); // bbcoop: the movie's sequence
     delete player;
     return BbErr::Ok;
 }
