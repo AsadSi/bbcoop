@@ -223,7 +223,18 @@ saves written during the run count, so it never picks one.
   the game's thread entry ABI. The movie player gave up silently there; f486342 logs why, and
   `BB_GPU_LOG=info` shows every event it sends the game. Workaround meanwhile: don't leave the title
   screen idle (press a button within half a minute); a new character's opening movie may hit it too.
-- Also in that log: AMD's driver refused storage usage on BC1/BC7 textures (fixed in 747b08d).
+- Also in that log: AMD's driver refused storage usage on BC1/BC7 textures (fixed in 747b08d; gone in
+  the 2026.10.26c run).
+- 2026.10.26c (same panic, a character loaded, no AvPlayer error logged): the movie class (vtable
+  0x52e3800: +0x10 init loads sysmodule 0xa5, +0x20 open at +0x28fddc0 makes the audio thread, +0x30
+  close at +0x28fe2e0) closes right after opening. Close stops the audio object (+0x29002d0), which
+  waits only when the audio thread has marked itself running (state 1), so a thread not yet started is
+  not waited for; the DL thread's destructor (+0x208b440) then detaches it (scePthreadDetach, not a
+  join) and destroys its mutex; the thread starts and panics. On the Mac the thread opens its audio
+  port right after creation instead. Not the cause: the AvPlayer failing (nothing logged), its
+  callbacks' ABI, red-zone sites (none near), thread attributes, timed waits' clocks. Next: a run with
+  `BB_GPU_LOG=info` (the player's events and "the game closes the player"), and whether the movie
+  showed at all before the crash.
 
 ## Open
 - Not yet run on Windows: the game itself, online and the package. Those need the PC.
