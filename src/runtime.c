@@ -163,7 +163,7 @@ static ABI int guard_acquire(uint64_t *guard) {
             fputs("STOP: recursive/concurrent static initialization is not supported yet\n", stderr);
             exit(21);
         }
-        sched_yield(); /* another thread is running the initializer */
+        runtime_yield(); /* another thread is running the initializer */
     }
     atomic_fetch_add(&guards_acquired, 1);
     return 1;

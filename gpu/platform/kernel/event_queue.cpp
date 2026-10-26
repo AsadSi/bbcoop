@@ -98,7 +98,11 @@ public:
 private:
     void Run(std::stop_token stop) {
         Common::SetCurrentThreadName("bb:Timers");
+#ifdef _WIN32 // bbcoop: libc++ waits whole milliseconds there; a shorter wait returned at once
+        constexpr auto Spin = std::chrono::microseconds(2000);
+#else
         constexpr auto Spin = std::chrono::microseconds(150);
+#endif
         std::unique_lock lock{mutex};
         while (!stop.stop_requested()) {
             if (items.empty()) {

@@ -133,6 +133,13 @@ void runtime_precise_sleep_ns(uint64_t ns) {
     else Sleep((DWORD)((ns+999999)/1000000));
 }
 #endif
+void runtime_yield(void) {
+#ifdef _WIN32
+    SwitchToThread();
+#else
+    sched_yield();
+#endif
+}
 static int sleep_ns(uint64_t ns) {
     struct timespec t={.tv_sec=(time_t)(ns/1000000000),.tv_nsec=(long)(ns%1000000000)}, a, b;
     clock_gettime(CLOCK_MONOTONIC,&a);
@@ -184,7 +191,7 @@ static ABI int64_t posix_time(int64_t *out) { int64_t t=(int64_t)time(NULL); if 
 /* ---- process ---- */
 static ABI int32_t get_pagesize(void) { return PAGE; }
 static ABI int32_t get_pid(void) { return 1000; }
-static ABI int32_t yield(void) { sched_yield(); return 0; }
+static ABI int32_t yield(void) { runtime_yield(); return 0; }
 static ABI __attribute__((noreturn)) void hard_exit(int status) {
     printf("Runtime: guest requested _exit(%d)\n",status);
     runtime_report();
@@ -294,7 +301,7 @@ static ABI int32_t thread_once(int32_t *once,void (ABI *routine)(void)) {
             __atomic_store_n(once,1,__ATOMIC_RELEASE);
             return 0;
         }
-        sched_yield();
+        runtime_yield();
     }
 }
 static ABI int32_t posix_once(int32_t *once,void (ABI *routine)(void)) { return thread_once(once,routine) ? 22 : 0; }

@@ -15,6 +15,16 @@
 #include "render/gcn_to_vk.h"
 #include <xxhash.h>
 
+namespace {
+// bbcoop: libc++ on Windows waits whole milliseconds: 1 ms (999 us left) became 0, and the idle workers
+// spun on the locks the game's submit and GPU threads take.
+#ifdef _WIN32
+constexpr auto PollTick = std::chrono::milliseconds(2);
+#else
+constexpr auto PollTick = std::chrono::milliseconds(1);
+#endif
+} // namespace
+
 namespace Vulkan {
 
 namespace {
@@ -408,7 +418,7 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
             std::unique_lock lk{mutex};
             // Woken by Enqueue, and every millisecond (its notification may come between the
             // check and the wait: it does not take `mutex`).
-            while (!cv.wait_for(lk, stop, std::chrono::milliseconds(1), [&] {
+            while (!cv.wait_for(lk, stop, PollTick, [&] {
                 TakeIntakeLocked();
                 return next_seq < tail_seq ||
                        (!submissions.empty() && submissions.back()->seq >= next_seq);
@@ -477,7 +487,7 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
         {
             std::unique_lock lk{mutex};
             // gpu_seq moves without the lock: keep the candidate the predicate found.
-            while (!cv.wait_for(lk, stop, std::chrono::milliseconds(1), [&] {
+            while (!cv.wait_for(lk, stop, PollTick, [&] {
                 TakeIntakeLocked();
                 target = baseline_ready ? claimable() : nullptr;
                 return target != nullptr;
