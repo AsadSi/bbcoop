@@ -14,6 +14,9 @@
 #include <pthread.h>
 #include <time.h>
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#include <windows.h> /* bbcoop: sleep_until */
+#endif
 
 #define PORTS 25
 #define ERR_NOT_OPENED ((int32_t)0x80260001)
@@ -51,10 +54,33 @@ static int initialized, sdl_ready=-1;
 static size_t buffers_out, ports_opened;
 
 static uint64_t now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
+#ifdef _WIN32
+/* bbcoop, from Supermedo/bloodborne_pc edc6680 (compat_sleep_ns, GPL-2.0): winpthreads' clock_nanosleep
+ * takes CLOCK_REALTIME only (EINVAL otherwise), so the loop below spun forever after a port's first
+ * buffer: no sound, two cores busy, and closing the movie's port after the intro waited on that port's
+ * lock forever (black screen at character creation, 2026-10-26). A high-resolution timer per thread
+ * (Windows 10 1803+), a plain one before. */
+static __thread HANDLE sleep_timer;
+static void sleep_ns(uint64_t ns) {
+    if (!ns) { SwitchToThread(); return; }
+    if (!sleep_timer) {
+        sleep_timer=CreateWaitableTimerExW(NULL,NULL,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+        if (!sleep_timer) sleep_timer=CreateWaitableTimerExW(NULL,NULL,0,TIMER_ALL_ACCESS);
+    }
+    LARGE_INTEGER due;
+    due.QuadPart=-(LONGLONG)((ns+99)/100); /* relative, 100 ns units */
+    if (sleep_timer && SetWaitableTimer(sleep_timer,&due,0,NULL,NULL,FALSE)) WaitForSingleObject(sleep_timer,INFINITE);
+    else Sleep((DWORD)((ns+999999)/1000000));
+}
+static void sleep_until(uint64_t deadline) {
+    for (uint64_t now=now_ns(); now<deadline; now=now_ns()) sleep_ns(deadline-now);
+}
+#else
 static void sleep_until(uint64_t deadline) {
     struct timespec t={(time_t)(deadline/1000000000u),(long)(deadline%1000000000u)};
     while (clock_nanosleep(CLOCK_MONOTONIC,TIMER_ABSTIME,&t,NULL)) {}
 }
+#endif
 static int sdl_audio(void) {
     if (sdl_ready<0) {
         const char *mode=getenv("BB_AUDIO");

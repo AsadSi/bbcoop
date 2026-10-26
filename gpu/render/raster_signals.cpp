@@ -261,6 +261,11 @@ bool Rasterizer::WriteTimestampOnGpu(VAddr address, bool end_of_pipe) {
     if (!enabled || !VideoCore::GuestInPlace() || address % 8 != 0) {
         return false;
     }
+    // bbcoop: as WriteLabelOnGpu: an address outside the guest chunks is written by the CPU (the GPU's
+    // write would go to a VRAM copy the game never reads).
+    if (!buffer_cache.GuestChunkSource(address, 8)) {
+        return false;
+    }
     if (!timestamps) {
         timestamps = std::make_unique<GpuTimestamps>(instance, scheduler, buffer_cache);
     }

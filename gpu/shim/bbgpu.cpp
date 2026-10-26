@@ -35,6 +35,7 @@
 #include "core/signals.h"
 #include "sdl_window.h"
 #include "render/rasterizer.h"
+#include "render/vk_frame_capture.h" // bbcoop: bbgpu_flips
 
 extern "C" {
 // runtime_memory.c
@@ -332,6 +333,11 @@ extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
         }
     }
     return 0;
+}
+
+// bbcoop: frames presented so far (src/runtime_hang_report.c reports a game that stopped presenting).
+extern "C" uint64_t bbgpu_flips(void) {
+    return Vulkan::FrameCapture::Flips();
 }
 
 extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {

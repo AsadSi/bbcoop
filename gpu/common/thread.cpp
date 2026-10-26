@@ -4,6 +4,10 @@
 #include <cstring>
 #include <ctime>
 #include <thread>
+#ifdef _WIN32
+#include <algorithm>
+#include <windows.h> // bbcoop: AccurateTimer
+#endif
 
 #include <pthread.h>
 #ifdef __APPLE__
@@ -94,6 +98,26 @@ void AccurateTimer::Start() {
 #ifdef __APPLE__
         // No clock_nanosleep on Darwin; steady_clock is its monotonic clock.
         std::this_thread::sleep_until(deadline);
+#elif defined(_WIN32)
+        // bbcoop: winpthreads' clock_nanosleep takes CLOCK_REALTIME only (EINVAL otherwise), so this
+        // never slept: the vblank thread ran unpaced. A high-resolution waitable timer per thread
+        // (Windows 10 1803+), a plain one before; steady_clock is QueryPerformanceCounter there.
+        static thread_local HANDLE timer = [] {
+            HANDLE t = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                              TIMER_ALL_ACCESS);
+            return t ? t : CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+        }();
+        for (auto left = deadline - std::chrono::steady_clock::now(); left.count() > 0;
+             left = deadline - std::chrono::steady_clock::now()) {
+            LARGE_INTEGER due;
+            due.QuadPart = -std::max<LONGLONG>(
+                1, std::chrono::duration_cast<std::chrono::nanoseconds>(left).count() / 100);
+            if (!timer || !SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+                std::this_thread::sleep_until(deadline);
+                break;
+            }
+            WaitForSingleObject(timer, INFINITE);
+        }
 #else
         const auto since_epoch = deadline.time_since_epoch();
         const timespec at{
