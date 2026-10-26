@@ -59,7 +59,11 @@ void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
 Frontend::WindowSDL* g_window = nullptr;
 
 namespace BbGnm { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+#ifdef _WIN32 // bbcoop: Supermedo/bloodborne_pc's movie player there (platform/avplayer_win)
+namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+#else
 namespace BbAvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+#endif
 
 namespace {
 struct Symbol {
@@ -312,7 +316,11 @@ extern "C" void bbgpu_run_window_loop(void) {
 extern "C" void bbgpu_register_kernel(void) {
     Core::Loader::SymbolsResolver resolver;
     BbKernel::RegisterEventQueue(&resolver);
+#ifdef _WIN32
+    Libraries::AvPlayer::RegisterLib(&resolver);
+#else
     BbAvPlayer::RegisterLib(&resolver);
+#endif
 }
 
 extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {

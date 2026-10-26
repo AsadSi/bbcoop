@@ -153,6 +153,11 @@ file(GLOB_RECURSE PLATFORM_SOURCES CONFIGURE_DEPENDS platform/*.cpp)
 # platform/win32: the POSIX subset over Win32 (with its headers in platform/win32/include).
 if (NOT WIN32)
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "/platform/win32/")
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "/platform/avplayer_win/")
+else()
+    # bbcoop: on Windows the movie player is Supermedo/bloodborne_pc's (shadPS4's, platform/avplayer_win):
+    # upstream 0.6's (platform/avplayer) lost the game's movie audio thread there (docs/bbcoop/windows.md).
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "/platform/avplayer/")
 endif()
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
 if (APPLE)
@@ -203,6 +208,9 @@ target_compile_definitions(bbgpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
 set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 target_include_directories(bbgpu PRIVATE . shim layer games cp ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include)
+if (WIN32) # bbcoop: Supermedo's movie player keeps its shadPS4 include paths (core/libraries/avplayer/...)
+    target_include_directories(bbgpu PRIVATE platform/avplayer_win)
+endif()
 if (WIN32)
     target_include_directories(bbgpu PUBLIC platform/win32/include)
     # bbcoop: xbyak is header-only and MSYS2 has no package: the version scripts/mac-deps.sh builds.
