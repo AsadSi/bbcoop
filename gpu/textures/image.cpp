@@ -230,14 +230,26 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     const vk::Format format = instance.GetSupportedFormat(info.pixel_format, format_features);
     const vk::ImageType vk_type = VulkanType(info.type);
-    const auto properties = instance.GetPhysicalDevice().getImageFormatProperties2(
-        vk::PhysicalDeviceImageFormatInfo2{
-            .format = format,
-            .type = vk_type,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = usage_flags,
-            .flags = create_flags,
-        });
+    vk::PhysicalDeviceImageFormatInfo2 format_info{
+        .format = format,
+        .type = vk_type,
+        .tiling = vk::ImageTiling::eOptimal,
+        .usage = usage_flags,
+        .flags = create_flags,
+    };
+    auto properties = instance.GetPhysicalDevice().getImageFormatProperties2(format_info);
+    // bbcoop, from Supermedo/bloodborne_pc (GPL-2.0): the storage usage is speculative. Drivers that
+    // refuse it for a format (AMD's Windows driver for BC1 and BC7 with format views) get the image
+    // without it: creating the unsupported combination anyway lost the device a few frames later.
+    if (properties.result == vk::Result::eErrorFormatNotSupported &&
+        (usage_flags & vk::ImageUsageFlagBits::eStorage)) {
+        format_info.usage = usage_flags & ~vk::ImageUsageFlagBits::eStorage;
+        properties = instance.GetPhysicalDevice().getImageFormatProperties2(format_info);
+        if (properties.result == vk::Result::eSuccess) {
+            usage_flags = format_info.usage;
+            format_features = FeaturesOf(usage_flags);
+        }
+    }
     if (properties.result == vk::Result::eErrorFormatNotSupported) {
         LOG_ERROR(Render_Vulkan, "image format {} type {} unsupported (flags {}, usage {})",
                   vk::to_string(format), vk::to_string(vk_type), vk::to_string(create_flags),
