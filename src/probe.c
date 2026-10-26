@@ -47,6 +47,7 @@ const char *seamless_hooks_install(unsigned char *image, uint64_t size); /* bbco
 const char *camera_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_camera.c */
 const char *messenger_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_messenger.c */
 const char *ik_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_ik.c */
+void runtime_hang_report_start(const unsigned char *image, uint64_t size); /* bbcoop: runtime_hang_report.c (Windows) */
 const char *papers_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_papers.c */
 const char *respec_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_respec.c */
 const char *context_lock_install(unsigned char *image, uint64_t size); /* bbcoop: runtime_context_lock.c */
@@ -791,6 +792,7 @@ int main(int argc, char **argv) {
 #endif
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
+    runtime_hang_report_start(image, round_page(size)); /* bbcoop: Windows; idle until the game shows frames */
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {
         protect(image + segments[i].address, round_page(segments[i].size), (unsigned)segments[i].flags);

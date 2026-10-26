@@ -266,6 +266,14 @@ static void set_host_name(const char *name) {
 #else
     pthread_setname_np(pthread_self(),host);
 #endif
+#ifdef _WIN32
+    /* bbcoop: the whole name for Windows' tools and the hang report (runtime_hang_report.c). */
+    typedef HRESULT (WINAPI *SetDescription)(HANDLE, PCWSTR);
+    static SetDescription set_description;
+    if (!set_description) set_description=(SetDescription)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),"SetThreadDescription");
+    wchar_t wide[64];
+    if (set_description && MultiByteToWideChar(CP_UTF8,0,name,-1,wide,64)) set_description(GetCurrentThread(),wide);
+#endif
 }
 static void run_guest(void *p) {
     GuestThread *t=p;
