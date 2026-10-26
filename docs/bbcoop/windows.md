@@ -212,6 +212,19 @@ Not taken: Mrsuss60's 7c0e5f0 crash workarounds (another tree layout, not Window
 Left as is: BBSC looks for a save under `%APPDATA%\shadPS4` before the port's save folder exists; only
 saves written during the run count, so it never picks one.
 
+## First PC run (2026-10-26, RX 5700 XT, Windows)
+- 2026.10.26: exit 0xC0000139 before the game started (llvm-mingw's libc++.dll; fixed in b767b0d).
+- 2026.10.26b: the game ran (menus, save loaded, audio over WASAPI) and then stopped on the game's own
+  panic "Mutex is not initialized" (DLLightMutex.cpp 126) as the title screen's idle movie
+  (`sprj_advertise.mp4`) started. Traced in the game's code: the DL thread object of the movie's audio
+  thread (`Mv_AudioPlayThread`, made at +0x28fe219) was destroyed (its mutex destructor +0x207ed40
+  clears the flag) before the new thread's entry (+0x263b1e0) locked it: the game tore the movie down
+  at once. Ruled out: FFmpeg opening that file on Windows (works under Wine), the winpthread mutexes,
+  the game's thread entry ABI. The movie player gave up silently there; f486342 logs why, and
+  `BB_GPU_LOG=info` shows every event it sends the game. Workaround meanwhile: don't leave the title
+  screen idle (press a button within half a minute); a new character's opening movie may hit it too.
+- Also in that log: AMD's driver refused storage usage on BC1/BC7 textures (fixed in 747b08d).
+
 ## Open
 - Not yet run on Windows: the game itself, online and the package. Those need the PC.
 - The C tests (`build.sh --test`) have no Windows path.
