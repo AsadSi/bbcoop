@@ -239,7 +239,7 @@ bool AvPlayerSource::Start() {
         return false;
     }
     if (m_video_stream_index) {
-        const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
+        const auto stream_index = m_video_stream_index.value() /* bbcoop: FFmpeg's index already */;
         const auto stream = m_avformat_context->streams[stream_index];
         avformat_seek_file(m_avformat_context.get(), m_video_stream_index.value(), 0, 0,
                            stream->duration, 0);
@@ -267,7 +267,7 @@ bool AvPlayerSource::Start() {
         }
     }
     if (m_audio_stream_index) {
-        const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
+        const auto stream_index = m_audio_stream_index.value() /* bbcoop: FFmpeg's index already */;
         const auto stream = m_avformat_context->streams[stream_index];
         avformat_seek_file(m_avformat_context.get(), m_audio_stream_index.value(), 0, 0,
                            stream->duration, 0);
@@ -564,13 +564,13 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
                     m_state.OnWarning(ORBIS_AVPLAYER_ERROR_WAR_LOOPING_BACK);
                     avio_seek(m_avformat_context->pb, 0, SEEK_SET);
                     if (m_video_stream_index.has_value()) {
-                        const auto index = m_streams[m_video_stream_index.value()].ffmpeg_index;
+                        const auto index = m_video_stream_index.value() /* bbcoop: FFmpeg's index already */;
                         const auto stream = m_avformat_context->streams[index];
                         avformat_seek_file(m_avformat_context.get(), index, 0, 0, stream->duration,
                                            0);
                     }
                     if (m_audio_stream_index.has_value()) {
-                        const auto index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
+                        const auto index = m_audio_stream_index.value() /* bbcoop: FFmpeg's index already */;
                         const auto stream = m_avformat_context->streams[index];
                         avformat_seek_file(m_avformat_context.get(), index, 0, 0, stream->duration,
                                            0);
@@ -667,15 +667,16 @@ Frame AvPlayerSource::PrepareVideoFrame(GuestBuffer buffer, const AVFrame& frame
     auto p_buffer = buffer.GetBuffer();
     Videodec::CopyNV12Data(p_buffer, buffer.Size(), frame);
 
-    const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
+    const auto stream_index = m_video_stream_index.value() /* bbcoop: FFmpeg's index already */;
     const auto stream = m_avformat_context->streams[stream_index];
     const auto timestamp = FrameTimestampMillis(frame, stream->time_base);
 
     const auto width = Common::AlignUp<u32>(frame.width, 16);
     const auto pitch = Common::AlignUp<u32>(frame.width, 64);
     const auto height = Common::AlignUp<u32>(frame.height, 16);
+    // bbcoop: CopyNV12Data writes rows of `pitch` bytes: all of them changed.
     Core::Memory::Instance()->InvalidateMemory(reinterpret_cast<VAddr>(p_buffer),
-                                               (width * height * 3) / 2);
+                                               (pitch * height * 3) / 2);
 
     return Frame{
         .buffer = std::move(buffer),
@@ -804,7 +805,7 @@ Frame AvPlayerSource::PrepareAudioFrame(GuestBuffer buffer, const AVFrame& frame
     const auto size = frame.ch_layout.nb_channels * frame.nb_samples * sizeof(u16);
     std::memcpy(p_buffer, frame.data[0], size);
 
-    const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
+    const auto stream_index = m_audio_stream_index.value() /* bbcoop: FFmpeg's index already */;
     const auto stream = m_avformat_context->streams[stream_index];
     const auto timestamp = FrameTimestampMillis(frame, stream->time_base);
 

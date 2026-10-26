@@ -172,8 +172,24 @@ bool AvPlayerState::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
 
 // Called inside GAME thread
 bool AvPlayerState::Start() {
-    std::unique_lock lock(m_source_mutex);
-    if (m_current_state == AvState::Ready || m_current_state == AvState::Stop || Stop()) {
+    {
+        std::unique_lock lock(m_source_mutex);
+        // bbcoop: no source (closed meanwhile), or no streams yet / failed: nothing to start. A
+        // playback under way is stopped here, under the lock already held: Stop() takes it again
+        // (shared), which waited forever behind this thread's own write lock.
+        const AvState current = m_current_state;
+        if (m_up_source == nullptr || current == AvState::Unknown || current == AvState::Initial ||
+            current == AvState::AddingSource || current == AvState::Error) {
+            LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
+            return false;
+        }
+        if (current != AvState::Ready && current != AvState::Stop) {
+            m_up_source->Stop();
+            if (!SetState(AvState::Stop)) {
+                LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
+                return false;
+            }
+        }
         m_eof_stop_event_sent = false;
         SetState(AvState::Starting);
         if (!m_up_source->Start()) {
@@ -182,12 +198,10 @@ bool AvPlayerState::Start() {
             return false;
         }
         SetState(AvState::Play);
-        OnPlaybackStateChanged(AvState::Play);
-        return true;
     }
-
-    LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
-    return false;
+    // bbcoop: told after the lock is released; the game's callback may call the player back.
+    OnPlaybackStateChanged(AvState::Play);
+    return true;
 }
 
 // Called inside GAME thread
