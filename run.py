@@ -282,6 +282,11 @@ def main():
                    '--patches-config', env.get('BB_PATCHES_CONFIG', data / 'patches.json'))
         # The GPU library's defaults as run.sh sets them (its comments say why).
         env.setdefault('BB_PREUPLOAD', '1')
+        # bbcoop: end-of-pipe labels written by a CPU thread after the GPU, as run.sh does on macOS and
+        # the GPU library on GFX8: written by the GPU (AMD buffer markers into the game's imported
+        # memory) the game stalled on a black screen at character creation after the intro on an
+        # RX 5700 XT (2026-10-26), as upstream #203 on an RX 580. BB_GPU_LABELS=1: by the GPU.
+        env.setdefault('BB_GPU_LABELS', '0')
         if not env.get('BB_PC_MODEL'):
             name = tool_output([str(caps), '--device']).partition('\t')[2]
             env['BB_PC_MODEL'] = '1'
