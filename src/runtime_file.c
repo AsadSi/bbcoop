@@ -17,6 +17,9 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <windows.h> /* bbcoop: GetLastError in read_retrying */
+#endif
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define MAX_FILES 1024
 #define MAX_MOUNTS 64 /* app0, 16 save data slots, 16 add-ons and the rest */
@@ -546,6 +549,9 @@ static ssize_t read_retrying(int h,void *buffer,uint64_t size,int64_t offset,int
     ssize_t n=-1;
     for (int attempt=0; attempt<8; ++attempt) {
         n=positional ? pread(h,buffer,size,offset) : read(h,buffer,size);
+#ifdef _WIN32
+        if (n<0 && GetLastError()==ERROR_NOACCESS) errno=EFAULT; /* bbcoop: the C runtime's read says EINVAL */
+#endif
         if (n>=0 || errno!=EFAULT) break;
         touch_for_write(buffer,size);
     }

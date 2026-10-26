@@ -88,8 +88,10 @@ void Commit(const Section& section, uint64_t offset, uint64_t size) {
 void MapView(uintptr_t start, uintptr_t end, int fd, uint64_t offset, DWORD protect) {
     const Section& section = sections.at(fd);
     Commit(section, offset, end - start); // bbcoop
-    // A view cannot start without access; protections change after.
-    const DWORD initial = protect == PAGE_NOACCESS ? PAGE_READWRITE : protect;
+    // A view cannot start without access; protections change after. bbcoop: and never above the
+    // protection it was mapped with (STATUS_SECTION_PROTECTION): it starts with all of them, so a
+    // mapping made read-only and later writable or executable can be changed (as on Linux).
+    const DWORD initial = PAGE_EXECUTE_READWRITE;
     if (!MapViewOfFile3(section.handle, GetCurrentProcess(), reinterpret_cast<void*>(start), offset,
                         end - start, MEM_REPLACE_PLACEHOLDER, initial, nullptr, 0)) {
         std::fprintf(stderr, "Memory: view of section %d offset %#llx (of %#llx) at %#llx failed\n", fd,
