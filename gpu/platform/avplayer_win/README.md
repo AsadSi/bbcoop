@@ -17,3 +17,8 @@ Changed here (marked `bbcoop`), from a review of the copy (2026-10-26):
 - The decoded frame's GPU invalidation covered `width` (aligned to 16) bytes a row; `CopyNV12Data` writes
   `pitch` (aligned to 64).
 - The stored stream indexes are FFmpeg's; six places looked them up again in the list of supported streams.
+- The game froze on a black screen after the intro movie (2026-10-26). Fixed: a stop reaches a decoder
+  that another thread is already joining (`gpu/shim/core/libraries/kernel/threads.h`); `Stop()`,
+  `Pause()` and `Resume()` tell the game after releasing the source lock, and `Stop()` holds it
+  exclusively while it clears the frames; a stop after the threads ended by themselves still clears
+  what they left; events are emitted outside the event lock, and none while the player closes.

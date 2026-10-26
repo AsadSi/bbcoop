@@ -26,6 +26,8 @@ public:
             func(stop);
             done->store(true);
         });
+        std::scoped_lock lock{mutex};
+        stop_source = thread.get_stop_source(); // bbcoop: see Stop()
     }
     // A thread may stop its own Thread object (AvPlayer does); it detaches instead of joining.
     // AvPlayer joins one thread from two at once (Stop and the demuxer's end): the first takes the
@@ -64,8 +66,12 @@ public:
     void Stop() {
         {
             std::scoped_lock lock{mutex};
+            // bbcoop: the stop is asked for even when another thread is joining this one (it took
+            // the jthread): the movie's demuxer joins the video decoder at the end of the file while
+            // the decoder waits for a buffer the game no longer returns once it stops the movie;
+            // without the stop neither returned (Windows, 2026-10-26: black screen after the intro).
+            stop_source.request_stop();
             if (!thread.joinable()) return;
-            thread.request_stop();
         }
         Join();
     }
@@ -73,6 +79,7 @@ public:
 private:
     mutable std::mutex mutex;
     std::jthread thread;
+    std::stop_source stop_source{std::nostopstate}; // bbcoop: the running thread's, kept by Run
     std::shared_ptr<std::atomic<bool>> finished; // bbcoop: for a join that failed
 };
 } // namespace Libraries::Kernel

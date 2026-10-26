@@ -304,9 +304,10 @@ bool AvPlayerSource::Start() {
 bool AvPlayerSource::Stop() {
     std::unique_lock lock(m_state_mutex);
 
+    // bbcoop: threads that ended by themselves (end of the file) leave frames queued; they are
+    // cleared too, or IsActive() stayed true and the game never got StateStop.
     if (!HasRunningThreads()) {
-        LOG_WARNING(Lib_AvPlayer, "Could not stop playback: already stopped.");
-        return false;
+        LOG_INFO(Lib_AvPlayer, "Stop: the threads have ended; clearing what they left");
     }
 
     if (m_up_data_streamer) {

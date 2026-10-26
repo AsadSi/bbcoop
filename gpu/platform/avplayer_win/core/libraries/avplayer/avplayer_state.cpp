@@ -113,6 +113,7 @@ AvPlayerState::AvPlayerState(const AvPlayerInitData& init_data)
 }
 
 AvPlayerState::~AvPlayerState() {
+    m_closing = true; // bbcoop: no more events to the game (EmitEvent)
     {
         std::unique_lock lock(m_source_mutex);
         m_up_source.reset();
@@ -220,6 +221,7 @@ bool AvPlayerState::Pause() {
     if (!SetState(AvState::Pause)) {
         return false;
     }
+    lock.unlock(); // bbcoop: the game's callback may close the player or call it back (its lock)
     OnPlaybackStateChanged(AvState::Pause);
     return true;
 }
@@ -234,6 +236,7 @@ bool AvPlayerState::Resume() {
     m_up_source->Resume();
     const auto state = m_previous_state.load();
     SetState(state);
+    lock.unlock(); // bbcoop: the game's callback may close the player or call it back (its lock)
     OnPlaybackStateChanged(state);
     return true;
 }
@@ -290,7 +293,8 @@ bool AvPlayerState::EnableStream(u32 stream_index) {
 
 // Called inside GAME thread
 bool AvPlayerState::Stop() {
-    std::shared_lock lock(m_source_mutex);
+    // bbcoop: exclusive: Source::Stop clears the frames GetVideoData/GetAudioData hand out.
+    std::unique_lock lock(m_source_mutex);
     if (m_up_source == nullptr || m_current_state == AvState::Stop) {
         return false;
     }
@@ -301,6 +305,7 @@ bool AvPlayerState::Stop() {
         return false;
     }
     m_eof_stop_event_sent = true;
+    lock.unlock(); // bbcoop: the game's callback may close the player or call it back (its lock)
     OnPlaybackStateChanged(AvState::Stop);
     return true;
 }
@@ -441,7 +446,7 @@ std::optional<bool> AvPlayerState::OnBufferingCheckEvent(u32 num_frames) {
 void AvPlayerState::EmitEvent(AvPlayerEvents event_id, void* event_data) {
     LOG_INFO(Lib_AvPlayer, "Sending event to the game: id = {}", magic_enum::enum_name(event_id));
     const auto callback = m_init_data.event_replacement.event_callback;
-    if (callback) {
+    if (callback && !m_closing) { // bbcoop
         const auto ptr = m_init_data.event_replacement.object_ptr;
         callback(ptr, event_id, 0, event_data);
     }
@@ -453,9 +458,11 @@ void AvPlayerState::ProcessEvent() {
         return;
     }
 
-    std::lock_guard guard(m_event_handler_mutex);
-
-    auto event = m_event_queue.Pop();
+    // bbcoop: held for the pop only: the game may close the player from the event's callback.
+    auto event = [this] {
+        std::lock_guard guard(m_event_handler_mutex);
+        return m_event_queue.Pop();
+    }();
     if (!event.has_value()) {
         return;
     }
