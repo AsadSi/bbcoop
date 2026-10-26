@@ -20,5 +20,4 @@ Changed here (marked `bbcoop`), from a review of the copy (2026-10-26):
 - The game froze on a black screen after the intro movie (2026-10-26). Fixed: a stop reaches a decoder
   that another thread is already joining (`gpu/shim/core/libraries/kernel/threads.h`); `Stop()`,
   `Pause()` and `Resume()` tell the game after releasing the source lock, and `Stop()` holds it
-  exclusively while it clears the frames; a stop after the threads ended by themselves still clears
-  what they left; events are emitted outside the event lock, and none while the player closes.
+  exclusively while it clears the frames; events are emitted outside the event lock, and none while the player closes.

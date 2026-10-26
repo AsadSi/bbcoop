@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdio>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
@@ -378,6 +379,8 @@ void AvPlayerState::OnError() {
 }
 
 void AvPlayerState::OnEOF() {
+    std::printf("Movie: end of the file\n"); // bbcoop
+    std::fflush(stdout);
     SetState(AvState::EndOfFile);
 }
 
@@ -445,6 +448,8 @@ std::optional<bool> AvPlayerState::OnBufferingCheckEvent(u32 num_frames) {
 // Called inside CONTROLLER thread
 void AvPlayerState::EmitEvent(AvPlayerEvents event_id, void* event_data) {
     LOG_INFO(Lib_AvPlayer, "Sending event to the game: id = {}", magic_enum::enum_name(event_id));
+    std::printf("Movie: event %s to the game\n", std::string(magic_enum::enum_name(event_id)).c_str()); // bbcoop
+    std::fflush(stdout);
     const auto callback = m_init_data.event_replacement.event_callback;
     if (callback && !m_closing) { // bbcoop
         const auto ptr = m_init_data.event_replacement.object_ptr;

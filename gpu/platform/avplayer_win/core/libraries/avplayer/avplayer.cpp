@@ -7,7 +7,13 @@
 #include "core/libraries/avplayer/avplayer_impl.h"
 #include "core/libraries/libs.h"
 
+#include <atomic>
+#include <cstdio>
 #include <string_view>
+
+// bbcoop: the movie's sequence in every log (Windows; no BB_GPU_LOG needed): the game's calls and
+// what they returned, so a stuck or black movie shows where it stopped.
+#define BB_MOVIE_TRACE(...) (std::printf("Movie: " __VA_ARGS__), std::printf("\n"), std::fflush(stdout))
 
 namespace Libraries::AvPlayer {
 
@@ -16,7 +22,9 @@ s32 PS4_SYSV_ABI sceAvPlayerAddSource(AvPlayerHandle handle, const char* filenam
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
-    return handle->AddSource(filename);
+    const s32 result = handle->AddSource(filename);
+    BB_MOVIE_TRACE("AddSource %s -> %#x", filename, unsigned(result));
+    return result;
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerAddSourceEx(AvPlayerHandle handle, AvPlayerUriType uri_type,
@@ -26,7 +34,9 @@ s32 PS4_SYSV_ABI sceAvPlayerAddSourceEx(AvPlayerHandle handle, AvPlayerUriType u
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
     const auto path = std::string_view(source_details->uri.name, source_details->uri.length);
-    return handle->AddSourceEx(path, source_details->source_type);
+    const s32 result = handle->AddSourceEx(path, source_details->source_type);
+    BB_MOVIE_TRACE("AddSourceEx %.*s -> %#x", int(path.size()), path.data(), unsigned(result));
+    return result;
 }
 
 int PS4_SYSV_ABI sceAvPlayerChangeStream() {
@@ -39,7 +49,9 @@ s32 PS4_SYSV_ABI sceAvPlayerClose(AvPlayerHandle handle) {
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
+    BB_MOVIE_TRACE("Close");
     delete handle;
+    BB_MOVIE_TRACE("Close done");
     return ORBIS_OK;
 }
 
@@ -89,7 +101,12 @@ bool PS4_SYSV_ABI sceAvPlayerGetVideoData(AvPlayerHandle handle, AvPlayerFrameIn
     if (handle == nullptr || video_info == nullptr) {
         return false;
     }
-    return handle->GetVideoData(*video_info);
+    const bool got = handle->GetVideoData(*video_info);
+    static std::atomic<u32> frames{0};
+    if (got && (frames.fetch_add(1) % 600) == 0) {
+        BB_MOVIE_TRACE("video frame given to the game (every 600th shown)");
+    }
+    return got;
 }
 
 bool PS4_SYSV_ABI sceAvPlayerGetVideoDataEx(AvPlayerHandle handle,
@@ -165,7 +182,9 @@ s32 PS4_SYSV_ABI sceAvPlayerPause(AvPlayerHandle handle) {
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
-    return handle->Pause();
+    const s32 result = handle->Pause();
+    BB_MOVIE_TRACE("Pause -> %#x", unsigned(result));
+    return result;
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerPostInit(AvPlayerHandle handle, AvPlayerPostInitData* data) {
@@ -186,7 +205,9 @@ s32 PS4_SYSV_ABI sceAvPlayerResume(AvPlayerHandle handle) {
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
-    return handle->Resume();
+    const s32 result = handle->Resume();
+    BB_MOVIE_TRACE("Resume -> %#x", unsigned(result));
+    return result;
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerSetAvSyncMode(AvPlayerHandle handle, AvPlayerAvSyncMode sync_mode) {
@@ -226,7 +247,10 @@ s32 PS4_SYSV_ABI sceAvPlayerStart(AvPlayerHandle handle) {
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
-    return handle->Start();
+    BB_MOVIE_TRACE("Start");
+    const s32 result = handle->Start();
+    BB_MOVIE_TRACE("Start -> %#x", unsigned(result));
+    return result;
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerStop(AvPlayerHandle handle) {
@@ -236,7 +260,10 @@ s32 PS4_SYSV_ABI sceAvPlayerStop(AvPlayerHandle handle) {
     }
     // bbport: guest code calls this and cannot unwind a C++ exception.
     try {
-        return handle->Stop();
+        BB_MOVIE_TRACE("Stop");
+        const s32 result = handle->Stop();
+        BB_MOVIE_TRACE("Stop -> %#x", unsigned(result));
+        return result;
     } catch (const std::exception& error) {
         LOG_ERROR(Lib_AvPlayer, "Stop failed: {}", error.what());
         return ORBIS_AVPLAYER_ERROR_OPERATION_FAILED;
