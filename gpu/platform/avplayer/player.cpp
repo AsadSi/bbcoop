@@ -66,6 +66,7 @@ void Player::Emit(AvPlayerEvents event, void* data) {
         AutoStart(); // the player starts itself instead of telling the game
         return;
     }
+    LOG_INFO(Lib_AvPlayer, "event {:#x} to the game", u32(event)); // bbcoop: the movie's sequence
     if (game_events.event_callback) {
         game_events.event_callback(game_events.object_ptr, event, 0, data);
     }
@@ -183,6 +184,7 @@ void Player::Handle(const Event& event) {
             SetState(State::Ready);
             Announce(State::Ready);
         } else {
+            LOG_ERROR(Lib_AvPlayer, "the movie has no stream to play"); // bbcoop: said, not silent
             OnWarning(ErrorNotSupported);
             SetState(State::Error);
         }
