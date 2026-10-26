@@ -8,3 +8,12 @@ upstream 0.6's player in `platform/avplayer`.
 Why: on Windows the game's movie audio thread (`Mv_AudioPlayThread`) found its object destroyed with
 upstream 0.6's player ("Mutex is not initialized", docs/bbcoop/windows.md), and Supermedo's Windows builds
 play the same movies with this one.
+
+Changed here (marked `bbcoop`), from a review of the copy (2026-10-26):
+- `AvPlayerState::Start()` stopped a playback under way through `Stop()`, which takes the source lock again
+  (shared) behind its own write lock: it hangs. It also started with no source (closed meanwhile) or
+  before the streams were known. Now it refuses those, stops under the lock it holds, and tells the game
+  "Play" after releasing it.
+- The decoded frame's GPU invalidation covered `width` (aligned to 16) bytes a row; `CopyNV12Data` writes
+  `pitch` (aligned to 64).
+- The stored stream indexes are FFmpeg's; six places looked them up again in the list of supported streams.
