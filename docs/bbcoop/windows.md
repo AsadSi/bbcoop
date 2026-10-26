@@ -145,8 +145,12 @@ needs soulstruct in the Python that runs `run.py`, or in `BB_RE_PYTHON`.
 `bash packaging/windows/package.sh` on macOS or Linux runs `package-cross.sh`:
 - the executables from `scripts/windows/cross-build.sh`, including `shadnet.exe` (server/, cross-built
   with MSYS2's Qt 6.12 and Homebrew's Qt tools and the Mac server build's protoc) in `bin/shadnet/`;
-- every DLL they load, followed through the DLLs' imports in the MSYS2 sysroot and llvm-mingw; it
-  stops if one is neither there nor Windows' own;
+- every DLL they load, followed through the DLLs' imports in the MSYS2 sysroot, with MSYS2's own C++
+  runtime (libc++, libunwind, winpthread, libomp), not llvm-mingw's; it stops if one is neither there nor
+  Windows' own, and `scripts/windows/check_imports.py` stops it if any imported function is missing from
+  the shipped DLL. The first PC run (2026-10-26) exited 0xC0000139 ("entry point not found"): MSYS2's
+  DLLs import `_Unwind_Resume` from libc++.dll, which llvm-mingw's libc++.dll lacks. Wine never saw it
+  (it stubs missing imports);
 - PyInstaller cannot freeze for Windows from a Mac, so the package carries python.org's Windows Python
   3.13 (its MSIs unpacked with `msiextract`, `brew install msitools`) with soulstruct 2.6.0 and the
   Mac respec Python's versions of its wheels; `Bloodborne.exe` is `packaging/windows/launcher.c`,
@@ -158,7 +162,8 @@ The MSYS2 path (`package.sh` in MSYS2, `install.ps1`) still freezes with PyInsta
 Checked under Wine 10 (Debian's, in an x86-64 Docker container; Homebrew's Wine is disabled):
 `shadnet.exe` starts and creates an account through `bbcoop_online.make_account`; `bb-probe.exe` and
 `bb-gpu-capabilities.exe` load every DLL; the launcher window opens from `Bloodborne.exe`; tkinter,
-soulstruct and the launcher's modules import. numpy stops in Wine's own `ucrtbase` (no `crealf`), so the
+soulstruct and the launcher's modules import; `run.py --cpu-only` with the game runs its code (16
+threads, audio, every bbcoop hook, the red-zone sites) up to the first GPU call, as CPU-only does. numpy stops in Wine's own `ucrtbase` (no `crealf`), so the
 respec tool is not checked there; real Windows has it.
 
 ## Checking from the Mac

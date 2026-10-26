@@ -14,8 +14,14 @@ command -v msiextract >/dev/null || { echo 'Need msiextract: brew install msitoo
 bash scripts/windows/cross-build.sh
 cross=$PWD/out/windows-cross
 tools=$(echo "$cross"/llvm-mingw-*/bin)
-mingw_bin=$(echo "$cross"/llvm-mingw-*/x86_64-w64-mingw32/bin)
 sysroot_bin=$cross/sysroot/clang64/bin
+# MSYS2's C++ runtime, not the toolchain's: MSYS2's DLLs import _Unwind_Resume from its libc++.dll,
+# which the toolchain's lacks (Windows then refuses to start the game: 0xC0000139).
+# libomp.dll (libsoxr, FFmpeg) is from the same LLVM.
+runtime_bin=$cross/runtime/clang64/bin
+if [[ ! -f $runtime_bin/libomp.dll ]]; then
+    python3 -I scripts/windows/msys2_fetch.py "$cross/pkgs" "$cross/runtime" libc++ libunwind libwinpthread llvm-openmp | tail -1
+fi
 
 # Windows Python with tkinter (core, exe, lib, tcltk), and soulstruct's wheels for it: the versions
 # the Mac's respec Python runs.
@@ -49,11 +55,11 @@ cp "$cross/sysroot/clang64/share/qt6/plugins/sqldrivers/qsqlite.dll" "$dest/bin/
 cp server/worlds.cfg server/scoreboards.cfg "$dest/bin/shadnet/"
 
 # Every DLL the executables load, followed through the DLLs' own imports: from the MSYS2 sysroot or
-# the toolchain (libc++, libunwind, winpthread), else it must be Windows' own.
+# MSYS2's C++ runtime (libc++, libunwind, winpthread), else it must be Windows' own.
 system_dll='^(api-ms-win-.*|ext-ms-.*|kernel32|user32|gdi32|shell32|advapi32|ws2_32|iphlpapi|crypt32|bcrypt|bcryptprimitives|dbghelp|ole32|oleaut32|shlwapi|winmm|version|secur32|ncrypt|imm32|setupapi|cfgmgr32|hid|uxtheme|dwmapi|winhttp|netapi32|userenv|mpr|ntdll|comdlg32|comctl32|rpcrt4|msvcrt|ucrtbase|usp10|dnsapi|d3d9|d3d11|d3d12|dxgi|dcomp|dwrite|d2d1|mf|mfplat|mfreadwrite|avrt|psapi|powrprof|wtsapi32|authz|wldap32|normaliz|winspool.drv|dxva2|evr|propsys|sspicli|wintrust|ksuser|mswsock|opengl32|glu32|msimg32|wsock32|gdiplus|vcruntime140|vcruntime140_1)\.dll$'
 find_dll() {
     local name=$1 dir found
-    for dir in "$mingw_bin" "$sysroot_bin"; do
+    for dir in "$runtime_bin" "$sysroot_bin"; do
         found=$(find "$dir" -maxdepth 1 -iname "$name" -print -quit)
         [[ -n $found ]] && { echo "$found"; return; }
     done
@@ -80,6 +86,10 @@ bundle "$dest/bin" "$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe"
 bundle "$dest/bin/shadnet" "$dest/bin/shadnet/shadnet.exe" "$dest/bin/shadnet/sqldrivers/qsqlite.dll"
 # qsqlite.dll's own DLLs sit beside shadnet.exe, where Windows looks for them first.
 for dll in "$dest"/bin/shadnet/sqldrivers/*.dll; do [[ $(basename "$dll") == qsqlite.dll ]] || mv "$dll" "$dest/bin/shadnet/"; done
+
+# Every function imported from a shipped DLL is exported by it (Wine does not check that).
+python3 -I scripts/windows/check_imports.py "$tools/llvm-readobj" "$dest" || {
+    echo 'A DLL in the package lacks a function the executables import (above)' >&2; exit 1; }
 
 cp -R scripts patches "$dest/"
 cp launcher/*.py launcher/bloodborne.ico launcher/bloodborne.png "$dest/launcher/"

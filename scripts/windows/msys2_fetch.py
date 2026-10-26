@@ -20,10 +20,10 @@ with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
 # The cross toolchain (llvm-mingw) brings its own C runtime, headers and C++ library.
 SKIP = re.compile(P + r'(crt|headers|libc\+\+|libunwind|libwinpthread|winpthreads|compiler-rt|clang|llvm|lld|gcc|python|cmake|ninja|pkgconf|tcl|tk|ncurses|readline|gettext-tools)')
 order, seen = [], set()
-def add(dep):
+def add(dep, wanted=False):
     name = re.split('[<>=]', dep)[0]
     name = name if name in db else provides.get(name, name)
-    if name in seen or SKIP.match(name):
+    if name in seen or (SKIP.match(name) and not wanted):  # bbcoop: a package asked for by name is fetched
         return
     if name not in db:
         print('missing', name); return
@@ -32,7 +32,7 @@ def add(dep):
         add(d)
     order.append(name)
 for w in wanted:
-    add(P + w)
+    add(P + w, True)
 print(len(order), 'packages')
 sysroot.mkdir(parents=True, exist_ok=True)
 for name in order:
