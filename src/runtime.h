@@ -55,6 +55,9 @@ void runtime_wait_note(int kind, uint64_t ns);
  * up to its timer period (~15.6 ms by default). */
 void runtime_precise_sleep_ns(uint64_t ns);
 #endif
+/* bbcoop: gives the CPU to another ready thread (Windows: SwitchToThread; its sched_yield is Sleep(0),
+ * which yields to equal or higher priority only, and FMOD's threads run above normal there). */
+void runtime_yield(void);
 void runtime_wait_report(double frames);
 void runtime_guest_call_sites(uint64_t out[3]);
 /* bbport: times the game's heap asked for more memory (posix_mmap): a sign it leaks. */

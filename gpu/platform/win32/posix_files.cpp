@@ -256,8 +256,15 @@ ssize_t bb_pread(int fd, void* buffer, size_t size, int64_t offset) {
     at.Offset = DWORD(offset);
     at.OffsetHigh = DWORD(uint64_t(offset) >> 32);
     DWORD done = 0;
-    if (!ReadFile(file, buffer, DWORD(size > 0x7fffffff ? 0x7fffffff : size), &done, &at)) {
-        if (GetLastError() == ERROR_HANDLE_EOF) return 0;
+    // bbcoop: ReadFile at an offset moves the handle's position too; pread must not (a read() after it).
+    LARGE_INTEGER position{};
+    const bool kept = SetFilePointerEx(file, LARGE_INTEGER{}, &position, FILE_CURRENT);
+    const BOOL ok = ReadFile(file, buffer, DWORD(size > 0x7fffffff ? 0x7fffffff : size), &done, &at);
+    const DWORD error = GetLastError();
+    if (kept) SetFilePointerEx(file, position, nullptr, FILE_BEGIN);
+    if (!ok) {
+        if (error == ERROR_HANDLE_EOF) return 0;
+        SetLastError(error);
         SetErrnoFromWin32();
         return -1;
     }
@@ -270,7 +277,14 @@ ssize_t bb_pwrite(int fd, const void* buffer, size_t size, int64_t offset) {
     at.Offset = DWORD(offset);
     at.OffsetHigh = DWORD(uint64_t(offset) >> 32);
     DWORD done = 0;
-    if (!WriteFile(file, buffer, DWORD(size > 0x7fffffff ? 0x7fffffff : size), &done, &at)) {
+    // bbcoop: as bb_pread, the handle's position stays where it was.
+    LARGE_INTEGER position{};
+    const bool kept = SetFilePointerEx(file, LARGE_INTEGER{}, &position, FILE_CURRENT);
+    const BOOL ok = WriteFile(file, buffer, DWORD(size > 0x7fffffff ? 0x7fffffff : size), &done, &at);
+    const DWORD error = GetLastError();
+    if (kept) SetFilePointerEx(file, position, nullptr, FILE_BEGIN);
+    if (!ok) {
+        SetLastError(error);
         SetErrnoFromWin32();
         return -1;
     }
@@ -288,12 +302,20 @@ int bb_ftruncate(int fd, int64_t size) {
 }
 
 int bb_rename(const char* from, const char* to) {
-    if (!MoveFileExW(Wide(from).c_str(), Wide(to).c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        SetErrnoFromWin32();
-        return -1;
+    // bbcoop: another program holding the file a moment (Defender, the search indexer, OneDrive) fails
+    // the replace with ACCESS_DENIED or SHARING_VIOLATION; a save committed then was dropped. Retried.
+    for (int attempt = 0;; ++attempt) {
+        if (MoveFileExW(Wide(from).c_str(), Wide(to).c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            return 0;
+        }
+        const DWORD error = GetLastError();
+        if (attempt == 10 || (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION)) {
+            SetErrnoFromWin32();
+            return -1;
+        }
+        Sleep(10);
     }
-    return 0;
 }
 
 int bb_mkdir(const char* path, int) {

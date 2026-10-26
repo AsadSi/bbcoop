@@ -273,6 +273,9 @@ int posix_pthread_cond_wait(PthreadCondT* cond, PthreadMutexT* mutex) {
 int posix_pthread_cond_reltimedwait_np(PthreadCondT* cond, PthreadMutexT* mutex, u64 usec) {
     if (!cond || !*cond || !mutex || !*mutex) return 22;
     HeldMutex held{*mutex};
+#ifdef _WIN32 // bbcoop: libc++ waits whole milliseconds there and woke before the timeout ("no timeout")
+    usec += 1000;
+#endif
     const auto status = (*cond)->cond.wait_for(held, std::chrono::microseconds(usec));
     return status == std::cv_status::timeout ? 60 : 0; // ETIMEDOUT
 }
