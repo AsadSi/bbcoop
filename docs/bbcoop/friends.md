@@ -38,6 +38,17 @@ load your character and the guest arrives in the host's world. Any level can joi
 Everyone needs the same download: the launcher refuses to join a host on another build and says which
 builds you both have.
 
+**Chalice Dungeons:** every dungeon has its own layout, so a guest can't be pulled in from outside.
+1. The host makes the dungeon at the altar while online (an older dungeon, made before your server
+   kept them, has no glyph here: make a new one). Its glyph is in the altar's dungeon list.
+2. A guest who is still in the host's world sees "The host went into a Chalice Dungeon": leave with a
+   Silencing Blank, or quit to the title and Continue.
+3. The guest, in their own Hunter's Dream: altar, **Glyph**, type the host's glyph, enter.
+4. The bells ring by themselves in there; you join on the same layer. After that the guest follows
+   the host down the layers.
+A fixed chalice (Pthumeru, Hintertomb, Loran, Isz) is the same dungeon for everyone on your server, so
+a guest with that chalice can also do the ritual instead of typing the glyph.
+
 ## If it doesn't connect
 - Your list is empty: Tailscale must be connected on both computers, and the host's launcher must be
   open with Host picked.
