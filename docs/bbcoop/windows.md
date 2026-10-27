@@ -29,7 +29,7 @@ nothing has to be pushed. The Mac app and the zip must come from the same commit
 2. Windows Firewall asks once each for `python`, `shadnet` (when hosting) and `bb-probe`: tick
    **Private and Public** and click Allow. If you clicked away the question, Windows Security, Firewall &
    network protection, Allow an app through firewall, and tick both boxes for those.
-3. Load your character. The bells ring by themselves; the guest arrives in the host's world. Try both
+3. Load your character. The host rings the Beckoning Bell, the guest the Small Resonant Bell; the guest arrives in the host's world. Try both
    ways: the PC hosting, then the Mac hosting.
 
 **Logs to send back** (all inside `C:\bbcoop-windows`):

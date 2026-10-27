@@ -469,8 +469,6 @@ def game_environment(s):
         env["BB_NET_GEN"] = "20"
         if pool == "seamless" and s.get("online_bbsc"):
             env["BB_BBSC"] = "1"
-            if s.get("coop_mode") in ("host", "join"):  # bbcoop: fast join, the bells ring by themselves
-                env["BB_COOP_ROLE"] = s["coop_mode"]
         if pool == "huntersdream":
             # run.sh turns these into the backend's addresses and the host overrides.
             env["BB_NET_BACKEND"] = "thd"

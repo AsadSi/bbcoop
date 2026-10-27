@@ -32,8 +32,8 @@ Launcher, **Online co-op**:
   "<your name> — hosting". Keep the launcher open while anyone plays.
 - **Join a game:** pick the host from the list (or type their address, 100.x.y.z), then Play.
 
-In the game the bells ring by themselves (the host's Beckoning Bell, the guests' Small Resonant Bell):
-load your character and the guest arrives in the host's world. Any level can join.
+In the game the host rings the Beckoning Bell and the guest the Small Resonant Bell, as in the game
+(both are in your inventory); the guest arrives in the host's world. Any level and any area can join.
 
 Everyone needs the same download: the launcher refuses to join a host on another build and says which
 builds you both have.
@@ -44,7 +44,7 @@ builds you both have.
 2. A guest who is still in the host's world sees "The host went into a Chalice Dungeon": leave with a
    Silencing Blank, or quit to the title and Continue.
 3. The guest, in their own Hunter's Dream: altar, **Glyph**, type the host's glyph, enter.
-4. The bells ring by themselves in there; you join on the same layer. After that the guest follows
+4. Both ring your bells in there; you join on the same layer. After that the guest follows
    the host down the layers.
 A fixed chalice (Pthumeru, Hintertomb, Loran, Isz) is the same dungeon for everyone on your server, so
 a guest with that chalice can also do the ritual instead of typing the glyph.

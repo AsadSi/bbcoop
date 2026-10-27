@@ -397,8 +397,6 @@ def game_environment(s):
             env['BB_THD_TOKEN'] = str(s.get('thd_token', ''))
         elif s.get('online_bbsc'):
             env['BB_BBSC'] = '1'
-            if s.get('coop_mode') in ('host', 'join'):  # bbcoop: fast join, the bells ring by themselves
-                env['BB_COOP_ROLE'] = s['coop_mode']
     if MAC and FROZEN:  # bbcoop: the Mac app's prebuilt port; this executable runs its scripts
         python = str(PORT_DIR / 'bin' / 'python3')
         env.update(BB_PREBUILT='1', BB_DATA_DIR=str(DATA_DIR), PYTHON=python, BB_RE_PYTHON=python,

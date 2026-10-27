@@ -21,7 +21,7 @@ Starting
 Playing together (launcher, Online co-op)
 - Host a game: this PC runs the server while the launcher is open. Friends see you in their list.
 - Join a game: pick the host from the list (or type their 100.x.y.z address), then PLAY.
-- The bells ring by themselves: just play, and the guest arrives in the host's world.
+- The host rings the Beckoning Bell, the guest the Small Resonant Bell; the guest arrives in the host's world.
 - When Windows Firewall asks about Bloodborne, python or shadnet: tick both Private and Public
   networks and click Allow. Without it nobody can join you.
 - Everyone needs the same download. The launcher says so when two builds differ.
