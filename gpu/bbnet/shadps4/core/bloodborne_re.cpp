@@ -1309,6 +1309,13 @@ void ApplyCrossMapSummonHostPlacement(const GuestRegisterSnapshot& registers) {
         host_placement_rewrite.result = "invalid_map";
         return;
     }
+    // bbcoop: a Chalice Dungeon summon (area 29) is a same-dungeon one, as vanilla: both players
+    // entered the dungeon by its glyph, and the game's own placement carries the layer (0x1d0a5a00);
+    // our map read has only 0x1d000000 (2026-10-27 19:33: the guest loaded Old Yharnam and died).
+    if ((host_placement_rewrite.candidate.packed_region >> 24) == 29) {
+        host_placement_rewrite.result = "chalice";
+        return;
+    }
     if (!ReadLocalSummonPlacement(host, host_placement_rewrite.result)) {
         return;
     }
@@ -1337,7 +1344,9 @@ void ApplyCrossMapSummonHostPlacement(const GuestRegisterSnapshot& registers) {
 // The kept host placement lives until the summoned reload has finished in the host map
 // (BbscConnectFirstReloadFinished), so the fork's forced warp in the handoff never runs meanwhile.
 std::optional<SummonPlacementDescriptor> BbscConnectFirstHost() {
-    if (!BbscConnectFirstEnabled() || !BbscConnectFirstPlacementFresh()) {
+    // bbcoop: never in a Chalice Dungeon (area 29; see GetSeamlessHostPlacementHeader).
+    if (!BbscConnectFirstEnabled() || !BbscConnectFirstPlacementFresh() ||
+        (GetCurrentPackedMap() >> 24) == 29) {
         return std::nullopt;
     }
     std::scoped_lock lock{seamless_placement_mutex};
@@ -9467,10 +9476,11 @@ void TickBbscStrandedGuest() {
     last_ms = now;
     const u64 global = GetGlobalState();
     const u64 me = GetLocalPlayerCharacter();
-    // Only a guest is ever stranded (Asad 2026-10-27: when the guest quit, the host "got kicked
-    // out of the world to his own world even though it already is his world"). A host, or anyone
-    // back in their own world, is not; joining (4) or being a guest (6) is what arms this.
-    static bool was_guest = false;
+    // Never for a host (Asad 2026-10-27: when the guest quit, the host "got kicked out of the world
+    // to his own world even though it already is his world"): hosting (3) or our own world disarms
+    // this, joining (4) or being a guest (6) arms it. Armed from the start: a save quit as a guest
+    // loads outside our own world with no session (2026-10-27 19:22, "stuck in a limbo").
+    static bool was_guest = true;
     const s32 state = GetSessionState();
     if (state == 4 || state == 6) {
         was_guest = true;
@@ -9548,11 +9558,9 @@ static_assert(sizeof(BbscShopLineupRow) == 0x20);
 static_assert(offsetof(BbscShopLineupRow, sell_quantity) == 0x14);
 static_assert(offsetof(BbscShopLineupRow, equip_type) == 0x17);
 
-constexpr std::array<BbscShopLineupRow, 4> BbscShopRows{{
-    {4016, 0, -1, -1, -1, -1, 0, 3, -1},  // Hunt Bell
-    {4121, 0, -1, -1, -1, -1, 0, 3, -1},  // Kin Bell
-    {11201, 0, -1, -1, -1, -1, 0, 3, -1}, // Bloodlust Bell
-    {4313, 0, -1, -1, -1, -1, 0, 3, -1},  // Duel Bell
+// bbcoop 2026-10-27: only the Duel Bell - the game's own bells are not sold, as in the game.
+constexpr std::array<BbscShopLineupRow, 1> BbscShopRows{{
+    {4313, 0, -1, -1, -1, -1, 0, 3, -1}, // Duel Bell
 }};
 
 // The list builder looks each lineup row up once to decide whether to include it, then the item
@@ -9562,7 +9570,7 @@ constexpr std::array<BbscShopLineupRow, 4> BbscShopRows{{
 // though BbscShopLineupRow::value is zero. Remember the four IDs selected by the active Bath
 // Messenger range and expose them at that one price-construction call site too. No other
 // ShopLineupParam user can see these synthetic rows.
-std::array<s32, BbscShopRows.size()> bbsc_shop_row_ids{-1, -1, -1, -1}; // game thread only
+std::array<s32, BbscShopRows.size()> bbsc_shop_row_ids{-1}; // game thread only
 bool BbscKitParamsReady();
 
 void PS4_SYSV_ABI BbscShopLineupResultHook(u64, const GuestRegisterSnapshot* registers) {
@@ -9728,8 +9736,8 @@ void InstallBbscQuitHook() {
                       ShopLineupGetResultOffset);
         } else {
             LOG_INFO(Debug,
-                     "BBSC shop: regular Bath Messenger adds Hunt, Kin, Bloodlust and Duel Bells "
-                     "for free (starter and regular Bath ranges; vanilla stock unchanged)");
+                     "BBSC shop: regular Bath Messenger adds the Duel Bell for free (starter and "
+                     "regular Bath ranges; vanilla stock unchanged)");
         }
     }
     static constexpr std::array<u8, 6> Prologue{0x55, 0x48, 0x89, 0xE5, 0x53, 0x50};
@@ -13681,6 +13689,7 @@ bool BbscKitParamsReady() {
 }
 std::vector<u64> bbsc_duel_bell_effect_rows; // SpEffect 7511 rows (every table copy)
 std::vector<u64> bbsc_blank_effect_rows;     // SpEffect 7 rows: the Silencing Blank (goods 111)
+std::vector<std::pair<u64, std::string_view>> bbsc_bell_rows; // goods rows of the bells anywhere
 std::vector<u64> bbsc_invadable_effect_rows; // SpEffect 9020 rows: "Bell Maiden" (invaders welcome)
 std::atomic<bool> bbsc_pvp_on{false};
 std::atomic<int> bbsc_pvp_request{-1}; // host side: a guest asked for this state (0 / 1)
@@ -13688,72 +13697,25 @@ std::atomic<int> bbsc_pvp_host_state{-1}; // guest side: the host's last state (
 std::atomic<s64> bbsc_pvp_host_state_ms{0};
 std::map<u64, u32> bbsc_pvp_original_team; // character -> its team before PvP
 
-// ---- The BBSC hunter's kit (2026-10-05) ---------------------------------------------------------
-// The user: "our own stuff - summoning, joining, pvp, invading - with our rules, including no insight
-// cost", given to every character (new ones too) into the carried items, vanilla bells hidden.
-// Each kit item is an unused goods slot that has item name / info / caption text slots (msg 10, 20,
-// 24); its row becomes a copy of the vanilla item it replaces (same refId: the same SpEffect, so the
-// game's own sign / search / leave code runs), then: no Insight (consumeHeroPoint +56 = 0), its own
-// icon and sort position, and no "ringing" form (replaceItemId_bySpEffect +100 / +104 = -1: the
-// vanilla forms 201/206/226 turn back into the vanilla bells). The vanilla bells and the Silencing
-// Blank stay in inventories but cannot be used any more (+68 enable bits cleared) and sort last;
-// their texts point at the kit (gen_messages.py).
+// ---- The hunter's bells (2026-10-05; bbcoop 2026-10-27: the game's own bells again) ---------------
+// Every character carries the game's own bells and Silencing Blank, plus BBSC's Duel Bell. BBSC's
+// kit replaced them with copies (Hunt, Kin, Bloodlust Bell, Parting Blank: goods 4016, 4121, 11201,
+// 11251) and took the originals out; Asad 2026-10-27: "use the original bells rather than the ones
+// from seamless coop". Saves holding the copies get the originals back (TickBbscDuelBellGive).
+// `ringing`: the form the game swaps a ringing bell for (replaceItemId_bySpEffect).
 struct BbscKitItem {
     u32 id;
-    u32 copy_of;  // the vanilla goods row it copies
-    u16 icon;
-    s32 sort_id;
+    u32 ringing;
     const char16_t* name;
 };
 constexpr BbscKitItem BbscKit[] = {
-    {4016, 200, 71, 240010, u"Hunt Bell"},       // Beckoning Bell (SpEffect 9000: search)
-    {4121, 205, 37, 240011, u"Kin Bell"},        // Small Resonant Bell (9005: cooperator sign)
-    {11201, 225, 70, 240012, u"Bloodlust Bell"}, // Sinister Resonant Bell (9025: invader sign)
-    {4313, 0, 7, 240013, u"Duel Bell"},          // own row, see PrepareBbscDuelBell
-    {11251, 111, 9, 240014, u"Parting Blank"},   // Silencing Blank (SpEffect 7: leave)
+    {200, 201, u"Beckoning Bell"},      // SpEffect 9000: search
+    {205, 206, u"Small Resonant Bell"}, // 9005: cooperator sign
+    {225, 226, u"Sinister Bell"},       // 9025: invader sign
+    {111, 0, u"Silencing Blank"},       // SpEffect 7: leave
+    {4313, 0, u"Duel Bell"},            // own row, see PrepareBbscDuelBell
 };
-constexpr u32 BbscHiddenVanilla[] = {200, 205, 225, 111};
 constexpr size_t GoodsRowSize = 108;
-
-// Enable bits (+68) of each vanilla source row as first seen. A kit row whose copy ran after its
-// source was already hidden (second table pass, param reload) would get +68 = 0: not usable
-// anywhere, i.e. "can't use the Kin Bell". Kept here so such a row is switched back on.
-std::array<std::atomic<u8>, std::size(BbscKit)> bbsc_kit_enable{};
-
-void PrepareBbscKitRows(u64 table) {
-    for (size_t i = 0; i < std::size(BbscKit); ++i) {
-        const BbscKitItem& item = BbscKit[i];
-        const u64 row = BbscParamRow(table, item.id, GoodsRowSize);
-        const u64 source = item.copy_of != 0 ? BbscParamRow(table, item.copy_of, GoodsRowSize) : 0;
-        if (row == 0 || (item.copy_of != 0 && source == 0)) {
-            continue;
-        }
-        if (source != 0 && ReadValue<u8>(source, 68) != 0) { // not hidden yet: still the original
-            bbsc_kit_enable[i].store(ReadValue<u8>(source, 68));
-            std::array<u8, GoodsRowSize> copy{};
-            std::memcpy(copy.data(), reinterpret_cast<const void*>(source), copy.size());
-            std::memcpy(reinterpret_cast<void*>(row), copy.data(), copy.size());
-        }
-        if (source != 0 && ReadValue<u8>(row, 68) == 0) {
-            const u8 enable = bbsc_kit_enable[i].load();
-            LOG_WARNING(Debug, "BBSC kit: goods {} row had no enable bits (source {} hidden first) - "
-                               "set to {:#x}", item.id, item.copy_of, enable != 0 ? enable : 0xFF);
-            WriteValue<u8>(row, 68, enable != 0 ? enable : 0xFF);
-        }
-        WriteValue<u8>(row, 56, 0);              // consumeHeroPoint: no Insight
-        WriteValue<u16>(row, 44, item.icon);     // iconId
-        WriteValue<s32>(row, 28, item.sort_id);  // sortId
-        WriteValue<s32>(row, 100, -1);           // replaceItemId_bySpEffect
-        WriteValue<s32>(row, 104, -1);           // replaceTriggerSpEffectId
-        WriteValue<u8>(row, 58, 0);              // goodsType: normal item (some slots were keys)
-    }
-    for (const u32 id : BbscHiddenVanilla) {
-        if (const u64 row = BbscParamRow(table, id); row != 0) {
-            WriteValue<u8>(row, 68, 0);       // usable nowhere
-            WriteValue<s32>(row, 28, 999000); // sorted last
-        }
-    }
-}
 
 // Kit rows, the Duel Bell's row and its SpEffect in the given tables. `publish`: also hand the
 // SpEffect rows to the game thread (the PvP / Blank / Bell Maiden checks) - only the full scan does
@@ -13768,6 +13730,7 @@ bool PrepareBbscDuelBellIn(const std::vector<u64>& goods_tables,
     std::vector<u64> effects;
     std::vector<u64> blanks;
     std::vector<u64> maidens;
+    std::vector<std::pair<u64, std::string_view>> bells;
     for (const u64 table : speffect_tables) {
         if (const u64 blank = BbscParamRow(table, 7); blank != 0) {
             blanks.push_back(blank);
@@ -13788,13 +13751,19 @@ bool PrepareBbscDuelBellIn(const std::vector<u64>& goods_tables,
         effects.push_back(effect);
     }
     for (const u64 table : goods_tables) {
-        PrepareBbscKitRows(table);
+        for (const auto& [id, name] : {std::pair<u32, std::string_view>{200, "Beckoning Bell"},
+                                       {205, "Small Resonant Bell"}, {225, "Sinister Bell"},
+                                       {BbscDuelBellGoodsId, "Duel Bell"}}) {
+            if (const u64 bell = BbscParamRow(table, id, GoodsRowSize); bell != 0) {
+                bells.emplace_back(bell, name);
+            }
+        }
         const u64 row = BbscParamRow(table, BbscDuelBellGoodsId, GoodsRowSize);
         if (row == 0) {
             continue;
         }
         WriteValue<s32>(row, 0, static_cast<s32>(BbscDuelBellEffectId)); // refId
-        WriteValue<s32>(row, 28, 240013);  // sortId: with the kit
+        WriteValue<s32>(row, 28, 240013);  // sortId: with the bells
         WriteValue<s32>(row, 36, 0);       // yesNoDialogMessageId: none
         WriteValue<u16>(row, 44, 7);       // iconId: the Sinister Bell's
         WriteValue<s16>(row, 54, 1);       // maxNum
@@ -13820,6 +13789,7 @@ bool PrepareBbscDuelBellIn(const std::vector<u64>& goods_tables,
         bbsc_duel_bell_effect_rows = std::move(effects);
         bbsc_blank_effect_rows = std::move(blanks);
         bbsc_invadable_effect_rows = std::move(maidens);
+        bbsc_bell_rows = std::move(bells);
         bbsc_duel_bell_ready.store(true, std::memory_order_release);
     }
     return ok;
@@ -14140,11 +14110,11 @@ bool BackupBbscSavesUnchecked() {
     return copied != 0;
 }
 
-// The kit every BBSC player gets (the user, 2026-10-05: given when you start playing, even as a new
-// player, only once - it checks whether you carry it or have it in storage). Each kit item missing
-// from BOTH the carried items and the storage box goes into the carried items. Checked once per
-// loaded character (every new local player character), so a save loaded later is checked too; the
-// saves are backed up before anything is added.
+// The bells every player carries (the user, 2026-10-05: given when you start playing, even as a
+// new player, only once - it checks whether you carry it or have it in storage). Each one missing
+// from BOTH the carried items and the storage box goes into the carried items; a ringing bell counts
+// (the game swaps it for its ringing form). The kit's old copies go first, so a save that held them
+// gets the originals back. Checked every 5 s in the game; the saves are backed up before any change.
 void TickBbscDuelBellGive() {
     static s64 last_ms = 0;
     const s64 now = SteadyNowMs();
@@ -14168,108 +14138,37 @@ void TickBbscDuelBellGive() {
         const u32 code = 0x40000000u | id;
         return BbscInventoryHas(carried, code) || BbscInventoryHas(storage, code);
     };
-    // Older builds could grant these unused goods IDs before their parameter rows were converted.
-    // Merely finding the ID then incorrectly accepted a bell that remained cached as a Key Item (or
-    // was invisible).  Reinsert every kit item once per loaded inventory after the corrected rows
-    // have been published, forcing the game to rebuild the saved item from its normal-goods key.
-    // Once per character, at home and alone (2026-10-18 bug reports: keyed on the player pointer,
-    // which is new at every load, it removed and re-added every bell at each load and join - the
-    // bells left their quick-item slots and "stopped working"). Done = a marker file per save slot
-    // (<mod>\kit-repaired\<user>-<slot>.done); without a known slot, once per run.
-    namespace fs = std::filesystem;
-    static bool repaired_this_run = false;
-    const auto slot = BbscActiveSaveSlot();
-    const fs::path marker =
-        slot.has_value()
-            ? Common::FS::GetUserPath(Common::FS::PathType::CapturesDir).parent_path() /
-                  "kit-repaired" / fmt::format("{}-{}.done", slot->user, slot->slot)
-            : fs::path{};
-    std::error_code marker_ec;
-    const bool repair_done =
-        repaired_this_run || (slot.has_value() && fs::exists(marker, marker_ec));
-    const bool repair_existing = !repair_done && GetSessionState() == 0 &&
-                                 ReadValue<u8>(global, 0x1592) != 0;
-    const auto mark_repaired = [&] {
-        repaired_this_run = true;
-        if (slot.has_value()) {
-            std::error_code ec;
-            fs::create_directories(marker.parent_path(), ec);
-            std::ofstream(marker) << "kit repaired\n";
-            LOG_INFO(Debug, "BBSC kit: repair marked done for user {} slot {}", slot->user,
-                     slot->slot);
-        }
+    const auto carries = [&](const BbscKitItem& item) {
+        return has(item.id) || (item.ringing != 0 && has(item.ringing));
     };
+    static constexpr u32 Retired[] = {4016, 4121, 11201, 11251}; // the kit's copies
     std::vector<const BbscKitItem*> missing;
     for (const BbscKitItem& item : BbscKit) {
-        if (!has(item.id)) {
+        if (!carries(item)) {
             missing.push_back(&item);
         }
     }
-    // The vanilla items the kit replaces (and the bells' "ringing" forms), carried or stored, are
-    // taken out (the user: "old items are still there, they are not hidden").
-    // The Dream's messenger holds out the vanilla Beckoning Bell (event 12101024, item lot 10010,
-    // "given" flag 6622) to every character with Insight - next to the kit's Hunt Bell it only
-    // confuses (2026-10-08: "the host has the old bells on the ground in the Dream"). In our own
-    // world the flag is set, so the messenger no longer offers it.
-    if (ReadValue<u8>(global, 0x1592) != 0 && ReadValue<u64>(image_base + 0x0553B0D8, 0) != 0 &&
-        ReadValue<u64>(image_base + EventFlagManPointerOffset, 0) != 0 && !BbscEventFlag(6622)) {
-        using SetEventFlag = u64 PS4_SYSV_ABI (*)(u64 unused, u32 flag, u8 value);
-        reinterpret_cast<SetEventFlag>(image_base + 0x0132E5A0)(0, 6622, 1);
-        LOG_INFO(Debug, "BBSC kit: the Dream messenger's vanilla Beckoning Bell marked as given "
-                        "(flag 6622) - the kit's Hunt Bell replaces it");
-    }
-    static constexpr u32 Retired[] = {200, 201, 205, 206, 225, 226, 111};
     bool retire = false;
     for (const u32 id : Retired) {
         retire = retire || has(id);
     }
-    if (missing.empty() && !retire && !repair_existing) {
+    if (missing.empty() && !retire) {
         return;
     }
     if (!BackupBbscSaves()) {
         // Portable shadPS4 and BBport layouts do not all expose their active save directory to the
-        // injected DLL.  A missing optional backup must not prevent the recovery kit from being
-        // delivered; otherwise exactly the users who need the Bath fallback receive no bells.
-        LOG_WARNING(Debug, "BBSC kit: no save folder found to back up - continuing with the "
-                           "idempotent item repair");
+        // injected DLL. A missing optional backup must not keep the bells from a player.
+        LOG_WARNING(Debug, "BBSC kit: no save folder found to back up - continuing");
     }
     for (const u32 id : Retired) {
         for (const u64 inventory : {carried, storage}) {
             if (BbscInventoryHas(inventory, 0x40000000u | id)) {
                 const bool gone = BbscInventoryRemove(inventory, 0x40000000u | id);
-                LOG_INFO(Debug, "BBSC kit: vanilla goods {} taken out of the {} ({})", id,
+                LOG_INFO(Debug, "BBSC kit: the kit's copy goods {} taken out of the {} ({})", id,
                          inventory == carried ? "carried items" : "storage box",
                          gone ? "gone" : "STILL THERE");
             }
         }
-    }
-    bool repair_ok = true;
-    if (repair_existing) {
-        for (const BbscKitItem& item : BbscKit) {
-            const u32 code = 0x40000000u | item.id;
-            for (const u64 inventory : {carried, storage}) {
-                if (BbscInventoryHas(inventory, code)) {
-                    const bool gone = BbscInventoryRemove(inventory, code);
-                    LOG_INFO(Debug,
-                             "BBSC kit: goods {} removed from the {} for normal-item repair ({})",
-                             item.id, inventory == carried ? "carried items" : "storage box",
-                             gone ? "gone" : "STILL THERE");
-                    repair_ok = repair_ok && gone;
-                }
-            }
-        }
-        missing.clear();
-        for (const BbscKitItem& item : BbscKit) {
-            if (!has(item.id)) {
-                missing.push_back(&item);
-            }
-        }
-    }
-    if (missing.empty()) {
-        if (repair_existing) {
-            mark_repaired();
-        }
-        return;
     }
     // 0x014D9A80(inventory, &code, count) is how many fit; 0x014DA0A0(inventory, &key, count) adds,
     // with the item key (0x01A89070: bit 31, category index in bits 28-30 - goods 3 - and the id).
@@ -14310,17 +14209,13 @@ void TickBbscDuelBellGive() {
     }
     bool complete = true;
     for (const BbscKitItem& item : BbscKit) {
-        complete = complete && has(item.id);
+        complete = complete && carries(item);
     }
     for (const u32 id : Retired) {
         complete = complete && !has(id);
     }
-    complete = complete && repair_ok;
     if (!complete) {
         LOG_WARNING(Debug, "BBSC kit: not all items could be placed yet - will retry");
-    } else if (repair_existing) {
-        mark_repaired();
-        LOG_INFO(Debug, "BBSC kit: inventory repair complete; custom goods are normal items");
     }
 }
 
@@ -14554,7 +14449,7 @@ void TickBbscHostBlank() {
 // yet (HYPOTHESIS: the boss-clear state BBSC keeps for the guest). So when the guest's Blank was used
 // and the game's leave did not follow within BbscGuestBlankWaitMs, BBSC makes that same call, and
 // logs the effect entry it found so the next log shows which step stopped.
-constexpr u32 BbscPartingBlankGoodsId = 11251;
+constexpr u32 BbscPartingBlankGoodsId = 111; // the Silencing Blank
 constexpr s64 BbscGuestBlankWaitMs = 3'000;
 
 void TickBbscGuestBlank() {
@@ -14580,10 +14475,10 @@ void TickBbscGuestBlank() {
     const bool using_blank = item || effect;
     if (using_blank && !was_using && used_ms == 0) {
         used_ms = now;
-        LOG_INFO(Debug, "BBSC leave: the guest's Parting Blank is in use (use running {}, SpEffect 7 "
+        LOG_INFO(Debug, "BBSC leave: the guest's Silencing Blank is in use (use running {}, SpEffect 7 "
                         "on {}) - waiting for the game's own leave",
                  item, effect);
-        BBSC_TIMELINE("LEAVE", "leave: the guest's Parting Blank is in use (use running {}, SpEffect 7 "
+        BBSC_TIMELINE("LEAVE", "leave: the guest's Silencing Blank is in use (use running {}, SpEffect 7 "
                         "on {}) - waiting for the game's own leave",
                  item, effect);
     }
@@ -14604,14 +14499,14 @@ void TickBbscGuestBlank() {
     const u64 lua_holder = ReadValue<u64>(image_base + 0x0553B0C8, 0);
     const u64 lua = ReadablePointer(lua_holder, 0x10) ? ReadValue<u64>(lua_holder, 8) : 0;
     LOG_WARNING(Debug,
-                "BBSC leave: the guest's Parting Blank did not start the game's leave in {} s "
+                "BBSC leave: the guest's Silencing Blank did not start the game's leave in {} s "
                 "(SpEffect 7 entry {:#x} flags {:#x}, leave bit {}, event flag 4047 {}, Lua {:#x}) - "
                 "BBSC raises OnLeaveMagic itself",
                 BbscGuestBlankWaitMs / 1000, node, node != 0 ? ReadValue<u32>(node, 0x1C) : 0,
                 ReadablePointer(param, 0x168) &&
                     (ReadValue<u64>(param, 0x15F) & 0x400000) != 0,
                 BbscEventFlag(4047), lua);
-    BBSC_TIMELINE("LEAVE", "leave: the guest's Parting Blank did not start the game's leave in {} s "
+    BBSC_TIMELINE("LEAVE", "leave: the guest's Silencing Blank did not start the game's leave in {} s "
                 "(SpEffect 7 entry {:#x} flags {:#x}, leave bit {}, event flag 4047 {}, Lua {:#x}) - "
                 "BBSC raises OnLeaveMagic itself",
                 BbscGuestBlankWaitMs / 1000, node, node != 0 ? ReadValue<u32>(node, 0x1C) : 0,
@@ -15455,7 +15350,7 @@ constexpr s64 BbscBellRefundWindowMs = 15'000;
 constexpr s64 BbscBellRefundLoadWindowMs = 45'000;
 constexpr s64 BbscRealInsightGraceMs = 5'000;
 constexpr s32 BbscBellEffectIds[] = {9000, 9005, 9025}; // Hunt (search), Kin and Bloodlust (signs)
-constexpr s32 BbscBellGoods[] = {4016, 4121, 11201, 4313, 11251, 200, 205, 225, 111};
+constexpr s32 BbscBellGoods[] = {200, 201, 205, 206, 225, 226, 111, 4313};
 std::atomic<s64> bbsc_other_goods_used_ms{0};
 
 // Item use (TraceEntry): every goods but the bells and blanks, for TickBbscFreeBellRefund.
@@ -15662,8 +15557,9 @@ void TickBbscTimelineContext() {
 //   the goods ([chr+0x1C8] vfunc +0x10, ?); [rbp-0x1E1] candidate state (goods 9998/9999);
 //   [rbp-0x1EC] / [rbp-0x1BA] the bell branches (area check 0x0191A750, the Blank's session tests);
 //   [rbp-0x1F4] goods 120; [rbp-0x1F0] the Beckoning Bell's area result.
-// Only the local, living player's kit bells (rows with BBSC's sortId 240010-240013: Hunt, Kin,
-// Bloodlust, Duel Bell), only when the game said no and nothing in the kept list did. Switch
+// Only the local, living player's bells (the Beckoning, Small Resonant and Sinister Bell and the
+// Duel Bell: their rows in bbsc_bell_rows), only when the game said no and nothing in the kept list
+// did. Switch
 // SHADPS4_BBSC_BELLS_ANYWHERE. Logs 'BBSC bells anywhere:' on every change of bell / reasons / map.
 constexpr u64 ItemUsableResultOffset = 0x015800D1;
 void ApplyBbscBellsAnywhere(const GuestRegisterSnapshot* registers) {
@@ -15675,13 +15571,14 @@ void ApplyBbscBellsAnywhere(const GuestRegisterSnapshot* registers) {
     if (!ReadablePointer(row, 0x48)) {
         return;
     }
-    static constexpr std::array<std::string_view, 4> Bells{"Hunt Bell", "Kin Bell",
-                                                           "Bloodlust Bell", "Duel Bell"};
-    const s32 sort_id = ReadValue<s32>(row, 28);
-    if (sort_id < 240010 || sort_id > 240013) {
-        return; // not one of the kit's bells
+    if (!bbsc_duel_bell_ready.load(std::memory_order_acquire)) {
+        return; // the bells' rows are not known yet
     }
-    const std::string_view bell = Bells[static_cast<size_t>(sort_id - 240010)];
+    const auto found = std::ranges::find(bbsc_bell_rows, row, &std::pair<u64, std::string_view>::first);
+    if (found == bbsc_bell_rows.end()) {
+        return; // not one of the bells
+    }
+    const std::string_view bell = found->second;
     const u64 frame = registers->rbp;
     if (registers->r14 == 0 || registers->r14 != GetLocalPlayerCharacter() ||
         GetCharacterHp(registers->r14) <= 0 || !ReadablePointer(frame - 0x200, 0x200)) {
@@ -16804,6 +16701,13 @@ std::string CapBbscAreaListRequest(std::string_view path, std::string& body) {
 }
 
 std::optional<std::string> GetSeamlessHostPlacementHeader() {
+    // bbcoop: no cross-map summon from a Chalice Dungeon (area 29). Its placement is not refreshed
+    // there (SosStatusUpdate does not run in a dungeon): twice on 2026-10-27 (19:33, 19:39) the host
+    // sent the same Old Yharnam spot from inside the dungeon. Without the header the broker matches
+    // as vanilla (same dungeon by its channel) and the game's own summon loads the layout.
+    if ((bbsc_tick_map.load(std::memory_order_acquire) >> 24) == 29) {
+        return std::nullopt;
+    }
     std::optional<SummonPlacementDescriptor> placement;
     {
         std::scoped_lock lock{seamless_placement_mutex};
@@ -16823,6 +16727,12 @@ std::optional<std::string> GetSeamlessHostPlacementHeader() {
 }
 
 bool SetSeamlessHostPlacementHeader(std::string_view value) {
+    // bbcoop: a guest in a Chalice Dungeon (area 29) joins the host's same dungeon the vanilla way
+    // (see GetSeamlessHostPlacementHeader): no connect-first move, which loaded Old Yharnam.
+    if ((bbsc_tick_map.load(std::memory_order_acquire) >> 24) == 29) {
+        ClearSeamlessHostPlacementHeader();
+        return true;
+    }
     std::array<std::string_view, 7> fields{};
     size_t begin = 0;
     for (size_t field_index = 0; field_index < fields.size(); ++field_index) {

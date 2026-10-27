@@ -43,7 +43,6 @@ enum class Group : u8 {
     GuestItems,  // a summoned guest sees, picks up and keeps the items of the host's world
     SolidNpcs,   // a guest sees the host world's NPCs as they are, not as grey wandering ghosts
     Scaling,     // vanilla's boss co-op buff (Lua_MultiDoping) off - BBSC enemy scaling instead
-    KitBells,    // the BBSC kit's Hunt Bell gets the Beckoning Bell's special checks (Dream use)
     SendBacklog, // one member that never answers does not end the session for everyone
     Hunters,     // the host keeps looking for co-op signs past vanilla's two guests
 };
@@ -351,15 +350,6 @@ constexpr std::array<WideEdit, 11> WideEdits{{
      Group::GuestItems},
     {"GuestItems.PlaceTreasuresAway", 0x017DC3E5, {0x98, 0x0C, 0x00, 0x00},
      {0x00, 0x00, 0x00, 0x00}, Group::GuestItems},
-    // Report 2026-10-07: "cannot use the bells in the Dream". The item availability check 0x0157F200
-    // gives the bells their own branches by goods id: CMP R12D, 0xCD / 0xE1 (Small Resonant /
-    // Sinister Bell) and at 0x0157F855 CMP EBX, 0xC8 (Beckoning Bell, 81 FB C8000000) - the branch
-    // that holds the seamless patches letting a host ring it where vanilla says no (0x0157F8C8,
-    // 0x0157F960). The kit's Hunt Bell is goods 4016 (a copy of 200), so it never got there; the
-    // vanilla bell itself is disabled by the kit. Its id goes into the compare: 4016 = 0x00000FB0.
-    // (The Kin Bell already works in the Dream through the general path - left as it is.)
-    {"KitBells.HuntBellChecks", 0x0157F857, {0xC8, 0x00, 0x00, 0x00}, {0xB0, 0x0F, 0x00, 0x00},
-     Group::KitBells},
     // Three players, 2026-10-08 (host hardwater, guest cls_amg; abood's game had crashed but his
     // sign was still listed): the host summoned the dead sign and sat in CreateWait for 6 minutes,
     // then its own game raised "OnIrregularLeaveSession" (0x017897DA) and ended the session for the
@@ -434,8 +424,6 @@ inline bool GroupEnabled(Group group) {
         return EnvFlag("SHADPS4_BBSC_SOLID_NPCS");
     case Group::Scaling:
         return EnvFlag("SHADPS4_BBSC_SCALING");
-    case Group::KitBells:
-        return true; // the kit is always given (bloodborne_re.cpp, PrepareBbscKitRows)
     case Group::SendBacklog:
         return true;
     case Group::Hunters:

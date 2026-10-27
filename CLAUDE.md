@@ -74,8 +74,9 @@ Runtime mods (`src/`):
   lists the tailnet's hosts, makes the account (shadNet's Create) and refuses another build (the game server's
   `/bbcoop/hello`; a build is its commit, or the package's `BUILD`). Both launchers use it: GTK on Linux, Tk
   (`bbport_launcher_win.py`) on Windows and macOS. Tests: `tests/test_bbcoop_online.py`.
-- Bells by hand, as vanilla (Asad 2026-10-27: the fast-join auto bell was removed). The host's game server polls
-  signs every 5 s (`SUMMON_POLL_S`, vanilla 35/30). A ringing kit bell used again stops it. Any area joins (the
+- The game's own bells, rung by hand (Asad 2026-10-27: no auto bell, no BBSC kit copies; free, anywhere;
+  `bloodborne_re.cpp` "The hunter's bells"). Chalice Dungeons: no cross-map move inside area 29. The host's game server polls
+  signs every 5 s (`SUMMON_POLL_S`, vanilla 35/30). A ringing bell used again stops it. Any area joins (the
   broker's anywhere summons + connect-first placement; verified 2026-10-27, Old Yharnam guest into a Cathedral
   Ward host). Two games on one Mac: `BB_P2P_PORT=3659` on the second.
 - Mac app: `bash packaging/macos/package.sh` -> `dist/bbcoop-mac.zip` (Tk launcher frozen with PyInstaller, port in
@@ -93,7 +94,7 @@ Runtime mods (`src/`):
     saves backed up first.
   - `BB_TEST_STATS=<level>,<vit>,<end>,<str>,<skl>,<blt>,<arc>`: sets the loaded character's stats (any name) on the
     run's first load, saves backed up first. Level = sum of stats − 50.
-  - `BB_TEST_BELLS=again|death|both` (online, BBSC): rings the Hunt, Kin and Bloodlust Bells in turn by the game's
+  - `BB_TEST_BELLS=again|death|both` (online, BBSC): rings the Beckoning, Small Resonant and Sinister Bells in turn by the game's
     item use and stops each by using it again or by dying, 25 s apart; TEST, BELL and INSIGHT lines in the timeline.
   - `BB_TEST_LOADOUT=<list>`: fills a character named TEST once (stats 99, every weapon +10 Uncanny/Lost, all armor,
     stacks, gems); list `mods/bbcoop-respec/test-loadout.txt`; launcher `~/.local/bin/bloodborne-testchar.sh`.
