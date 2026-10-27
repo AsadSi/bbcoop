@@ -9467,7 +9467,17 @@ void TickBbscStrandedGuest() {
     last_ms = now;
     const u64 global = GetGlobalState();
     const u64 me = GetLocalPlayerCharacter();
-    const bool stranded = GetSessionState() == 0 && ReadablePointer(global, 0x1598) &&
+    // Only a guest is ever stranded (Asad 2026-10-27: when the guest quit, the host "got kicked
+    // out of the world to his own world even though it already is his world"). A host, or anyone
+    // back in their own world, is not; joining (4) or being a guest (6) is what arms this.
+    static bool was_guest = false;
+    const s32 state = GetSessionState();
+    if (state == 4 || state == 6) {
+        was_guest = true;
+    } else if (state == 3 || (ReadablePointer(global, 0x1598) && ReadValue<u8>(global, 0x1592) != 0)) {
+        was_guest = false;
+    }
+    const bool stranded = was_guest && state == 0 && ReadablePointer(global, 0x1598) &&
                           ReadValue<u8>(global, 0x1592) == 0 && ReadValue<u8>(global, 0x08) == 0 &&
                           me != 0 && GetCharacterHp(me) > 0;
     if (!stranded) {
