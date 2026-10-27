@@ -123,7 +123,7 @@ bool BbcoopRespawnAtHostLamp() {
         return false;
     }
     if (BbscMapArea(map) == BbscChaliceArea) {
-        // Chalice co-op is parked: a load there has no dungeon layout (see TickBbscFollowHost).
+        // No death load into a Chalice Dungeon: it would carry no layout (see TickBbscFollowHost).
         LOG_INFO(Debug, "bbcoop death: the host's last lamp {} is in a Chalice Dungeon - BBSC's respawn",
                  point);
         return false;

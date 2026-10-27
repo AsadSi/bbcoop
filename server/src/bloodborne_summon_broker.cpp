@@ -89,6 +89,19 @@ bool MatchesSearch(const QJsonObject& request, const QJsonObject& sign, bool any
                              !SameIfPresent(request, sign, QStringLiteral("ChannelId")))) {
         return false;
     }
+    // bbcoop: every Chalice Dungeon (area 29) shares its map ids; the layout is the dungeon's
+    // channel. A load into the host's dungeon from anywhere else has no layout (grey void, the guest
+    // dies), so with anywhere summons too, area 29 matches only inside the same known dungeon - as
+    // vanilla, where both players enter it by its glyph first.
+    constexpr qint64 ChaliceArea = 29;
+    const qint64 requestArea = Integer(request, QStringLiteral("AreaId"), -1) >> 24;
+    const qint64 signArea = Integer(sign, QStringLiteral("AreaId"), -1) >> 24;
+    const qint64 channel = Integer(request, QStringLiteral("ChannelId"), 0);
+    if ((requestArea == ChaliceArea || signArea == ChaliceArea) &&
+        (requestArea != signArea || channel <= 0 ||
+         channel != Integer(sign, QStringLiteral("ChannelId"), 0))) {
+        return false;
+    }
 
     QSet<int> summonTypes;
     for (const QJsonValue& value : request.value(QStringLiteral("SummonTypeList")).toArray()) {

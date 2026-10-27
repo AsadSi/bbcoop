@@ -4997,17 +4997,23 @@ void TickBbscFollowHost() {
         shared_host_map = host.packed_map;
         return; // same map as the host: nothing to follow
     }
-    // bbcoop: no follow into a Chalice Dungeon (area 29; their co-op is parked, Asad 2026-10-25).
-    // The follow load sends the map only, not the dungeon's layout (its glyph): the guest landed in
-    // an empty grey map and died (1b63c18, 16:18:51). The guest stays where it is meanwhile.
+    // bbcoop: no follow into a Chalice Dungeon (area 29) from outside it. The follow load sends the
+    // map only, not the dungeon's layout (its channel): the guest landed in an empty grey map and
+    // died (1b63c18, 16:18:51). The guest stays where it is and is told the vanilla way in: leave,
+    // enter the host's glyph at the altar, ring the bell there. A guest already in area 29 joined
+    // inside the same dungeon (the summon broker matches area 29 by channel only), so it follows
+    // the host between that dungeon's maps.
     static bool host_in_chalice = false;
-    if ((host.packed_map >> 24) == 29) {
+    if ((host.packed_map >> 24) == 29 && (here >> 24) != 29) {
         if (!host_in_chalice) {
             host_in_chalice = true;
             LOG_INFO(Debug, "BBSC warp together: host went into a Chalice Dungeon (map {:#x}) - "
                             "not following, we stay in {:#x}", host.packed_map, here);
             BBSC_TIMELINE("FOLLOW", "warp together: host went into a Chalice Dungeon (map {:#x}) - "
                             "not following, we stay in {:#x}", host.packed_map, here);
+            BbscAnnounce(u"The host went into a Chalice Dungeon.\nLeave (Silencing Blank or quit), then\n"
+                         u"enter the host's glyph at the altar.",
+                         "host in a Chalice Dungeon");
         }
         mismatch_since_ms = 0;
         return;

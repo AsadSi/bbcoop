@@ -285,6 +285,33 @@ int main() {
       "\"HostData\":\"remote-host-owned-data\""));
   CHECK(!remoteDeliveryResponse.contains("\"SeamlessWarp\""));
 
+  // bbcoop: Chalice Dungeons (area 29, 0x1d000000) match only inside the same dungeon (channel),
+  // even with anywhere summons: no placement into a dungeon the guest has not loaded.
+  Bloodborne::SummonBroker chalice(seamlessOptions);
+  QByteArray dungeonSign = advertisement;
+  dungeonSign.replace("\"AreaId\":385875968", "\"AreaId\":486539264")
+      .replace("\"ChannelId\":0", "\"ChannelId\":41");
+  CHECK(chalice.Advertise(Parse(dungeonSign), dungeonSign, 10'000).state ==
+        Bloodborne::SummonBroker::State::Advertised);
+  CHECK(chalice.Search(Parse(search), 10'001, hostPlacement).isEmpty());
+  QByteArray dungeonSearch = search;
+  dungeonSearch.replace("\"AreaId\":385875968", "\"AreaId\":486539264");
+  CHECK(chalice.Search(Parse(dungeonSearch), 10'002).isEmpty()); // channel 0: unknown dungeon
+  QByteArray otherDungeon = dungeonSearch;
+  otherDungeon.replace("\"ChannelId\":0", "\"ChannelId\":42");
+  CHECK(chalice.Search(Parse(otherDungeon), 10'003).isEmpty());
+  dungeonSearch.replace("\"ChannelId\":0", "\"ChannelId\":41");
+  CHECK(chalice.Search(Parse(dungeonSearch), 10'004).size() == 1);
+  CHECK(chalice.StateFor(QStringLiteral("guest-session"), 2465, 10'004) ==
+        Bloodborne::SummonBroker::State::Advertised);
+  // a host in a dungeon never pulls a guest out of the Dream either
+  Bloodborne::SummonBroker fromDream(seamlessOptions);
+  CHECK(fromDream.Advertise(Parse(advertisement), advertisement, 11'000).state ==
+        Bloodborne::SummonBroker::State::Advertised);
+  CHECK(fromDream.Search(Parse(dungeonSearch), 11'001, "1,1d000000,0,0,0,0,0").isEmpty());
+  CHECK(fromDream.StateFor(QStringLiteral("guest-session"), 2465, 11'001) ==
+        Bloodborne::SummonBroker::State::Advertised);
+
   std::cout << "Bloodborne summon broker state test passed\n";
   return 0;
 }
