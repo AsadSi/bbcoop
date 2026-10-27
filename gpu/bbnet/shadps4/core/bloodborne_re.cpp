@@ -15797,7 +15797,6 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbcoopSoloLeaveLocks(); // bbcoop: leave locks left in a solo save
         TickBbcoopTestBells(); // bbcoop: BB_TEST_BELLS
         TickBbcoopBellStop();  // bbcoop: a kit bell used again stops it
-        TickBbcoopAutoBell();  // bbcoop: fast join, the bells ring themselves
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();

@@ -116,14 +116,10 @@ launcher, MoltenVK window, the game's code running). Not verified: the AppImage 
 a co-op session through Host/Join (needs two machines and Tailscale), Gatekeeper's first open of a
 downloaded zip, Windows.
 
-Fast join (Asad, 2026-10-25: "one-press join", the most common Bloodborne co-op complaint is the bell
-dance): picking Host or Join is all a player does. The game rings the host's Hunt Bell and the guest's
-Kin Bell by itself when the character stands alone in its own world outside a boss fight, and again after
-a session ends or the game restarts (the rejoin); the host's server polls signs every 5 s. Verified with
-two games on one Mac against a local server, both in Old Yharnam: the guest's bell rang 6 s after it
-loaded, the host found it 29 s later, the guest stood beside the host 34 s after that, session kept
-7 minutes. Not verified: two machines, different areas, the rejoin after a session end, the pause after
-a bell stopped by hand.
+Fast join (2026-10-25, the bells rang by themselves on Host/Join) was removed (Asad, 2026-10-27: "the auto
+bell ring on opening the game isnt worth it... keep the bell to join like normal"). Players ring the bells by
+hand; the host's server still polls signs every 5 s. Cross-area join works (2026-10-27, Mac guest in Old
+Yharnam, Linux host in Cathedral Ward: connect-first placed the guest in the host's map).
 
 ## Reference values (to check against v1.09's own tables)
 
