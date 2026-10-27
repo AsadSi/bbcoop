@@ -1478,7 +1478,11 @@ void ApplyCrossMapSummonGuestPlacement(const GuestRegisterSnapshot& registers) {
         record.result = "placement_copy_pending";
         return;
     }
-    if (record.current_map == record.received_map) {
+    // bbcoop: a Chalice Dungeon (area 29) summon is a same-dungeon one: the summon's map carries the
+    // layer (0x1d0a5a00), our map read only 0x1d000000 (2026-10-27). A forced load here would race the
+    // game's own summoned reload, which loads the dungeon with its layout.
+    if (record.current_map == record.received_map ||
+        ((record.current_map >> 24) == 29 && (record.received_map >> 24) == 29)) {
         record.result = "same_map";
         return;
     }
