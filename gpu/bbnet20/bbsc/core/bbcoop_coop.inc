@@ -514,7 +514,8 @@ struct BbcoopBellStop {
     s32 bell;
     s32 effect;
 };
-constexpr BbcoopBellStop BbcoopBellStops[] = {{4016, 9000}, {4121, 9005}, {11201, 9025}};
+// bbcoop 2026-10-27: the game's own bells - used again, a ringing bell is its ringing form.
+constexpr BbcoopBellStop BbcoopBellStops[] = {{201, 9000}, {206, 9005}, {226, 9025}};
 constexpr s64 BbcoopBellStopAfterMs = 1'500;
 std::array<s64, std::size(BbcoopBellStops)> bbcoop_bell_on_since{}; // game thread
 std::atomic<s32> bbcoop_bell_stop_effect{0};
@@ -568,7 +569,7 @@ void TickBbcoopTestBells() {
         std::vector<Step> out;
         for (const bool death : {false, true}) {
             if (mode == "both" || mode == (death ? "death" : "again")) {
-                for (const s32 bell : {4016, 4121, 11201}) {
+                for (const s32 bell : {200, 205, 225}) {
                     out.push_back({bell, death});
                 }
             }

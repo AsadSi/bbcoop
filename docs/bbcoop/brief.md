@@ -116,6 +116,8 @@ launcher, MoltenVK window, the game's code running). Not verified: the AppImage 
 a co-op session through Host/Join (needs two machines and Tailscale), Gatekeeper's first open of a
 downloaded zip, Windows.
 
+The game's own bells again (Asad, 2026-10-27: "use the original bells rather than the ones from seamless
+coop"; kept free and usable anywhere, Duel Bell kept; saves holding BBSC's kit copies get the originals back).
 Fast join (2026-10-25, the bells rang by themselves on Host/Join) was removed (Asad, 2026-10-27: "the auto
 bell ring on opening the game isnt worth it... keep the bell to join like normal"). Players ring the bells by
 hand; the host's server still polls signs every 5 s. Cross-area join works (2026-10-27, Mac guest in Old

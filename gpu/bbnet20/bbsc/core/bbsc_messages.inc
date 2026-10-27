@@ -147,31 +147,12 @@
 {30, 101004, u"A player answered your bell.\nJoining..."}, // Discovered the chime of a Small Resonant Bell.
 {30, 101005, u"A player answered your bell.\nJoining..."}, // Discovered the chime of a Small Resonant Bell.
 {30, 101100, u"Found a host.\nJoining their game..."}, // Discovered the chime of a Beckoning Bell.
-{30, 14000, u"Ring the Hunt Bell\nto call other players?"}, // Expend Insight and seek the assistance of a hunter from another world?
-{30, 14003, u"Stop the Hunt Bell"}, // Silence the Beckoning Bell
-{30, 14004, u"Stop the Kin Bell"}, // Silence the Small Resonant Bell
-{30, 14005, u"Stop the Bloodlust Bell"}, // Silence the Sinister Resonant Bell
-{30, 100001, u"Hunt Bell rung.\nWaiting for players to join..."}, // Searching for the chime of a Small Resonant Bell...
-{30, 100100, u"Kin Bell rung.\nLooking for a host to join..."}, // Searching for the chime of a Beckoning Bell...
-{30, 100200, u"Bloodlust Bell rung.\nLooking for a world to invade..."}, // Searching for the chime of a Sinister Bell...
 {30, 100300, u"Nobody found.\nRing the bell again to keep looking."}, // Could not discover the chime of a Small Resonant Bell. No insight was consumed.
 {30, 101002, u"Someone is about to invade your world."}, // Sinister Bell resonates with another...
 {30, 101200, u"Found a world to invade.\nEntering..."}, // Discovered the chime of a Sinister Bell.
-{30, 100011, u"Hunt Bell rung (password).\nWaiting for players to join..."}, // Searching for the chime of a Small Resonant Bell with matching password.
-{30, 100110, u"Kin Bell rung (password).\nLooking for a host to join..."}, // Searching for the chime of a Beckoning Bell with matching password.
 {30, 101300, u"Found a host,\nbut the beckoner is an Executioner, and thus an adversary."}, // Discovered the chime of a Beckoning Bell, but the beckoner is an Executioner, and thus an adversary.
 {30, 101400, u"Found a host,\nbut the beckoner is a Vileblood, and thus an adversary."}, // Discovered the chime of a Beckoning Bell, but the beckoner is a Vileblood, and thus an adversary.
 {30, 101500, u"Found a host,\nbut the beckoner is a blood-addled hunter, and thus an adversary."}, // Discovered the chime of a Beckoning Bell, but the beckoner is a blood-addled hunter, and thus an adversary.
-{30, 10011270, u"Ring the Hunt Bell to call\nother players into your game."}, // Consume Insight and ring the Beckoning Bell to enlist the cooperation of hunters from other worlds.
-{30, 10011280, u"Use the Parting Blank to end co-op."}, // Silencing Blank ends such forms of cooperation.
-{200, 266302, u"Bloodlust Bell"}, // Sinister Bell
-{200, 280140, u"Bloodlust Bell"}, // Sinister Bell
-{200, 280240, u"Bloodlust Bell"}, // Sinister Bell
-{200, 302000, u"Parting Blank"}, // Silencing Blank
-{200, 302100, u"Parting Blank"}, // Silencing Blank
-{200, 302110, u"Stop the Hunt Bell"}, // Silence Beckoning Bell
-{200, 302111, u"Stop the Kin Bell"}, // Silence Small Resonant Bell
-{200, 302112, u"Stop the Bloodlust Bell"}, // Silence Sinister Resonant Bell
 {200, 302120, u"End co-op"}, // Disrupt Resonance
 {200, 302123, u"End co-op"}, // Disrupt Resonance
 {200, 302124, u"End co-op and go home"}, // Disrupt Resonance and Return Home
@@ -182,31 +163,9 @@
 {201, 302112, u"Stop looking for a world to invade."}, // Silence Bell and cease threat.
 {204, 269001, u"Find a host and join their game?"}, // Quick-search a Beckoning Bell chime and begin co-op?
 {204, 269002, u"Find a world to invade?"}, // Quick-search a Sinister Bell chime and become an adversary?
-{204, 302200, u"Kin Bell rung.\nLooking for a host to join..."}, // Searching for the chime of a Beckoning Bell...
-{204, 302201, u"Bloodlust Bell rung.\nLooking for a world to invade..."}, // Searching for the chime of a Sinister Bell...
-{204, 302210, u"Kin Bell rung (password).\nLooking for a host to join..."}, // Searching for the chime of a Beckoning Bell with matching password.
-{2, 2000, u"Need help? Ring the Hunt Bell."}, // Ring the Beckoning Bell if you require assistance.
-{2, 1121, u"Call other players into your game\nwith the Hunt Bell."}, // Receive assistance from the hunters of other worlds by using the Beckoning Bell.
-{2, 1122, u"Join another player's game\nwith the Kin Bell."}, // Assist the hunters of other worlds by using the Small Resonant Bell.
 {30, 15000011, u"You caught up with <?hostName?>."}, // *
 {30, 15000012, u"<?joinName?> caught up with you."}, // *
 {30, 15000035, u"You are in the host's Hunter's Dream."}, // *
-{10, 4016, u"Hunt Bell"}, // (empty)
-{20, 4016, u"Ring to call other players into your game.\nCosts no Insight."}, // (empty)
-{24, 4016, u"An old bell carried by the hunters of the\nworkshop, its toll heard across every world.\n\nRing it, and hunters who answer with a\nKin Bell may join your hunt. Together you\nwalk the night, through every lamp,\ndeath and dream, until the hunt is done."}, // (empty)
-{10, 4121, u"Kin Bell"}, // (empty)
-{20, 4121, u"Ring to join another players game.\nCosts no Insight."}, // (empty)
-{24, 4121, u"A small bell of the choir, its chime\nfaint, but true.\n\nHunters who hear a Hunt Bell may answer\nwith it, crossing into another world to\nstand at the side of kin. What is slain\nthere is slain for both."}, // (empty)
-{10, 11201, u"Bloodlust Bell"}, // (empty)
-{20, 11201, u"Ring to invade another players world.\nCosts no Insight."}, // (empty)
-{24, 11201, u"A bell that sounds only for the blood-drunk.\n\nNo maiden need ring for its toll to be\nheard: every hunter of the night is prey,\nalone or in company, wherever they walk.\n\nThe hunt for hunters never ends."}, // (empty)
-{10, 11251, u"Parting Blank"}, // (empty)
-{20, 11251, u"Use to end co-op.\nGuests go home; the host sends everyone home."}, // (empty)
-{24, 11251, u"A blank of silent powder.\n\nIts inaudible burst breaks the resonance\nbinding hunters of different worlds, and\neach returns to their own night."}, // (empty)
-{20, 200, u"No longer used. Use the Hunt Bell."}, // Use Insight to ring and call to other worlds for help.
-{20, 205, u"No longer used. Use the Kin Bell."}, // Ring this bell to help hunters in other worlds.
-{20, 225, u"No longer used. Use the Bloodlust Bell."}, // Ring to become the enemy of a hunter in another world.
-{20, 111, u"No longer used. Use the Parting Blank."}, // Fire to end ongoing, and prevent further, cooperation.
 {10, 4313, u"Duel Bell"}, // (empty)
 {20, 4313, u"Ring in co-op to turn on PvP between players.\nRing again to turn it off."}, // (empty)
 {24, 4313, u"A cracked bell with a sour, discordant chime.\n\nRing it while hunting together, and the\nresonance binding the hunters turns to\nrivalry: they may strike one another as foes.\n\nRing it again to restore the old bond.\nOnly the beckoner decides; a cooperator\nwho rings it merely asks."}, // (empty)
