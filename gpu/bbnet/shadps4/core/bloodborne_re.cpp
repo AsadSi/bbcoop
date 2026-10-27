@@ -15330,6 +15330,11 @@ void ApplyBbscHunterCap(u64 summon_manager) {
 // EquipParamGoods row 200 (Beckoning Bell) has consumeHeroPoint = 1 (row byte 0x38); no other bell
 // has an Insight cost. The loaded row is found with the game's own lookup 0x01F1E3D0(out, id)
 // (SoloParamRepository [0x05540340]) and the byte set to 0: ringing it neither needs nor uses Insight.
+// bbcoop 2026-10-27: the ringing forms 201/206/226 are what a ringing bell is used as to stop it, but
+// their "usable by" mask (row byte 0x44) is 0x60 where the bells have 0x53/0x63: a hunter (bit 0) or
+// hollow (bit 1) never could (test: Small Resonant Bell rung in the Dream, used again - refused). The
+// two bits are set, and bells anywhere knows the rows by these pointers.
+std::array<std::atomic<u64>, 3> bbcoop_ringing_rows{};
 void TickBbscFreeBell() {
     static const bool enabled = EnvFlagEnabled("SHADPS4_BBSC_FREE_BELL");
     static s64 last_ms = 0;
@@ -15372,6 +15377,20 @@ void TickBbscFreeBell() {
         }
         LOG_INFO(Debug, "BBSC free bell: goods {} Insight cost {} -> {}", id, cost,
                  ReadValue<u8>(result.row, 0x38));
+    }
+    for (size_t i = 0; i < bbcoop_ringing_rows.size(); ++i) {
+        const u32 id = std::array{201u, 206u, 226u}[i];
+        result = {0xFFFFFFFFu, 0, 0};
+        reinterpret_cast<Lookup>(image_base + 0x01F1E3D0)(&result, id);
+        if (!ReadablePointer(result.row, 0x48) ||
+            !HasMemoryAccess(result.row + 0x44, 1, MemoryProt::CpuWrite)) {
+            continue;
+        }
+        const u8 mask = ReadValue<u8>(result.row, 0x44);
+        WriteValue<u8>(result.row, 0x44, mask | 0x03);
+        bbcoop_ringing_rows[i].store(result.row);
+        LOG_INFO(Debug, "BBSC free bell: goods {} usable by a hunter to stop its bell (mask {:#x} -> {:#x})",
+                 id, mask, ReadValue<u8>(result.row, 0x44));
     }
     done = true;
 }
@@ -15629,7 +15648,11 @@ void ApplyBbscBellsAnywhere(const GuestRegisterSnapshot* registers) {
     const s32 ref = ReadValue<s32>(row, 0);
     const std::string_view bell = ref == 9000 ? "Beckoning Bell" : ref == 9005 ? "Small Resonant Bell"
                                   : ref == 9025 ? "Sinister Bell"
-                                  : ref == static_cast<s32>(BbscDuelBellEffectId) ? "Duel Bell" : "";
+                                  : ref == static_cast<s32>(BbscDuelBellEffectId) ? "Duel Bell"
+                                  : row == bbcoop_ringing_rows[0].load() ? "Beckoning Bell (ringing)"
+                                  : row == bbcoop_ringing_rows[1].load() ? "Small Resonant Bell (ringing)"
+                                  : row == bbcoop_ringing_rows[2].load() ? "Sinister Bell (ringing)"
+                                                                         : "";
     if (bell.empty()) {
         return; // not one of the bells
     }
