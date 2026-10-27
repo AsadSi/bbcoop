@@ -603,7 +603,7 @@ void TickBbcoopTestBells() {
                 WriteValue<s32>(data, 0xF8, 0);
             }
         } else {
-            use_item(GetLocalPlayer(), step.bell, BellUseArgument);
+            use_item(GetLocalPlayer(), step.bell + 1, BellUseArgument); // its ringing form (201/206/226)
         }
         BBSC_TIMELINE("TEST", "test bells: goods {} stopped by {} (session state {}, search effect {}, "
                               "sign effect {})",

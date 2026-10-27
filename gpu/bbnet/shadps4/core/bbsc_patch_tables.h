@@ -295,7 +295,7 @@ struct WideEdit {
     Group group;
 };
 
-constexpr std::array<WideEdit, 11> WideEdits{{
+constexpr std::array<WideEdit, 10> WideEdits{{
     // Every blood echo reward the local player receives is computed by 0x01335400 and left in a
     // float at [[0x0553B130]+8]+0xF8. Halfway through:
     //     MOV EAX, dword ptr [R15 + 0x78]    ; the local player's character type

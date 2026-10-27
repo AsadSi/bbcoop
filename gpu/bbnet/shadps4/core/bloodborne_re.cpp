@@ -1319,6 +1319,10 @@ void ApplyCrossMapSummonHostPlacement(const GuestRegisterSnapshot& registers) {
     if (!ReadLocalSummonPlacement(host, host_placement_rewrite.result)) {
         return;
     }
+    if ((host.packed_region >> 24) == 29) { // the host in a dungeon: its map read has no layer either
+        host_placement_rewrite.result = "chalice";
+        return;
+    }
     if (host_placement_rewrite.candidate.packed_region == host.packed_region) {
         host_placement_rewrite.result = "same_map";
         return;
@@ -13689,7 +13693,6 @@ bool BbscKitParamsReady() {
 }
 std::vector<u64> bbsc_duel_bell_effect_rows; // SpEffect 7511 rows (every table copy)
 std::vector<u64> bbsc_blank_effect_rows;     // SpEffect 7 rows: the Silencing Blank (goods 111)
-std::vector<std::pair<u64, std::string_view>> bbsc_bell_rows; // goods rows of the bells anywhere
 std::vector<u64> bbsc_invadable_effect_rows; // SpEffect 9020 rows: "Bell Maiden" (invaders welcome)
 std::atomic<bool> bbsc_pvp_on{false};
 std::atomic<int> bbsc_pvp_request{-1}; // host side: a guest asked for this state (0 / 1)
@@ -13730,7 +13733,6 @@ bool PrepareBbscDuelBellIn(const std::vector<u64>& goods_tables,
     std::vector<u64> effects;
     std::vector<u64> blanks;
     std::vector<u64> maidens;
-    std::vector<std::pair<u64, std::string_view>> bells;
     for (const u64 table : speffect_tables) {
         if (const u64 blank = BbscParamRow(table, 7); blank != 0) {
             blanks.push_back(blank);
@@ -13751,13 +13753,6 @@ bool PrepareBbscDuelBellIn(const std::vector<u64>& goods_tables,
         effects.push_back(effect);
     }
     for (const u64 table : goods_tables) {
-        for (const auto& [id, name] : {std::pair<u32, std::string_view>{200, "Beckoning Bell"},
-                                       {205, "Small Resonant Bell"}, {225, "Sinister Bell"},
-                                       {BbscDuelBellGoodsId, "Duel Bell"}}) {
-            if (const u64 bell = BbscParamRow(table, id, GoodsRowSize); bell != 0) {
-                bells.emplace_back(bell, name);
-            }
-        }
         const u64 row = BbscParamRow(table, BbscDuelBellGoodsId, GoodsRowSize);
         if (row == 0) {
             continue;
@@ -13789,7 +13784,6 @@ bool PrepareBbscDuelBellIn(const std::vector<u64>& goods_tables,
         bbsc_duel_bell_effect_rows = std::move(effects);
         bbsc_blank_effect_rows = std::move(blanks);
         bbsc_invadable_effect_rows = std::move(maidens);
-        bbsc_bell_rows = std::move(bells);
         bbsc_duel_bell_ready.store(true, std::memory_order_release);
     }
     return ok;
@@ -15307,18 +15301,27 @@ void TickBbscFreeBell() {
         u64 row;
     } result{0xFFFFFFFFu, 0, 0};
     using Lookup = void PS4_SYSV_ABI (*)(LookupResult* out, u32 id);
-    reinterpret_cast<Lookup>(image_base + 0x01F1E3D0)(&result, 200);
-    if (!ReadablePointer(result.row, 0x40) ||
-        !HasMemoryAccess(result.row + 0x38, 1, MemoryProt::CpuWrite)) {
-        return;
+    // bbcoop 2026-10-27: its ringing form 201 too - used to stop the bell (test 2026-10-25: "201 cost
+    // 1 Insight"); before, the kit's copy had no ringing form.
+    for (const u32 id : {200u, 201u}) {
+        result = {0xFFFFFFFFu, 0, 0};
+        reinterpret_cast<Lookup>(image_base + 0x01F1E3D0)(&result, id);
+        if (!ReadablePointer(result.row, 0x40) ||
+            !HasMemoryAccess(result.row + 0x38, 1, MemoryProt::CpuWrite)) {
+            return;
+        }
     }
-    const u8 cost = ReadValue<u8>(result.row, 0x38);
-    if (cost == 1) {
-        WriteValue<u8>(result.row, 0x38, 0);
+    for (const u32 id : {200u, 201u}) {
+        result = {0xFFFFFFFFu, 0, 0};
+        reinterpret_cast<Lookup>(image_base + 0x01F1E3D0)(&result, id);
+        const u8 cost = ReadValue<u8>(result.row, 0x38);
+        if (cost == 1) {
+            WriteValue<u8>(result.row, 0x38, 0);
+        }
+        LOG_INFO(Debug, "BBSC free bell: goods {} Insight cost {} -> {}", id, cost,
+                 ReadValue<u8>(result.row, 0x38));
     }
     done = true;
-    LOG_INFO(Debug, "BBSC free bell: Beckoning Bell Insight cost {} -> {}", cost,
-             ReadValue<u8>(result.row, 0x38));
 }
 
 // ---- Free bell, no free Insight (2026-10-18) -----------------------------------------------------
@@ -15557,9 +15560,9 @@ void TickBbscTimelineContext() {
 //   the goods ([chr+0x1C8] vfunc +0x10, ?); [rbp-0x1E1] candidate state (goods 9998/9999);
 //   [rbp-0x1EC] / [rbp-0x1BA] the bell branches (area check 0x0191A750, the Blank's session tests);
 //   [rbp-0x1F4] goods 120; [rbp-0x1F0] the Beckoning Bell's area result.
-// Only the local, living player's bells (the Beckoning, Small Resonant and Sinister Bell and the
-// Duel Bell: their rows in bbsc_bell_rows), only when the game said no and nothing in the kept list
-// did. Switch
+// Only the local, living player's bells (goods rows whose refId, +0, is a bell's SpEffect: the
+// Beckoning, Small Resonant and Sinister Bell - the kit's copies kept those refIds - and the Duel
+// Bell), only when the game said no and nothing in the kept list did. Switch
 // SHADPS4_BBSC_BELLS_ANYWHERE. Logs 'BBSC bells anywhere:' on every change of bell / reasons / map.
 constexpr u64 ItemUsableResultOffset = 0x015800D1;
 void ApplyBbscBellsAnywhere(const GuestRegisterSnapshot* registers) {
@@ -15571,14 +15574,13 @@ void ApplyBbscBellsAnywhere(const GuestRegisterSnapshot* registers) {
     if (!ReadablePointer(row, 0x48)) {
         return;
     }
-    if (!bbsc_duel_bell_ready.load(std::memory_order_acquire)) {
-        return; // the bells' rows are not known yet
-    }
-    const auto found = std::ranges::find(bbsc_bell_rows, row, &std::pair<u64, std::string_view>::first);
-    if (found == bbsc_bell_rows.end()) {
+    const s32 ref = ReadValue<s32>(row, 0);
+    const std::string_view bell = ref == 9000 ? "Beckoning Bell" : ref == 9005 ? "Small Resonant Bell"
+                                  : ref == 9025 ? "Sinister Bell"
+                                  : ref == static_cast<s32>(BbscDuelBellEffectId) ? "Duel Bell" : "";
+    if (bell.empty()) {
         return; // not one of the bells
     }
-    const std::string_view bell = found->second;
     const u64 frame = registers->rbp;
     if (registers->r14 == 0 || registers->r14 != GetLocalPlayerCharacter() ||
         GetCharacterHp(registers->r14) <= 0 || !ReadablePointer(frame - 0x200, 0x200)) {
