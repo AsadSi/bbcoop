@@ -9411,6 +9411,54 @@ void TickBbscLeaveLocks() {
     }
 }
 
+// Lamp and Doll locked in the Dream after a guest's Silencing Blank (2026-10-27 19:29-19:33, a lamp
+// still worked in Old Yharnam, no REPAIR line): which lock does the game still hold - does it take
+// us for a guest in the host's world? For 5 minutes after a session ends, from 15 s on and outside
+// loads, one timeline line each time any of these changes.
+void TimelineBbscAfterSessionLocks() {
+    static s64 last_ms = 0;
+    static s64 ended_ms = 0;
+    static s32 last_state = 0;
+    static std::string last;
+    const s64 now = SteadyNowMs();
+    if (image_base == 0 || now - last_ms < 1'000) {
+        return;
+    }
+    last_ms = now;
+    const s32 state = GetSessionState();
+    if (state != last_state) {
+        ended_ms = state == 0 ? now : 0;
+        last.clear();
+    }
+    last_state = state;
+    const u64 global = GetGlobalState();
+    if (ended_ms == 0 || now - ended_ms < 15'000 || now - ended_ms > 300'000 ||
+        !ReadablePointer(global, 0x1598) || ReadValue<u8>(global, 0x08) != 0) {
+        return;
+    }
+    const u64 me = GetLocalPlayerCharacter();
+    const u64 lua_man = ReadValue<u64>(image_base + 0x0553B0C8, 0);
+    const u64 lua = ReadablePointer(lua_man, 0x10) ? ReadValue<u64>(lua_man, 8) : 0;
+    const u64 request = BbscEventRequestAddress();
+    const u64 menu = ReadValue<u64>(image_base + 0x05562878, 0);
+    const u64 slots = ReadValue<u64>(image_base + PlayerSlotManagerPointerOffset, 0);
+    u32 leaving = 0;
+    for (u32 slot = 0; slot < 4 && ReadablePointer(slots, 0xB0); ++slot) {
+        leaving |= ReadValue<u8>(slots, 0xA9 + slot * 2) != 0 ? 1u << slot : 0;
+    }
+    std::string line = fmt::format(
+        "own world (global+0x1592) {}, event flag 4047 {}, load wait (Lua +0x8D) {}, character type "
+        "{}, event request {}, menu brake {}, slots leaving {:#x}",
+        ReadValue<u8>(global, 0x1592), BbscEventFlag(4047) ? "on" : "off",
+        ReadablePointer(lua, 0x90) ? ReadValue<u8>(lua, 0x8D) : 0xFF,
+        me != 0 ? GetCharacterType(me) : -1, request != 0 ? ReadValue<s32>(request, 0) : -1,
+        ReadablePointer(menu, 0x2E0) ? ReadValue<s32>(menu, 0x2DC) : -1, leaving);
+    if (line != last) {
+        BBSC_TIMELINE("LEAVE", "{} s after the session ended: {}", (now - ended_ms) / 1'000, line);
+        last = std::move(line);
+    }
+}
+
 // Safety net (test 2026-10-12 5p, abood host 23:13:13-19): the send-home skip released the locks,
 // then OnRoomTimeOut (caller 0x1789F6B) set flag 4047 + the load wait again and no send-home step
 // followed -> the host stood in its Dream with every menu/bell locked (soft lock). Within 60 s after
@@ -15713,6 +15761,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbscSendBacklog();
         TickBbscLeaveLocks();
         TickBbscStuckLeaveLocks();
+        TimelineBbscAfterSessionLocks();
         TickBbscStrandedGuest();
         TickBbscBossLine();
         TickBbscProgressBroadcast();
