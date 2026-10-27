@@ -14,6 +14,7 @@
 #include <vk_mem_alloc.h>
 
 #include "bbport_toggles.h"
+#include "common/path_util.h"
 #include "common/assert.h"
 #include "render/gcn_to_vk.h"
 #include "vulkan/instance.h"
@@ -104,19 +105,45 @@ bool NeedsBarrier(const Image::State& state, vk::ImageLayout layout, vk::AccessF
 
 // bbcoop: the images that needed the full usage once (guest address, size, format). The game
 // creates many of them again (the same ~330 every scene, Huax-1839 P10.1 step 2); one made again
-// at the same place starts with the usage instead of being promoted mid-frame again.
+// at the same place starts with the usage instead of being promoted mid-frame again. Kept across
+// runs (<cache>/full-image-usage.txt): a promotion mid-play is when the mist flickered with the
+// lean usages (2026-10-19: remembering them for the run fixed 1 of 2 sessions).
 std::mutex full_usage_mutex;
 std::set<std::tuple<VAddr, u32, u32, vk::Format>> full_usage_keys;
+std::FILE* full_usage_file = nullptr;
 
 auto FullUsageKey(const ImageInfo& info) {
     return std::tuple{info.guest_address, info.size.width, info.size.height, info.pixel_format};
+}
+
+/// Reads the kept keys once and opens the file for the new ones (full_usage_mutex held).
+void LoadFullUsageKeys() {
+    static bool loaded = false;
+    if (std::exchange(loaded, true)) {
+        return;
+    }
+    const auto path = Common::FS::GetUserPath(Common::FS::PathType::CacheDir) / "full-image-usage.txt";
+    if (std::FILE* file = std::fopen(path.c_str(), "r")) {
+        unsigned long long address;
+        unsigned width, height, format;
+        while (std::fscanf(file, "%llx %u %u %u", &address, &width, &height, &format) == 4) {
+            full_usage_keys.emplace(address, width, height, vk::Format(format));
+        }
+        std::fclose(file);
+    }
+    full_usage_file = std::fopen(path.c_str(), "a");
 }
 
 } // namespace
 
 void Image::RememberFullUsage(const ImageInfo& info) {
     std::scoped_lock lock{full_usage_mutex};
-    full_usage_keys.insert(FullUsageKey(info));
+    LoadFullUsageKeys();
+    if (full_usage_keys.insert(FullUsageKey(info)).second && full_usage_file) {
+        std::fprintf(full_usage_file, "%llx %u %u %u\n", (unsigned long long)info.guest_address,
+                     info.size.width, info.size.height, unsigned(info.pixel_format));
+        std::fflush(full_usage_file);
+    }
 }
 
 Common::IncrementalIdProvider<u64> Image::next_uid{};
@@ -213,6 +240,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     }();
     const auto needed_full = [&] {
         std::scoped_lock lock{full_usage_mutex};
+        LoadFullUsageKeys();
         return full_usage_keys.contains(FullUsageKey(info));
     };
     if (lean_usage && !info.props.is_block && !info.props.is_depth && info.num_samples == 1 &&
