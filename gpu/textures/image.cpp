@@ -122,7 +122,8 @@ void LoadFullUsageKeys() {
     if (std::exchange(loaded, true)) {
         return;
     }
-    const auto path = Common::FS::GetUserPath(Common::FS::PathType::CacheDir) / "full-image-usage.txt";
+    const std::string path = Common::FS::PathToUTF8String(
+        Common::FS::GetUserPath(Common::FS::PathType::CacheDir) / "full-image-usage.txt");
     if (std::FILE* file = std::fopen(path.c_str(), "r")) {
         unsigned long long address;
         unsigned width, height, format;
