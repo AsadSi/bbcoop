@@ -22,13 +22,14 @@ if [[ $(uname -s) == Darwin ]]; then
     export BB_GPU_LABELS=${BB_GPU_LABELS:-0}
     # bbcoop: no mist (Asad, 2026-10-19): the two tessellated blended pixel shaders that draw it
     # (BB_DRAW_LIST found them; Dream and Central Yharnam), ~5% faster in the city. BB_MIST=1 keeps it.
-    # Only the mist flickers with our MoltenVK's tessellation hoist or the lean texture usages
-    # (gpu/textures/image.cpp), so with it they stay off: each costs FPS (city 36 -> 42-50 with both).
-    # MVK_BB_HOIST_TESS, BB_FULL_IMAGE_USAGE override.
+    # Only the mist flickers with our MoltenVK's tessellation hoist (cause not found), so with it the
+    # hoist stays off (~15% slower). The lean texture usages flickered it when a texture was promoted
+    # mid-play; promoted textures are now kept across runs (gpu/textures/image.cpp), so they stay on
+    # (Asad 2026-10-27: mist back). MVK_BB_HOIST_TESS, BB_FULL_IMAGE_USAGE override.
     if [[ ${BB_MIST:-0} != 1 ]]; then
         export BB_SKIP_PS=${BB_SKIP_PS:+$BB_SKIP_PS,}71c96598,2e86d610
     else
-        export MVK_BB_HOIST_TESS=${MVK_BB_HOIST_TESS:-0} BB_FULL_IMAGE_USAGE=${BB_FULL_IMAGE_USAGE:-1}
+        export MVK_BB_HOIST_TESS=${MVK_BB_HOIST_TESS:-0}
     fi
 fi
 if [[ ${1:-} == --software ]]; then

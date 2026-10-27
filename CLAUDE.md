@@ -127,8 +127,12 @@ Runtime mods (`src/`):
   At 30 each frame is timed to the display's refreshes (`gpu/vulkan/swapchain.cpp` present times,
   `gpu/platform/videoout/display.cpp` vblank phase; `BB_PRESENT_PACE=0`, `BB_VBLANK_LOCK=0` off); `BB_FRAME_STATS=1`
   prints for how many refreshes frames stay on screen.
-- No mist by default (`BB_MIST=1` keeps it): run.sh skips its two pixel shaders through `BB_SKIP_PS`; `BB_DRAW_LIST=<file>`
-  lists a few frames' draws (pixel shader, primitive, blending) to find others. Lean texture usages (flicker only the mist: off with `BB_MIST=1`; `BB_FULL_IMAGE_USAGE=1` off, `BB_PROMOTE_LOG=1`), pipeline QoS (`BB_PIPELINE_QOS=0` off).
+- No mist by default (`BB_MIST=1` keeps it; Asad plays with it since 2026-10-27): run.sh skips its two pixel shaders
+  through `BB_SKIP_PS`; `BB_DRAW_LIST=<file>` lists a few frames' draws to find others. With the mist the tessellation
+  hoist is off (it drops the mist for a frame, cause not found). Lean texture usages stay on: they flickered the mist
+  when a texture was promoted mid-play, and promoted textures are now kept across runs (`<user>/cache/full-image-usage.txt`;
+  fogab 0/416 with mist, 446 -> 11 promotions on the second run). `BB_FULL_IMAGE_USAGE=1` off, `BB_PROMOTE_LOG=1`.
+  Pipeline QoS (`BB_PIPELINE_QOS=0` off).
 
 ## Windows
 - A native build in MSYS2 CLANG64 (`docs/bbcoop/windows.md`: packages, build, package, what came from where):
