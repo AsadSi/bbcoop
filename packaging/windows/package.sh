@@ -43,6 +43,8 @@ dest=out/stage/bbcoop-windows
 rm -rf -- out/stage
 mkdir -p "$dest/bin" "$dest/launcher" "$dest/tools" "$dest/licenses"
 cp -r out/pyi-dist/Bloodborne/. "$dest/"
+# soulstruct's resources folders hold files from FromSoftware's games; the respec mod doesn't load them.
+find "$dest" -type d -path '*/soulstruct/*' -name resources -prune -exec rm -rf {} +
 llvm-strip -o "$dest/Play Bloodborne.exe" out/bb-play.exe
 cp launcher/bloodborne.ico launcher/bloodborne.png "$dest/launcher/"
 # The executables without debug information (out/ keeps the symbols for crash reports).

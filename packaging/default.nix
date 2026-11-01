@@ -40,6 +40,8 @@ let
     format = "wheel";
     src = pkgs.fetchurl { inherit url hash; };
     propagatedBuildInputs = deps;
+    # soulstruct's resources folders hold files from FromSoftware's games; the respec mod doesn't load them.
+    postInstall = "find $out -type d -path '*/soulstruct/*' -name resources -prune -exec rm -rf {} +";
   };
   rePython = pkgs.python313.withPackages (ps:
     let

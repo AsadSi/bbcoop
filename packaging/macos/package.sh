@@ -46,6 +46,8 @@ out/pyenv-mac/bin/python -m PyInstaller --noconfirm --clean --log-level WARN --w
     --paths "$PWD/launcher" --paths "$PWD/scripts" --paths "$PWD/scripts/bbsc_gameserver" --collect-all soulstruct \
     "${hidden[@]}" "$PWD/launcher/bbport_launcher_win.py"
 app=out/pyi-mac/dist/Bloodborne.app
+# soulstruct's resources folders hold files from FromSoftware's games; the respec mod doesn't load them.
+find "$app" -type d -path '*/soulstruct/*' -name resources -prune -exec rm -rf {} +
 
 # The port.
 port=$app/Contents/Resources/port

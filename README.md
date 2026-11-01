@@ -1,3 +1,6 @@
+**This is bbcoop, a fan-made co-op and respec mod of bbport. No game files are included. Start with
+[docs/bbcoop/getting-started.md](docs/bbcoop/getting-started.md); questions about bbcoop go to this repo's issues, not to the Discord below. The rest of this page is bbport's.**
+
 THIS PROJECT IS NOT RELATED TO SHADPS4. ALL QUESTIONS RELATED TO THIS PROJECT SHOULD BE SENT TO THE DISCORD SERVER https://discord.gg/KYZRKk9CB, NOT TO THE SHADPS4 SERVER.
 
 

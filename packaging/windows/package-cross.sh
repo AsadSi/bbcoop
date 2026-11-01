@@ -45,6 +45,8 @@ dest=out/stage/bbcoop-windows
 rm -rf -- out/stage
 mkdir -p "$dest/bin/shadnet/sqldrivers" "$dest/launcher" "$dest/tools" "$dest/licenses"
 cp -R "$python_dir" "$dest/python"
+# soulstruct's resources folders hold files from FromSoftware's games; the respec mod doesn't load them.
+find "$dest/python" -type d -path '*/soulstruct/*' -name resources -prune -exec rm -rf {} +
 "$tools/llvm-strip" -o "$dest/Bloodborne.exe" "$cross/build/bb-launch.exe"
 "$tools/llvm-strip" -o "$dest/Play Bloodborne.exe" "$cross/build/bb-play.exe"
 for exe in bb-probe.exe bb-gpu-capabilities.exe; do
