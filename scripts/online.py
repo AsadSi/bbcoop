@@ -28,10 +28,10 @@ import time
 import urllib.error
 import urllib.request
 
-# bbcoop: the group's own server (Tailscale address of the host PC, docs/bbcoop/friends.md).
-COMMUNITY_SERVER = 'http://100.106.120.120'
-SHADNET_SERVER = '100.106.120.120:31313'
-WEBAPI_SERVER = 'http://100.106.120.120:31315'
+# bbcoop: this computer until Host, Join or Other server picks a server (docs/bbcoop/friends.md).
+COMMUNITY_SERVER = 'http://127.0.0.1'
+SHADNET_SERVER = '127.0.0.1:31313'
+WEBAPI_SERVER = 'http://127.0.0.1:31315'
 # The defaults before (the launcher replaces them in saved settings).
 OLD_DEFAULTS = {
     'online_server': ('srv.shadps4.net:31313', 'play.seamlesshunt.com:31313'),
